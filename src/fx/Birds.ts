@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CollisionWorld, ColFlags, RayHit } from '../physics/Collision';
-import { ground } from '../world/Heightmap';
+import { ground, islandRadius } from '../world/Heightmap';
 import { rand } from '../core/math';
 import { audio } from '../audio/Audio';
 import type { FX } from './FX';
@@ -25,7 +25,7 @@ interface Flock {
   color: THREE.Color;
 }
 
-const MAX_BIRDS = 72;
+const MAX_BIRDS = 96;
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -67,7 +67,7 @@ export class Birds {
   }
 
   /** Scatter fresh flocks over open ground (called once per match / playground). */
-  reset(n = 14) {
+  reset(n = 18) {
     this.flocks = [];
     let guard = 0;
     while (this.flocks.length < n && guard++ < 400) {
@@ -89,7 +89,7 @@ export class Birds {
 
   /** open, dry, reachable-from-the-sky ground */
   private findSpot(): THREE.Vector3 | null {
-    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 88;
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (islandRadius(a) - 10);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const gy = ground(x, z);
     if (gy < 0.6) return null;

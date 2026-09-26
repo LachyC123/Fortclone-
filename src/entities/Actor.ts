@@ -593,7 +593,7 @@ export class Actor implements BugOwner {
       return;
     }
     const diving = this.flight === 'dive';
-    const maxH = diving ? 17 : 11;
+    const maxH = diving ? 20 : 12.5;
     const acc = diving ? 22 : 12;
     const tx = it.moveX * maxH, tz = it.moveZ * maxH;
     const dx = tx - m.vel.x, dz = tz - m.vel.z;
@@ -606,7 +606,7 @@ export class Actor implements BugOwner {
       m.vel.z += (dz / dl) * st;
     }
     if (diving) m.vel.y = Math.max(-34, m.vel.y - 26 * dt);
-    else m.vel.y += (-5.2 - m.vel.y) * Math.min(1, dt * 3);
+    else m.vel.y += (-4.8 - m.vel.y) * Math.min(1, dt * 3);
     // off the edge of the island? a friendly updraft carries you back over it
     const hd = Math.hypot(m.pos.x, m.pos.z);
     const cliff = islandRadius(Math.atan2(m.pos.z, m.pos.x));

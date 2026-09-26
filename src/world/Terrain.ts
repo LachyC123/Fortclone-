@@ -38,6 +38,8 @@ export function buildTerrain(k: Kit, paths: [number, number][][]) {
   const rockC = lin(0xa89a88), highGrass = lin(0x9fd06a), mossy = lin(0x86b85a);
   const allPaths = [...paths, ...ROADS];
   const cove = POI_BY_ID.cove;
+  // vertices well past the rim are only kept where a triangle still touches land
+  const outside = new Uint8Array(pos.count);
   for (let idx = 0; idx < pos.count; idx++) {
     const i = idx % n, j = Math.floor(idx / n);
     let x = -size + i * HF_STEP, z = -size + j * HF_STEP;
@@ -45,6 +47,7 @@ export function buildTerrain(k: Kit, paths: [number, number][][]) {
     const R = islandRadius(ang);
     const r = Math.hypot(x, z);
     let y = heightAt(i, j);
+    if (r > R + 1.5) outside[idx] = 1;
     if (r > R) {
       // tuck vertices past the rim under the lip
       x = (x / r) * R;
@@ -80,7 +83,31 @@ export function buildTerrain(k: Kit, paths: [number, number][][]) {
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   g.deleteAttribute('uv');
   g.computeVertexNormals();
-  const ng = g.toNonIndexed();
+  // drop triangles that lie entirely over the sea (a big share of the square grid)
+  const index = g.getIndex()!;
+  const nrm = g.getAttribute('normal') as THREE.BufferAttribute;
+  const keep: number[] = [];
+  for (let t = 0; t < index.count; t += 3) {
+    const a = index.getX(t), b = index.getX(t + 1), c2 = index.getX(t + 2);
+    if (outside[a] && outside[b] && outside[c2]) continue;
+    keep.push(a, b, c2);
+  }
+  const P2 = new Float32Array(keep.length * 3), N2 = new Float32Array(keep.length * 3), C2 = new Float32Array(keep.length * 3);
+  keep.forEach((vi, o) => {
+    P2[o * 3] = pos.getX(vi);
+    P2[o * 3 + 1] = pos.getY(vi);
+    P2[o * 3 + 2] = pos.getZ(vi);
+    N2[o * 3] = nrm.getX(vi);
+    N2[o * 3 + 1] = nrm.getY(vi);
+    N2[o * 3 + 2] = nrm.getZ(vi);
+    C2[o * 3] = colors[vi * 3];
+    C2[o * 3 + 1] = colors[vi * 3 + 1];
+    C2[o * 3 + 2] = colors[vi * 3 + 2];
+  });
+  const ng = new THREE.BufferGeometry();
+  ng.setAttribute('position', new THREE.BufferAttribute(P2, 3));
+  ng.setAttribute('normal', new THREE.BufferAttribute(N2, 3));
+  ng.setAttribute('color', new THREE.BufferAttribute(C2, 3));
   g.dispose();
   k.nocast.add(ng, null);
 
@@ -146,7 +173,7 @@ export function buildSkyRocks(k: Kit) {
   const rng = new Rng(21);
   for (let i = 0; i < 12; i++) {
     const a = rng.range(0, Math.PI * 2);
-    const r = rng.range(128, 200);
+    const r = rng.range(158, 230);
     const x = Math.cos(a) * r, z = Math.sin(a) * r, y = rng.range(-18, 14);
     const s = rng.range(1.5, 5);
     k.ico(x, y, z, s, shade(0x8a7a6a, rng.range(0.8, 1.1)), { detail: 1, sy: 0.9, batch: 'nocast' });

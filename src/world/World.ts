@@ -54,7 +54,7 @@ interface Kickable {
 }
 
 import { buildIsland } from './Island';
-import { ISLAND_R } from './Heightmap';
+import { ISLAND_R, ISLAND_MAX } from './Heightmap';
 
 /** A named region used for indoor reverb, minimap labels and (later) POI logic. */
 export interface Zone {
@@ -89,11 +89,12 @@ export class World {
   playerSpawns: { pos: THREE.Vector3; yaw: number }[] = [];
   botSpawns: THREE.Vector3[] = [];
   islandRadius = ISLAND_R;
-  mapBounds = ISLAND_R + 6;
+  mapBounds = ISLAND_MAX + 4;
   signs: THREE.Object3D[] = [];
   private birdTimer = 2;
   private cullT = 0;
   private detailChunks: THREE.Mesh[] = [];
+  private interiorChunks: THREE.Mesh[] = [];
   private bigChunks: THREE.Mesh[] = [];
   /** chunks further than this (plus their radius) are skipped; set from the quality preset */
   drawDist = 400;
@@ -106,8 +107,10 @@ export class World {
     const nocast = new Batcher();
     const glow = new Batcher();
     const detail = new Batcher();
+    const interior = new Batcher();
     const k = new Kit(solid, foliage, nocast, glow, this.cw);
     k.detail = detail;
+    k.interior = interior;
     const doorSpecs: DoorSpec[] = [];
 
     buildVillageBlock(k, this, doorSpecs);
@@ -129,6 +132,11 @@ export class World {
       this.group.add(m);
     }
     for (const m of glow.buildChunked(gm, 72, false, false)) this.group.add(m);
+    for (const m of interior.buildChunked(wm, 18, true, true)) {
+      m.geometry.computeBoundingSphere();
+      this.interiorChunks.push(m);
+      this.group.add(m);
+    }
     for (const d of doorSpecs) this.makeDoor(d);
     this.signs = this.group.children.filter((c) => c.userData.sign);
     this.settleLoot();
@@ -402,7 +410,15 @@ export class World {
       for (const f of this.flyers) if (f.kind === 'butterfly') far(f.mesh, 45);
       for (const kk of this.kickables) far(kk.mesh, 55);
       for (const s of this.signs) far(s, 85);
+      // swinging doors and Rift Nest sparkles are separate meshes: only draw the nearby ones
+      for (const d of this.doors) d.pivot.visible = d.hinge.distanceToSquared(camPos) < 62 * 62;
+      for (const n of this.nests) far(n.fx, 130);
       for (const m of this.detailChunks) m.visible = m.geometry.boundingSphere!.center.distanceToSquared(camPos) < 62 * 62;
+      for (const m of this.interiorChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = Math.min(this.drawDist, 46) + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
       for (const m of this.bigChunks) {
         const bs = m.geometry.boundingSphere!;
         const d = this.drawDist + bs.radius;

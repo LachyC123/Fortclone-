@@ -6,12 +6,13 @@ import { SkyBarge } from '../world/SkyBarge';
 import { Gloom } from '../world/Gloom';
 import { rand, pick } from './math';
 import { audio } from '../audio/Audio';
-import { RARITY } from '../render/Palette';
+import { RARITY, RarityIndex } from '../render/Palette';
 import { AmmoType } from '../combat/Weapons';
 import { MatchUI, MatchSummary } from '../ui/MatchUI';
+import { rollWeapon, ammoFor } from '../loot/Loot';
 import type { Crate } from '../loot/Loot';
 import { toyMaterial } from '../render/Materials';
-import { ISLAND_R, groundHeight } from '../world/Terrain';
+import { ISLAND_R, groundHeight, islandRadius } from '../world/Terrain';
 import { randomBugName, randomSpecies, cocoonForPlacement, saveCollection } from '../progression/Bugs';
 import { POIS, POI_BY_ID, POI } from '../world/Heightmap';
 
@@ -188,6 +189,8 @@ export class Match implements MatchHooks {
     this.enterAt = enter < 0 ? 0.3 : enter;
     this.exitAt = exit < 0 ? 0.7 : exit;
     this.lastCallSaid = false;
+    this.clearHotDrops();
+    this.pickHotDrops();
     const spots = [...Array(this.barge.spots.length).keys()].sort(() => Math.random() - 0.5);
     g.actors.forEach((a, i) => {
       if (a.parked) return;
@@ -209,17 +212,37 @@ export class Match implements MatchHooks {
   }
 
   /** Spread the lobby over the island: a few more in Buttonbury, some in the wilds, the rest shared out. */
+  /** every place gets a couple of rascals (big Buttonbury a few more), plus some wild landings */
+  private dropOrder: (string | null)[] = [];
   private dropArea(i: number): POI | null {
-    const order: (string | null)[] = ['buttonbury', 'wobblewood', 'market', 'manor', 'rattleworks', 'cove', 'buttonbury', null];
-    const id = order[(i + this.dropSeed) % order.length];
-    return id ? POI_BY_ID[id] : null;
+    if (i === 0 || !this.dropOrder.length) {
+      this.dropOrder = [...POIS.map((p) => p.id), 'buttonbury', null, null].sort(() => Math.random() - 0.5);
+    }
+    // a few rascals always fancy the hot drops
+    if (this.hotDrops.length && Math.random() < 0.28) return this.hotDrops[i % this.hotDrops.length].poi;
+    const id = this.dropOrder[(i + this.dropSeed) % this.dropOrder.length];
+    if (!id) return null;
+    // only places a rascal can actually glide to from this match's barge route
+    const reach = (p: POI) => this.routeDist(p.x, p.z) < 72;
+    const want = POI_BY_ID[id];
+    if (reach(want)) return want;
+    const ok = POIS.filter(reach);
+    return ok.length ? ok[(i * 7 + this.dropSeed) % ok.length] : null;
+  }
+
+  /** horizontal distance from a point to the Sky Barge's straight route */
+  private routeDist(x: number, z: number) {
+    const S = this.barge.start, E = this.barge.end;
+    const dx = E.x - S.x, dz = E.z - S.z;
+    const t = Math.max(0, Math.min(1, ((x - S.x) * dx + (z - S.z) * dz) / (dx * dx + dz * dz)));
+    return Math.hypot(x - (S.x + dx * t), z - (S.z + dz * t));
   }
 
   private pickDropTarget(area: POI | null = null) {
     const w = this.g.world;
     // land on the ground near loot (not on roofs, lofts or perches)
     const low = (p: THREE.Vector3) => p.y < groundHeight(p.x, p.z) + 1.2;
-    let pool = [...w.lootSpots.map((s) => s.pos), ...w.crateSpots.map((c) => c.pos)].filter((p) => low(p) && Math.hypot(p.x, p.z) < ISLAND_R - 7);
+    let pool = [...w.lootSpots.map((s) => s.pos), ...w.crateSpots.map((c) => c.pos)].filter((p) => low(p) && Math.hypot(p.x, p.z) < islandRadius(Math.atan2(p.z, p.x)) - 7);
     const inArea = area ? pool.filter((p) => Math.hypot(p.x - area.x, p.z - area.z) < area.r + 6) : pool.filter((p) => !POIS.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < q.r));
     if (inArea.length) pool = inArea;
     const p = pick(pool).clone();
@@ -451,7 +474,52 @@ export class Match implements MatchHooks {
 
   /* ------------------------------------------------------------------ Loot Balloons */
 
+  /* ------------------------------------------------------------------ hot drops */
+
+  /** Two places per match (reachable from the barge route) get a rich crate, extra rare guns and a beam. */
+  hotDrops: { poi: POI; pos: THREE.Vector3; beam: THREE.Mesh; crate: Crate }[] = [];
+  private lastHot: string[] = [];
+
+  private pickHotDrops() {
+    const g = this.g;
+    const reachable = POIS.filter((p) => this.routeDist(p.x, p.z) < 72);
+    const fresh = reachable.filter((p) => !this.lastHot.includes(p.id));
+    const pool = (fresh.length >= 2 ? fresh : reachable).sort(() => Math.random() - 0.5).slice(0, 2);
+    for (const poi of pool) {
+      const pos = this.pickDropTarget(poi);
+      const crate = g.loot.placeCrate(pos.clone(), Math.random() * 6);
+      crate.rich = true;
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + Math.random();
+        const at = pos.clone().add(new THREE.Vector3(Math.cos(a) * 2.4, 0.1, Math.sin(a) * 2.4));
+        const w = rollWeapon();
+        w.rarity = pick([2, 2, 3, 3, 4]) as RarityIndex;
+        g.loot.spawnRolls([w, ammoFor(w.defId, 2)], at);
+      }
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 90, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xff8a3d, transparent: true, opacity: 0.26, blending: THREE.AdditiveBlending, depthWrite: false }));
+      beam.position.set(pos.x, pos.y + 45, pos.z);
+      g.scene.add(beam);
+      this.hotDrops.push({ poi, pos, beam, crate });
+    }
+    this.lastHot = pool.map((p) => p.id);
+    g.hud.hotDrops = this.hotDrops.map((h) => h.pos);
+    if (pool.length) {
+      g.hud.bigToast('HOT DROPS!', '#ff8a3d');
+      g.hud.toast(`Rare loot at ${pool.map((p) => p.name).join(' & ')} — marked on your map`, '#ffb36b');
+    }
+  }
+
+  clearHotDrops() {
+    for (const h of this.hotDrops) {
+      this.g.scene.remove(h.beam);
+      this.g.loot.removeCrate(h.crate);
+    }
+    this.hotDrops = [];
+    this.g.hud.hotDrops = [];
+  }
+
   clearBalloons() {
+    this.clearHotDrops();
     for (const b of this.balloons) {
       this.g.scene.remove(b.group, b.beam);
       if (b.crate) this.g.loot.removeCrate(b.crate);

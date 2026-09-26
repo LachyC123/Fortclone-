@@ -52,6 +52,7 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
   for (const [x, z] of [[-hw, -hd], [hw, -hd], [-hw, hd], [hw, hd]]) k.box(x, (H1 + (c.floors === 2 ? H2 : 0)) / 2, z, 0.38, H1 + (c.floors === 2 ? H2 : 0), 0.38, PAL.brownDark, { col: 'wood' });
 
   // ground floor furniture (kept to the edges so there's room to fight inside)
+  k.beginInterior();
   P.rug(k, 0, 0.05, 0, c.w * 0.45, c.d * 0.4, rng.pick([PAL.terracotta, PAL.teal, PAL.lavender, PAL.mustard]));
   P.table(k, -hw + 1.4, 0.05, hd - 1.4, 0, 1.2, 0.8, rng.pick([PAL.wood, PAL.woodLight]));
   P.chair(k, -hw + 1.4, 0.05, hd - 0.7, Math.PI);
@@ -62,6 +63,7 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
   P.lamp(k, -hw + 0.5, 0.05, 0.2, rng.pick([PAL.mustard, PAL.pink, PAL.softBlue]));
   P.crate(k, hw - 0.8, 0.05, -hd + 0.8, 0.7, rng.range(0, 1));
   P.picture(k, 0, 1.9, -hd + 0.17, 0, 0.7, 0.5, rng.pick([PAL.softBlue, PAL.pink, PAL.mustard]));
+  k.endInterior();
 
   if (c.floors === 2) {
     // stairs along the back wall, upstairs bedroom
@@ -75,10 +77,12 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
     wall(k, hw, -hd, -hw, -hd, H1, H2, style, [win(c.w * 0.5)]);
     wall(k, -hw, -hd, -hw, hd, H1, H2, style, [win(c.d * 0.6)]);
     k.push(0, H1, 0);
+    k.beginInterior();
     P.bed(k, hw - 1.0, 0, hd - 1.4, 0, rng.pick([PAL.lavender, PAL.softBlue, PAL.pink]));
     P.wardrobe(k, -hw + 0.7, 0, hd - 0.6, Math.PI / 2, rng.pick([PAL.teal, PAL.lavender, PAL.mustard]));
     P.rug(k, 0, 0.02, 0.4, 2.2, 1.6, rng.pick([PAL.terracotta, PAL.teal]));
     P.crate(k, hw - 0.7, 0, -hd + 0.8, 0.6, 0.4, PAL.pink);
+    k.endInterior();
     k.pop();
     floor(k, -hw + 0.15, -hd + 0.15, hw - 0.15, hd - 0.15, H1 + H2, 0.24, 0x9a6a44, 'wood', undefined, shade(c.wall, 1.05));
     gableRoof(k, 0, H1 + H2, 0, 0, c.w + 0.4, c.d + 0.4, 2.2, c.roof, { overhang: 0.5, gableColor: c.wall, trim: PAL.brown });

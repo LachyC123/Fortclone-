@@ -56,6 +56,15 @@ npm run typecheck
 > fight, or break out of the crossfire sideways while shooting back) instead of spinning, and a freshly
 > knocked-out Blinkbug gets a 2.4s shimmering head start.
 
+> **The bigger island.** Five peninsulas push out from the coast, each with a new place: **Puddleby Farm**
+> (climbable windmill, barn, silo, duck pond), **Tickerton** (two terraces of three-storey townhouses and a
+> clock tower — the densest spot on the map), **Snoozy Pines** (log cabins, a lodge and a fire lookout in a
+> dark pine wood), **Saltwhistle Wharf** (fisher cottages, boathouse, harbour lookout, a crane over the drop)
+> and **Rumpus Fair** (a big top you fight inside, Ferris wheel, carousel, haunted house). Twenty-odd lone
+> homesteads, cabins, huts and ruined towers fill the land between: 56 enterable buildings, up from 20.
+> Every match the barge route decides which peninsulas are in reach, and two **Hot Drops** (orange beams,
+> flame markers on the map) get a rich crate and rare guns.
+
 ## A match
 
 1. **Launch Isle** (~14s): rascals pop in; shoot and blink all you like, nobody can get hurt.
@@ -109,6 +118,8 @@ node tools/balance.mjs --duel                 # each bot skill vs a strafing pla
 node tools/m5shots.mjs                        # emotes, bubbles, Loot Balloon screenshots
 node tools/m6shots.mjs                        # KO tumble, birds, casings, victory lap screenshots
 node tools/thirdparty.mjs                     # third-partying a bot fight (no spinning) + Blinkbug escape
+node tools/placeshots.mjs [--only=tickerton]   # the peninsula places from the air and the ground
+node tools/densitymap.mjs                     # ASCII map of buildings / cover / open ground + counts
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

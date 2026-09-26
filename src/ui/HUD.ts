@@ -9,10 +9,10 @@ import { HEALS, UTILS, HealId, UtilId, ITEM_COLOR } from '../combat/Items';
 import { BUG } from '../entities/Blinkbug';
 import type { World } from '../world/World';
 import { ISLAND_R } from '../world/Terrain';
-import { ground, groundNormal, islandRadius, roadDist, POIS, STREAM_X, LAGOON_POS } from '../world/Heightmap';
+import { ground, groundNormal, islandRadius, roadDist, POIS, STREAM_X, LAGOON_POS, ISLAND_MAX } from '../world/Heightmap';
 
 const MAP_PX = 640;
-const MAP_HALF = ISLAND_R + 6;
+const MAP_HALF = ISLAND_MAX + 4;
 const MAP_S = MAP_PX / (MAP_HALF * 2);
 import { clamp } from '../core/math';
 
@@ -612,6 +612,8 @@ export class HUD implements HudEvents {
 
   /** Loot Balloon landing spots (minimap stars) */
   balloons: THREE.Vector3[] = [];
+  /** this match's hot drops (flame markers) */
+  hotDrops: THREE.Vector3[] = [];
   /** Sky Barge route for the overview map (set by the match while it flies) */
   route: { sx: number; sz: number; ex: number; ez: number; bx: number; bz: number } | null = null;
 
@@ -664,6 +666,31 @@ export class HUD implements HudEvents {
       g.lineTo(U(r.ex), V(r.ez));
       g.stroke();
       g.setLineDash([]);
+    }
+    for (const h of this.hotDrops) {
+      const u = U(h.x), v = V(h.z);
+      const pulse = 1 + Math.sin(performance.now() / 180) * 0.12;
+      g.save();
+      g.translate(u, v);
+      g.rotate(-yaw);
+      g.scale(pulse, pulse);
+      g.fillStyle = '#ff8a3d';
+      g.strokeStyle = '#2b2238';
+      g.lineWidth = 2;
+      // a little flame
+      g.beginPath();
+      g.moveTo(0, -9);
+      g.quadraticCurveTo(7, -1, 5, 4);
+      g.quadraticCurveTo(3, 8, 0, 8);
+      g.quadraticCurveTo(-3, 8, -5, 4);
+      g.quadraticCurveTo(-7, -1, 0, -9);
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#ffe07a';
+      g.beginPath();
+      g.arc(0, 3.5, 2.6, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
     }
     for (const b of this.balloons) {
       const u = U(b.x), v = V(b.z);

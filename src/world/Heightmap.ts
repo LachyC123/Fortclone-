@@ -15,9 +15,42 @@ export const STREAM_X = -28;
 export const STREAM_Z0 = -44;
 export const STREAM_Z1 = 81;
 
+/**
+ * Peninsulas (angle in radians = atan2(z, x), extra radius, angular width). Each one carries a place
+ * of its own out past the original round island, so there's always somewhere else to go.
+ */
+const LOBES: [number, number, number][] = [
+  [(223 * Math.PI) / 180, 33, 0.34], // Puddleby Farm (north-west)
+  [(282 * Math.PI) / 180, 35, 0.34], // Tickerton (north)
+  [(343 * Math.PI) / 180, 33, 0.34], // Snoozy Pines (north-east)
+  [(58 * Math.PI) / 180, 34, 0.34], // Saltwhistle Wharf (south-east)
+  [(150 * Math.PI) / 180, 35, 0.34], // Rumpus Fair (south-west)
+];
+/** furthest the land reaches from the centre (bounds for the heightfield, nav grid and minimap) */
+export const ISLAND_MAX = 140;
+
 export function islandRadius(angle: number) {
-  return ISLAND_R + Math.sin(angle * 3 + 1.3) * 4 + Math.sin(angle * 7 + 0.4) * 2.2 + Math.sin(angle * 13) * 0.9;
+  let r = ISLAND_R + Math.sin(angle * 3 + 1.3) * 4 + Math.sin(angle * 7 + 0.4) * 2.2 + Math.sin(angle * 13) * 0.9;
+  for (const [a, ext, w] of LOBES) {
+    let d = angle - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    const k = d / w;
+    if (k * k < 9) r += ext * Math.exp(-k * k) * (1 + Math.sin(angle * 17 + a) * 0.04);
+  }
+  return r;
 }
+
+/** point on a lobe's centre line at distance r from the island centre */
+function lobePoint(deg: number, r: number): [number, number] {
+  const a = (deg * Math.PI) / 180;
+  return [Math.round(Math.cos(a) * r), Math.round(Math.sin(a) * r)];
+}
+const [PUD_X, PUD_Z] = lobePoint(223, 108);
+const [TIC_X, TIC_Z] = lobePoint(282, 108);
+const [SNZ_X, SNZ_Z] = lobePoint(343, 107);
+const [SAL_X, SAL_Z] = lobePoint(58, 106);
+const [FAIR_X, FAIR_Z] = lobePoint(150, 108);
 
 export interface POI {
   id: string;
@@ -41,6 +74,11 @@ export const POIS: POI[] = [
   { id: 'manor', name: 'Crooked Manor', x: 50, z: -58, pad: 15, blend: 13, h: 7.5, r: 19 },
   { id: 'rattleworks', name: 'Rattleworks', x: 72, z: 20, pad: 21, blend: 10, h: 0.6, r: 23 },
   { id: 'cove', name: 'Crash Cove', x: -20, z: 78, pad: 13, blend: 10, h: -0.2, r: 20 },
+  { id: 'puddleby', name: 'Puddleby Farm', x: PUD_X, z: PUD_Z, pad: 17, blend: 9, h: 0.8, r: 20 },
+  { id: 'tickerton', name: 'Tickerton', x: TIC_X, z: TIC_Z, pad: 18, blend: 8, h: 1.0, r: 20 },
+  { id: 'pines', name: 'Snoozy Pines', x: SNZ_X, z: SNZ_Z, pad: 0, blend: 0, h: 0, r: 19 },
+  { id: 'wharf', name: 'Saltwhistle Wharf', x: SAL_X, z: SAL_Z, pad: 17, blend: 8, h: 0.4, r: 19 },
+  { id: 'fair', name: 'Rumpus Fair', x: FAIR_X, z: FAIR_Z, pad: 18, blend: 8, h: 0.5, r: 20 },
 ];
 export const POI_BY_ID: Record<string, POI> = Object.fromEntries(POIS.map((p) => [p.id, p]));
 
@@ -77,6 +115,12 @@ export const ROADS: [number, number][][] = [
   [[-30, -76], [-50, -60], [-62, -38]], // Market -> Wobblewood
   [[62, -44], [70, -20], [70, 0]], // Manor -> Rattleworks
   [[64, 36], [46, 60], [10, 76], [-6, 78]], // Rattleworks -> Cove along the south
+  // out to the peninsulas
+  [[-50, -60], [-62, -66], [-70, -70]], // -> Puddleby Farm
+  [[-4, -76], [8, -90], [16, -98]], // -> Tickerton
+  [[70, -20], [84, -26], [94, -29]], // -> Snoozy Pines
+  [[46, 60], [50, 72], [53, 80]], // -> Saltwhistle Wharf
+  [[-18, 66], [-38, 62], [-62, 58], [-80, 56]], // -> Rumpus Fair
 ];
 
 function distToSeg(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
@@ -144,7 +188,7 @@ export function terrainHeight(x: number, z: number): number {
 /* ------------------------------------------------------------------ sampled heightfield */
 
 export const HF_STEP = 1;
-export const HF_HALF = 106;
+export const HF_HALF = ISLAND_MAX + 2;
 export const HF_N = Math.round((HF_HALF * 2) / HF_STEP) + 1;
 
 let heights: Float32Array | null = null;

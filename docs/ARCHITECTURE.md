@@ -248,3 +248,35 @@ the threat). `tools/thirdparty.mjs` measures turns, target flips and reaction.
 **Blinkbug escape window**: a knocked-out rascal's bug gets `grace` 2.4s (bullets fizzle with a ring and a
 chirp, sparkles) and an upward burst; bots drop a graced bug as a target and ~60% of the time ignore it for
 5–9s.
+
+## 15. The bigger island (peninsulas, homesteads, Hot Drops)
+
+**Shape**: `islandRadius(angle)` adds five Gaussian lobes (`LOBES`: angle, +33–35m, width 0.34 rad) between
+the original places, so the coast reaches ~137m (`ISLAND_MAX` = 140 bounds the heightfield, nav grid and
+minimap; `ISLAND_R` = 100 is still the round core used for the barge's jump window). Each lobe carries a POI
+at r≈107 with a level pad (checked to keep ≥7m of land round every pad). New roads join each one to the
+network. Everything that asked "is this on the island?" already used `islandRadius`, so cliffs, the boundary
+ring, the underside, glide updrafts and nav all follow the new coast. The terrain mesh drops triangles that
+are entirely over the sea (the square grid is ~2× the land).
+
+**Buildings** (`world/Homes.ts`): `townhouse` (2–3 storeys, stairs alternate back/front walls, optional
+shopfront, terrace mode without side windows), `cabin` (log courses, porch, optional loft), `shed`, `barn`,
+`tower` (N levels, one flight per level; tops: battlements, lookout, windmill with turning sails, clock with
+four faces), `pavilion`, `signPost`. Places: `pois/Puddleby.ts`, `Tickerton.ts`, `SnoozyPines.ts`,
+`Saltwhistle.ts`, `RumpusFair.ts` (laid out in `placeFrame`, whose +z faces the island centre), and
+`pois/Homesteads.ts` (~22 lone buildings on flat, clear ground away from roads, places, the stream and each
+other — it queries the collision world, so it runs last).
+
+**Keeping it cheap**: furniture/fittings go through `Kit.beginInterior()/endInterior()` into an *interior*
+batch (18m chunks, drawn only within ~46m). Doors (one merged mesh each) are hidden beyond 62m, Rift Nest
+sparkles beyond 130m. Moving parts (sails, Ferris wheel, carousel, clock hands) are single merged
+vertex-coloured meshes via `spinMesh`. Net: live-match triangles went *down* (~1.22M → ~1.0–1.4M depending
+on where you stand), draw calls up ~15%. World build ~3.0s, nav bake ~0.6s on the dev box.
+
+**Landing spread**: `Match.dropArea` shuffles every place (Buttonbury twice) plus wild landings each match,
+but only hands out places within 72m of the barge route (`routeDist`); glide reach was raised a little
+(dive 20 m/s, glide 12.5 m/s at −4.8 m/s) so ~90m is reachable from a late jump.
+
+**Hot Drops** (`Match.pickHotDrops`): at barge time two reachable places (not last match's) get a rich crate,
+three rare-to-mythic guns with ammo, an orange sky beam and a pulsing flame on the minimap; ~28% of bots
+aim for them. Cleared with the balloons.

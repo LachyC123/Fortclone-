@@ -170,3 +170,17 @@ export function stilt(k: Kit, x: number, z: number, top: number, r = 0.18, color
 
 /** A plain box room/hall with wall() openings — returns nothing; zones set by caller. */
 export const rng0 = new Rng(4242);
+
+/**
+ * A place's own frame: local +z points back toward the island centre (where its road comes in),
+ * so layouts read the same whichever peninsula they sit on.
+ */
+export function placeFrame(X: number, Z: number) {
+  const yaw = Math.atan2(-X, -Z);
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return {
+    yaw,
+    /** local (x, z) -> world (x, z) */
+    p: (lx: number, lz: number): [number, number] => [X + lx * c + lz * s, Z - lx * s + lz * c],
+  };
+}

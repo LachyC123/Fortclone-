@@ -33,6 +33,17 @@ export class Kit {
 
   /** small ground clutter (grass, flowers): no shadows, hidden at distance */
   detail: Batcher | null = null;
+  /** furniture & fittings inside buildings: only drawn when you're close */
+  interior: Batcher | null = null;
+  private insideDepth = 0;
+
+  /** everything solid drawn between beginInterior/endInterior goes to the interior batch */
+  beginInterior() {
+    this.insideDepth++;
+  }
+  endInterior() {
+    this.insideDepth = Math.max(0, this.insideDepth - 1);
+  }
 
   constructor(public solid: Batcher, public foliage: Batcher, public nocast: Batcher, public glow: Batcher, public cw: CollisionWorld) {}
 
@@ -62,6 +73,7 @@ export class Kit {
   }
 
   private batch(o: PartOpts) {
+    if (this.insideDepth > 0 && this.interior && (o.batch === undefined || o.batch === 'solid' || o.batch === 'nocast')) return this.interior;
     return o.batch === 'foliage' ? this.foliage : o.batch === 'detail' ? (this.detail ?? this.foliage) : o.batch === 'nocast' ? this.nocast : o.batch === 'glow' ? this.glow : this.solid;
   }
 

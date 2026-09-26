@@ -79,8 +79,8 @@ export function buildWilds(k: Kit, world: World, doors: DoorSpec[]) {
       if (tall) k.collider((x0 + x1) / 2, ground((x0 + x1) / 2, rz) + 0.9, rz, w - 2.5, 1.8, 0.4, 'grass', { flags: 8 });
     }
   };
-  field(-72, 40, 20, 14, 'hedge', 0, 1);
-  field(34, -84, 16, 11, 'wall', 1, 2);
+  field(-64, 38, 18, 12, 'hedge', 0, 1);
+  field(38, -84, 12, 10, 'wall', 1, 2);
   field(-56, 70, 12, 10, 'wall', 0, 0);
   field(76, -38, 12, 12, 'hedge', 1, 3);
 

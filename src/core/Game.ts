@@ -26,7 +26,7 @@ import { Match } from './Match';
 import { Bubbles } from '../fx/Bubbles';
 import { Birds } from '../fx/Birds';
 import type { EmoteKind } from '../entities/RascalRig';
-import { ISLAND_R, POIS } from '../world/Heightmap';
+import { ISLAND_R, ISLAND_MAX, POIS } from '../world/Heightmap';
 import { SPECIES_BY_ID, Collection, loadCollection, saveCollection, randomBugName, randomSpecies } from '../progression/Bugs';
 
 const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo', 'Beans4Brains', 'Noodle', 'Gran Turbo', 'Mr. Wiggles', 'SoggyWaffle', 'Pip', 'Honk', 'Tater Tot', 'Lady Fizz', 'Gloomzilla', 'Crumpet', 'Bop'];
@@ -98,7 +98,7 @@ export class Game implements GameCtx {
     (this.world as unknown as { fx: FX }).fx = this.fx;
     this.loot = new LootSystem(this.scene, this.cw);
     this.throwables = new Throwables(this.scene);
-    this.nav = new NavGrid(this.cw, ISLAND_R + 6);
+    this.nav = new NavGrid(this.cw, ISLAND_MAX + 3);
     // doors swing open for anyone who approaches, so bake the nav mesh with them open
     for (const d of this.world.doors) d.collider.enabled = false;
     this.nav.bake();

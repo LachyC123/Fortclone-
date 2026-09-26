@@ -29,11 +29,13 @@ for (let run = 0; run < 6; run++) {
       g.debugStep(1, 1 / 30); t += 1 / 30;
     }
     g.debugStep(30, 1 / 30);
-    const R = (a) => 100 + Math.sin(a * 3 + 1.3) * 4 + Math.sin(a * 7 + 0.4) * 2.2 + Math.sin(a * 13) * 0.9;
-    const outside = g.actors.filter((a) => { const d = Math.hypot(a.motor.pos.x, a.motor.pos.z); return a.alive && d > R(Math.atan2(a.motor.pos.z, a.motor.pos.x)) - 0.5; });
+    // over the sea = no island ground under you (works for any coastline, peninsulas included)
+    const hf = g.cw.colliders.find((c) => c.tag === 'ground');
+    const V3 = g.player.motor.pos.constructor;
+    const outside = g.actors.filter((a) => a.alive && hf.raycast(new V3(a.motor.pos.x, 80, a.motor.pos.z), new V3(0, -1, 0), 200) < 0);
     const pd = Math.hypot(p.motor.pos.x, p.motor.pos.z);
     const maxD = Math.max(...g.actors.map((a) => Math.hypot(a.motor.pos.x, a.motor.pos.z)));
-    const sky = g.actors.filter((a) => a.out).length;
+    const sky = g.actors.filter((a) => a.out).map((a) => `${a.name}@${a.motor.pos.toArray().map((v) => v.toFixed(0))}${a.motor.pos.y < -10 ? '(FELL)' : ''}`).join(' ') || 0;
     const stuck = g.actors.filter((a) => a.flight !== 'none').map((a) => `${a.name}:${a.flight} alive=${a.alive} out=${a.out} parked=${a.parked} bug=${!!a.bugout} pos=${a.motor.pos.toArray().map((v) => v.toFixed(1))}`).join('; ');
     const res = `stuck[${stuck}] run ${run} ${early ? 'EARLY' : 'NEVER'} jump@${jumpedAt.toFixed(2)} enter=${m.enterAt.toFixed(2)} exit=${m.exitAt.toFixed(2)} player d=${pd.toFixed(1)} y=${p.motor.pos.y.toFixed(1)} alive=${p.alive} | outside=${outside.length} out=${sky} maxD=${maxD.toFixed(1)} t=${t.toFixed(1)}s`;
     g.goHome();
