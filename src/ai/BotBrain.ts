@@ -165,12 +165,36 @@ export class BotController implements Controller {
   onDamaged(me: Actor, from: Actor | null, ctx: GameCtx) {
     if (!from || from === me) return;
     if (me.hp < 30 && me.hp > 0) me.say(this.rng() < 0.5 ? 'EEK!' : 'OW!', '#ff8a8a', 1.2);
-    this.awareness.set(from.id, 1.2);
-    if (!this.target || this.target === from || !this.targetVisible) {
+    this.awareness.set(from.id, 1.5);
+    this.ignoreUntil.delete(from.id);
+    // threat bookkeeping: who is actually hurting us right now?
+    const th = (this.threat.get(from.id) ?? 0) + 1;
+    this.threat.set(from.id, th);
+    const cur = this.target;
+    if (cur && cur !== from && cur.alive) {
+      // shot by a third party mid-fight: make ONE decision and stick to it for a moment
+      this.thirdPartyT = ctx.time;
+      if (ctx.time > this.switchCd) {
+        const curThreat = this.threat.get(cur.id) ?? 0;
+        // hysteresis: only swap when the newcomer is clearly the bigger problem (or it's a fresh
+        // ambush while we're hurt) — otherwise two shooters make us ping-pong between them
+        const fresh = th < 1.5;
+        if (!this.targetVisible || th > curThreat * 1.35 + 0.3 || (fresh && me.hp < 55)) {
+          this.target = from;
+          this.switchCd = ctx.time + 2.6;
+          this.reactT = rand(0.2, 0.35);
+        }
+      }
+    } else if (!cur || cur === from || !cur.alive) {
       this.target = from;
+      if (this.state !== 'engage') this.reactT = rand(0.15, 0.3);
+    }
+    if (this.target === from) {
       this.lastSeenPos.copy(from.motor.pos);
       this.lastSeenT = ctx.time;
-      if (this.state !== 'engage') this.reactT = rand(0.15, 0.3);
+      // snap attention toward the shooter instead of sweeping around
+      this.lookYaw = yawFromDir(from.motor.pos.x - me.motor.pos.x, from.motor.pos.z - me.motor.pos.z);
+      this.lookAroundT = 0;
     }
     // panic-blink when hurt badly
     if (me.hp < this.profile.retreatHp && me.bug.canBlink && this.rng() < 0.7) me.intent.blink = true;
@@ -226,6 +250,11 @@ export class BotController implements Controller {
   private dropDelay = -1;
   private zoneSprint = false;
   private repathCd = 0;
+  private threat = new Map<number, number>();
+  private switchCd = 0;
+  private thirdPartyT = -99;
+  private fleeDecideT = 0;
+  private wantFlee = false;
   private ignoreUntil = new Map<number, number>();
   private dryT = 0;
   private escapeT = 0;
@@ -369,6 +398,8 @@ export class BotController implements Controller {
     let bestD = Infinity;
     for (const o of ctx.actors) {
       if (o === me || o.parked || (!o.alive && !o.bugout)) continue;
+      // a freshly spawned Blinkbug is shimmering (can't be hit) and often goes unnoticed
+      if (o.bugout && (o.bugout.grace > 0 || (this.ignoreUntil.get(o.id) ?? 0) > ctx.time)) continue;
       const tp = o.bugout ? _v.copy(o.bug.pos) : _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
       const d = tp.distanceTo(eye);
       if (d > 70) continue;
@@ -384,7 +415,8 @@ export class BotController implements Controller {
         continue;
       }
       const yawTo = yawFromDir(tp.x - eye.x, tp.z - eye.z);
-      const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5;
+      const hurtMe = me.lastDamagedBy === o && ctx.time - me.lastDamageTime < 2.5;
+      const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5 || hurtMe;
       let aw = this.awareness.get(o.id) ?? 0;
       const range = ctx.match ? ctx.match.engageRange * (this.profile.aggression > 0.7 ? 1.25 : this.profile.aggression < 0.4 ? 0.8 : 1) : 999;
       if (inCone && ctx.sightClear(eye, tp)) {
@@ -413,7 +445,8 @@ export class BotController implements Controller {
       this.awareness.set(o.id, aw);
     }
     // switch target if current one is lost and someone else is visible (or much closer)
-    if (bestNew && (!this.target || !this.target.alive || (!this.targetVisible && ctx.time - this.lastSeenT > 1.5) || bestD < 6)) {
+    if (bestNew && ctx.time > this.switchCd && (!this.target || !this.target.alive || (!this.targetVisible && ctx.time - this.lastSeenT > 1.5) || bestD < 6)) {
+      if (this.target && this.target !== bestNew) this.switchCd = ctx.time + 1.2;
       if (this.target !== bestNew) {
         if (!this.target) me.say(this.rng() < 0.8 ? '!' : '!!', '#ff6b6b', 1.1);
         this.target = bestNew;
@@ -432,6 +465,18 @@ export class BotController implements Controller {
         this.target = null;
         this.targetVisible = false;
       }
+    }
+    // decay threat
+    for (const [k, v] of this.threat) {
+      const nv = v * Math.exp(-tick / 3);
+      if (nv < 0.05) this.threat.delete(k);
+      else this.threat.set(k, nv);
+    }
+    // our target just became a fleeing Blinkbug: most rascals don't clock it straight away
+    if (this.target && this.target.bugout && this.target.bugout.grace > 0) {
+      if (this.rng() < 0.6) this.ignoreUntil.set(this.target.id, ctx.time + rand(5, 9));
+      this.target = null;
+      this.targetVisible = false;
     }
     if (this.target && !this.target.alive && !this.target.bugout) {
       this.target = null;
@@ -488,7 +533,16 @@ export class BotController implements Controller {
       }
     } else this.dryT = 0;
     if (!me.armed || !canShoot) next = hasTarget && this.targetVisible && me.hp < this.profile.retreatHp ? 'retreat' : 'loot';
-    else if (hasTarget && this.targetVisible) next = me.hp < this.profile.retreatHp && this.rng() < 0.6 ? 'retreat' : 'engage';
+    else if (hasTarget && this.targetVisible) {
+      // fight-or-flight is decided every couple of seconds, not every tick (no dithering)
+      if (ctx.time > this.fleeDecideT) {
+        this.fleeDecideT = ctx.time + 2;
+        const pinched = ctx.time - this.thirdPartyT < 3 && me.hp < 60; // caught between two shooters
+        this.wantFlee = (me.hp < this.profile.retreatHp && this.rng() < 0.6) || (pinched && this.rng() < 0.7);
+        if (pinched && this.wantFlee && me.bug.ready && this.rng() < this.profile.blinkiness) this.planEscapeBlink(me, ctx);
+      }
+      next = this.wantFlee ? 'retreat' : 'engage';
+    }
     else if (hasTarget) next = me.hp < this.profile.retreatHp ? 'retreat' : 'chase';
     else if (lowAmmo || (this.profile.archetype === 'goblin' && this.rng() < 0.3)) next = 'loot';
     else if (ctx.time - this.heardT < 6) next = 'investigate';
@@ -567,7 +621,28 @@ export class BotController implements Controller {
       case 'retreat': {
         // run away from the threat, preferably blink out
         if (this.target) {
+          // away from everyone who's been hurting us, weighted by threat; caught in a crossfire
+          // (shooters on opposite sides) → break out sideways instead of running into one of them
           _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+          if (this.threat.size > 1) {
+            _v.set(0, 0, 0);
+            let n = 0;
+            for (const o of ctx.actors) {
+              const w = this.threat.get(o.id);
+              if (!w || !o.alive || o === me) continue;
+              _v3.subVectors(me.motor.pos, o.motor.pos).setY(0).normalize();
+              _v.addScaledVector(_v3, w);
+              n += w;
+            }
+            if (n > 0 && _v.length() < n * 0.45) {
+              // opposite sides: pick the side of the line between them we're already leaning to (stable per bot)
+              _v3.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+              const side = me.id % 2 ? 1 : -1;
+              _v.set(-_v3.z * side, 0, _v3.x * side);
+            }
+            if (_v.lengthSq() < 1e-6) _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0);
+            _v.normalize();
+          }
           _v2.copy(me.motor.pos).addScaledVector(_v, 14);
           if (!this.hasGoal || this.goalTimeout <= 0) this.setGoal(me, ctx, _v2, true);
           if (me.bug.ready && this.rng() < this.profile.blinkiness * 0.4) this.planEscapeBlink(me, ctx);
@@ -1011,7 +1086,10 @@ export class BotController implements Controller {
     const it = me.intent;
     const eye = me.eyePos(_eye);
     let desiredYaw = this.aimYaw, desiredPitch = 0;
-    const engaged = this.state === 'engage' && this.target && this.targetVisible;
+    // a close retreat is a fighting retreat: keep eyes (and gun) on the threat while backing off,
+    // rather than whipping round to face the run direction and back again
+    const fightingRetreat = this.state === 'retreat' && !!this.target && this.targetVisible && me.armed && this.target.motor.pos.distanceTo(me.motor.pos) < 16;
+    const engaged = (this.state === 'engage' || fightingRetreat) && this.target && this.targetVisible;
     if (engaged) {
       const t = this.target!;
       // human-ish tracking: aim where they were a moment ago (+ an imperfect lead), with a

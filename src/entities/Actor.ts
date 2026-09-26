@@ -46,7 +46,7 @@ export class Actor implements BugOwner {
   private glider: THREE.Group | null = null;
   private gliderK = 0;
   /** eliminated but piloting their Blinkbug toward a Rift Nest */
-  bugout: { t: number; hp: number; vel: THREE.Vector3 } | null = null;
+  bugout: { t: number; hp: number; vel: THREE.Vector3; grace: number } | null = null;
   reviveUsed = false;
   /** fully out of the match */
   out = false;
@@ -392,7 +392,8 @@ export class Actor implements BugOwner {
   /* ----------------------------------------------------------------- bug-revive */
   private startBugout(from: THREE.Vector3, ctx: GameCtx) {
     this.reviveUsed = true;
-    this.bugout = { t: 22, hp: 30, vel: new THREE.Vector3(0, 3, 0) };
+    // a short invulnerable burst so the bug gets a fair head start
+    this.bugout = { t: 22, hp: 30, vel: new THREE.Vector3(0, 7, 0), grace: 2.4 };
     this.bug.startPilot(from);
     ctx.fx.blinkBurst(from, false);
     audio.chirp(from, 0.7, 0.6);
@@ -404,6 +405,12 @@ export class Actor implements BugOwner {
 
   private damageBug(amount: number, from: Actor | null, ctx: GameCtx, weaponName: string): boolean {
     const b = this.bugout!;
+    if (b.grace > 0) {
+      // bullets fizzle off the shimmering spark
+      ctx.fx.ring(this.bug.pos.clone(), 0x9ffcff, 0.1, 0.6, 0.2, undefined, true);
+      audio.chirp(this.bug.pos, 2.2, 0.2);
+      return false;
+    }
     b.hp -= amount;
     ctx.fx.sparkBurst(this.bug.pos, PAL.blink, 10);
     audio.chirp(this.bug.pos, 1.8, 0.5);
@@ -419,6 +426,10 @@ export class Actor implements BugOwner {
   private updateBugout(dt: number, ctx: GameCtx) {
     const b = this.bugout!;
     b.t -= dt;
+    if (b.grace > 0) {
+      b.grace -= dt;
+      if (Math.random() < dt * 30) ctx.fx.glow.emit(this.bug.pos, { count: 1, color: [0xffffff, 0x9ffcff], speed: [0.5, 2], spread: 1, life: 0.35, size: 0.12, shape: PShape.Sparkle });
+    }
     this.controller?.update(this, ctx, dt);
     const it = this.intent;
     const bug = this.bug;
