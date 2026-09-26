@@ -101,8 +101,23 @@ BotController (brain) ───────────────────�
 - Quality presets (pixel ratio, shadows, shadow map size, particle budget, draw distance) + automatic
   downgrade when FPS stays low.
 - Bot thinking throttled by distance; steering is cheap; nav grid baked once.
-- Planned (M3/M7): character LOD (merged impostor rig for distant bots), animation update throttling
-  for far actors, texture-free UI already.
+- **Milestone 7 tiers** (`render/Detail.ts`, `QUALITY_PRESETS`), baked at boot from the quality setting:
+  `model` scales every character/bug/weapon/pickup segment count through `G.*` (rascal 49k → 24k tris on
+  medium, 18k on low); `lite` builds the world with plain boxes, fewer cylinder/sphere/cone segments and
+  detail-0 icosahedra (world geometry 1.01M → 0.66M tris); `cull` scales how far pickups, glows, crates,
+  doors, signs, kickables and butterflies are drawn. Small solid props (< 1.1m) go to their own chunked
+  batch drawn to `smallDist`; small foliage bits to the no-shadow detail batch; only the top tier lets
+  small props and interiors cast shadows; rascal shadows and full-rig LOD range shrink on lower tiers.
+  Fog closes in with the draw distance. Measured with `tools/tierprobe.mjs` (live match, four spots):
+  | tier | on-screen tris | draw calls |
+  |---|---|---|
+  | low | 0.36M | ~240 |
+  | medium | 0.50M | ~375 |
+  | high | 0.94M | ~510 |
+- Boot: terrain path colouring rasterises a distance field around each road instead of testing every
+  vertex against every segment (654ms → ~150ms); world build ~2.2s (low/medium) / ~2.7s (high) on the
+  dev box, nav bake ~0.65s.
+- HUD writes text/HTML/styles only when the value changes (`setText`/`setHtml`/`setStyle`).
 
 ## 8. Folder structure
 

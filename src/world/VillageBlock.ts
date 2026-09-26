@@ -44,7 +44,9 @@ export function buildVillageBlock(k: Kit, world: World, doors: DoorSpec[]) {
     [[13, 6], [26, 10], [36, 12]],
     [[0, -10], [0, -30], [4, -40]],
   ];
+  const tt = performance.now();
   buildTerrain(k, paths);
+  if (location.search.includes('timing')) console.log(`[t]   terrain ${(performance.now() - tt).toFixed(0)}ms`);
   buildSkyRocks(k);
   buildSquare(k, world);
   buildHouse(k, world, doors, -12, -17);

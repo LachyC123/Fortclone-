@@ -15,6 +15,7 @@ import { ColFlags } from '../physics/Collision';
 import { PShape } from '../fx/Particles';
 import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
 import { islandRadius, groundHeight } from '../world/Terrain';
+import { detail } from '../render/Detail';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -1193,10 +1194,11 @@ export class Actor implements BugOwner {
       // crowds (Launch Isle, the Sky Barge) switch to the cheap stand-in much sooner
       const mt = this.ctx.match;
       const crowd = !!mt && (mt.phase === 'lobby' || this.flight === 'barge');
-      const far = crowd ? (r.lod ? 6 : 7) : r.lod ? 30 : 34;
+      const far = (crowd ? (r.lod ? 6 : 7) : r.lod ? 30 : 34) * (0.5 + 0.5 * detail.model);
       r.setLod(d2 > far * far);
       this.bug.setFar(r.lod);
-      const wantShadow = d2 < (crowd ? 7 * 7 : 24 * 24);
+      const sd = (crowd ? 7 : 24) * (detail.model < 1 ? 0.55 : 1);
+      const wantShadow = d2 < sd * sd;
       if (wantShadow !== this.shadowsOn) {
         this.shadowsOn = wantShadow;
         r.setShadows(wantShadow);

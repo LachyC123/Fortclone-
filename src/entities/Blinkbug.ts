@@ -7,6 +7,7 @@ import { PShape } from '../fx/Particles';
 import { audio } from '../audio/Audio';
 import { mergeChildren } from '../render/Merge';
 import { BugSpecies, BugStats, SPECIES_BY_ID, statsFor, BASE_BUG_STATS } from '../progression/Bugs';
+import { G } from '../render/Detail';
 
 export const BUG = {
   radius: 0.14,
@@ -125,21 +126,21 @@ export class Blinkbug {
     const bulb = new THREE.MeshBasicMaterial({ color: 0xfff6a0 });
 
     this.root.add(this.bodyG);
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), this.bodyMat);
+    const body = new THREE.Mesh(G.sphere(0.13, 16, 12), this.bodyMat);
     body.scale.set(1, 0.9, 1.1);
     body.castShadow = true;
     this.bodyG.add(body);
-    const bellyM = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), belly);
+    const bellyM = new THREE.Mesh(G.sphere(0.09, 12, 8), belly);
     bellyM.position.set(0, -0.04, -0.05);
     this.bodyG.add(bellyM);
     // big googly eyes
     const mkEye = (x: number) => {
       const g = new THREE.Group();
       g.position.set(x, 0.05, -0.1);
-      const w = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), white);
-      const p = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), ink);
+      const w = new THREE.Mesh(G.sphere(0.055, 12, 10), white);
+      const p = new THREE.Mesh(G.sphere(0.03, 10, 8), ink);
       p.position.z = -0.035;
-      const hl = new THREE.Mesh(new THREE.SphereGeometry(0.01, 6, 4), white);
+      const hl = new THREE.Mesh(G.sphere(0.01, 6, 4), white);
       hl.position.set(0.012, 0.012, -0.06);
       g.add(w, p, hl);
       this.bodyG.add(g);
@@ -151,9 +152,9 @@ export class Blinkbug {
     for (const sx of [-1, 1]) {
       const a = new THREE.Group();
       a.position.set(sx * 0.04, 0.1, -0.03);
-      const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 4), ink);
+      const stalk = new THREE.Mesh(G.cylinder(0.008, 0.008, 0.12, 4), ink);
       stalk.position.y = 0.06;
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), bulb);
+      const b = new THREE.Mesh(G.sphere(0.022, 8, 6), bulb);
       b.position.y = 0.12;
       a.add(stalk, b);
       a.rotation.z = -sx * 0.4;
@@ -163,7 +164,7 @@ export class Blinkbug {
     // species extras
     if (L.horns) {
       for (const sx of [-1, 1]) {
-        const h = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 6), new THREE.MeshStandardMaterial({ color: 0xfff1d8, roughness: 0.5 }));
+        const h = new THREE.Mesh(G.cone(0.03, 0.09, 6), new THREE.MeshStandardMaterial({ color: 0xfff1d8, roughness: 0.5 }));
         h.position.set(sx * 0.075, 0.1, -0.05);
         h.rotation.z = -sx * 0.6;
         this.bodyG.add(h);
@@ -171,25 +172,25 @@ export class Blinkbug {
     }
     if (L.pincers) {
       for (const sx of [-1, 1]) {
-        const pc = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 5, 10, Math.PI * 1.2), ink);
+        const pc = new THREE.Mesh(G.torus(0.035, 0.012, 5, 10, Math.PI * 1.2), ink);
         pc.position.set(sx * 0.045, -0.04, -0.13);
         pc.rotation.set(Math.PI / 2, 0, sx > 0 ? Math.PI * 0.9 : -Math.PI * 0.1);
         this.bodyG.add(pc);
       }
     }
     if (L.crown) {
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.04, 10, 1, true), gold);
+      const c = new THREE.Mesh(G.cylinder(0.05, 0.045, 0.04, 10, 1, true), gold);
       c.position.set(0, 0.13, 0.01);
       this.bodyG.add(c);
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
-        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.035, 4), gold);
+        const sp = new THREE.Mesh(G.cone(0.012, 0.035, 4), gold);
         sp.position.set(Math.cos(a) * 0.048, 0.165, 0.01 + Math.sin(a) * 0.048);
         this.bodyG.add(sp);
       }
     }
     if (L.leaf) {
-      const lf = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0x4fbf4a, roughness: 0.6 }));
+      const lf = new THREE.Mesh(G.sphere(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0x4fbf4a, roughness: 0.6 }));
       lf.scale.set(1, 0.18, 0.55);
       lf.position.set(0.02, 0.13, 0.03);
       lf.rotation.set(0.2, 0.6, 0.35);
@@ -206,27 +207,27 @@ export class Blinkbug {
     this.bodyG.add(this.wingL, this.wingR);
     // stubby legs (springs for Hopper, sucker feet for Stickle)
     for (let i = 0; i < 4; i++) {
-      const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.04, 2, 4), ink);
+      const l = new THREE.Mesh(G.capsule(0.015, 0.04, 2, 4), ink);
       l.position.set(i % 2 ? 0.06 : -0.06, -0.11, i < 2 ? -0.04 : 0.04);
       this.bodyG.add(l);
       this.legs.push(l);
       if (L.springs) {
         for (let k = 0; k < 3; k++) {
-          const coil = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 4, 10), gold);
+          const coil = new THREE.Mesh(G.torus(0.018, 0.005, 4, 10), gold);
           coil.position.set(l.position.x, -0.13 - k * 0.016, l.position.z);
           coil.rotation.x = Math.PI / 2;
           this.bodyG.add(coil);
         }
       }
       if (L.suckers) {
-        const sk = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff8fc0, roughness: 0.5 }));
+        const sk = new THREE.Mesh(G.sphere(0.022, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff8fc0, roughness: 0.5 }));
         sk.scale.set(1, 0.45, 1);
         sk.position.set(l.position.x, -0.14, l.position.z);
         this.bodyG.add(sk);
       }
     }
     // soft halo
-    this.halo = new THREE.Mesh(new THREE.SphereGeometry(species.ability === 'ping' ? 0.34 : 0.22, 12, 8), new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.halo = new THREE.Mesh(G.sphere(species.ability === 'ping' ? 0.34 : 0.22, 12, 8), new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }));
     this.root.add(this.halo);
     this.bodyG.scale.setScalar(L.scale ?? 1);
     this.baseScale = L.scale ?? 1;

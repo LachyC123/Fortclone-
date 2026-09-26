@@ -1,5 +1,5 @@
 import type { Game } from '../core/Game';
-import type { Quality } from '../render/Renderer';
+import { QUALITY_PRESETS, type Quality } from '../render/Renderer';
 import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
 import { CollectionScreen } from './Collection';
@@ -116,6 +116,7 @@ export class Menus {
     this.pauseEl.innerHTML = `<div class="menu panel">
       <div class="menuhead"><h2>PAUSED</h2><button class="btn resume">RESUME</button></div>
       <div class="rows"><div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
+      <div class="row qnote hidden"><small>Model &amp; world detail change after a reload.</small></div>
       <div class="row"><span>Auto-adjust graphics</span><div class="seg" data-k="autoQuality"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Look sensitivity</span><input type="range" min="0.3" max="2.5" step="0.05" data-k="sensitivity"></div>
       <div class="row"><span>Field of view</span><input type="range" min="60" max="90" step="1" data-k="fov"></div>
@@ -141,6 +142,9 @@ export class Menus {
         (s as unknown as Record<string, unknown>)[k] = v === 'true' ? true : v === 'false' ? false : v;
         audio.uiTap();
         this.game.applySettings();
+        const note = this.pauseEl.querySelector('.qnote');
+        const bq = this.game.bootQuality;
+        note?.classList.toggle('hidden', QUALITY_PRESETS[s.quality].model === QUALITY_PRESETS[bq].model);
         sync();
       });
     });

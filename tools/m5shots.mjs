@@ -13,6 +13,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+if (process.env.Q) await page.addInitScript((q) => localStorage.setItem('rr.settings', JSON.stringify({ quality: q, autoQuality: false })), process.env.Q);
 await page.goto(`http://localhost:${PORT}/`);
 await page.waitForFunction(() => window.__game, null, { timeout: 120000 });
 const shot = async (name) => { await page.waitForTimeout(600); await page.screenshot({ path: `${out}/${name}.png`, timeout: 180000 }); };

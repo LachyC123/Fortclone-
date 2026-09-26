@@ -55,6 +55,7 @@ interface Kickable {
 
 import { buildIsland } from './Island';
 import { ISLAND_R, ISLAND_MAX } from './Heightmap';
+import { detail } from '../render/Detail';
 
 /** A named region used for indoor reverb, minimap labels and (later) POI logic. */
 export interface Zone {
@@ -95,6 +96,15 @@ export class World {
   private cullT = 0;
   private detailChunks: THREE.Mesh[] = [];
   private interiorChunks: THREE.Mesh[] = [];
+  private smallChunks: THREE.Mesh[] = [];
+  /** small outdoor props are drawn out to this distance (set from the quality preset) */
+  smallDist = 90;
+
+  /** small props and furniture only cast shadows on the top tier (saves a shadow draw each) */
+  setPropShadows(on: boolean) {
+    for (const m of this.smallChunks) m.castShadow = on;
+    for (const m of this.interiorChunks) m.castShadow = on;
+  }
   private bigChunks: THREE.Mesh[] = [];
   /** chunks further than this (plus their radius) are skipped; set from the quality preset */
   drawDist = 400;
@@ -108,13 +118,25 @@ export class World {
     const glow = new Batcher();
     const detail = new Batcher();
     const interior = new Batcher();
+    const small = new Batcher();
     const k = new Kit(solid, foliage, nocast, glow, this.cw);
     k.detail = detail;
     k.interior = interior;
+    k.small = small;
     const doorSpecs: DoorSpec[] = [];
 
+    const T = location.search.includes('timing');
+    let t0 = performance.now();
+    const lap = (label: string) => {
+      if (!T) return;
+      const t = performance.now();
+      console.log(`[t]   ${label} ${(t - t0).toFixed(0)}ms`);
+      t0 = t;
+    };
     buildVillageBlock(k, this, doorSpecs);
+    lap('village+terrain');
     buildIsland(k, this, doorSpecs);
+    lap('island');
 
     const wm = worldMaterial();
     const fm = foliageMaterial();
@@ -132,14 +154,22 @@ export class World {
       this.group.add(m);
     }
     for (const m of glow.buildChunked(gm, 72, false, false)) this.group.add(m);
+    for (const m of small.buildChunked(wm, 28, true, true)) {
+      m.geometry.computeBoundingSphere();
+      this.smallChunks.push(m);
+      this.group.add(m);
+    }
     for (const m of interior.buildChunked(wm, 18, true, true)) {
       m.geometry.computeBoundingSphere();
       this.interiorChunks.push(m);
       this.group.add(m);
     }
+    lap('merge');
     for (const d of doorSpecs) this.makeDoor(d);
     this.signs = this.group.children.filter((c) => c.userData.sign);
+    lap('doors');
     this.settleLoot();
+    lap('settleLoot');
     this.scene.add(this.group);
     this.makeClouds();
   }
@@ -407,13 +437,20 @@ export class World {
     if (this.cullT <= 0) {
       this.cullT = 0.25;
       const far = (o: THREE.Object3D, d: number) => (o.visible = o.position.distanceToSquared(camPos) < d * d);
-      for (const f of this.flyers) if (f.kind === 'butterfly') far(f.mesh, 45);
-      for (const kk of this.kickables) far(kk.mesh, 55);
-      for (const s of this.signs) far(s, 85);
+      const cf = detail.cull;
+      for (const f of this.flyers) if (f.kind === 'butterfly') far(f.mesh, 45 * cf);
+      for (const kk of this.kickables) far(kk.mesh, 55 * cf);
+      for (const s of this.signs) far(s, 85 * cf);
       // swinging doors and Rift Nest sparkles are separate meshes: only draw the nearby ones
-      for (const d of this.doors) d.pivot.visible = d.hinge.distanceToSquared(camPos) < 62 * 62;
+      const dd = 62 * cf;
+      for (const d of this.doors) d.pivot.visible = d.hinge.distanceToSquared(camPos) < dd * dd;
       for (const n of this.nests) far(n.fx, 130);
       for (const m of this.detailChunks) m.visible = m.geometry.boundingSphere!.center.distanceToSquared(camPos) < 62 * 62;
+      for (const m of this.smallChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = Math.min(this.drawDist, this.smallDist) + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
       for (const m of this.interiorChunks) {
         const bs = m.geometry.boundingSphere!;
         const d = Math.min(this.drawDist, 46) + bs.radius;

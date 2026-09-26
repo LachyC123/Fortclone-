@@ -3,6 +3,7 @@ import { toyMaterial } from '../render/Materials';
 import { PAL, RarityIndex, RARITY } from '../render/Palette';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeToVertexColored } from '../render/Merge';
+import { G } from '../render/Detail';
 
 export type AmmoType = 'light' | 'medium' | 'heavy' | 'shells' | 'bolts';
 export type SoundProfile = 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun' | 'needle' | 'bow' | 'pepper';
@@ -165,7 +166,7 @@ export class WeaponInstance {
 /* ------------------------------------------------------------------ view models */
 
 function rbox(w: number, h: number, d: number, r: number) {
-  return new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
+  return G.rbox(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
 }
 
 export interface WeaponView {
@@ -215,7 +216,7 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
       parent.add(mesh);
     }
   };
-  const cyl = (rt: number, rb: number, h: number, s = 12) => new THREE.CylinderGeometry(rt, rb, h, s);
+  const cyl = (rt: number, rb: number, h: number, s = 12) => G.cylinder(rt, rb, h, s);
   const HALF = Math.PI / 2;
   let muzzleZ = -0.8, muzzleY = 0.03;
   let gripR = new THREE.Vector3(0, -0.1, 0.05), gripL = new THREE.Vector3(0, -0.02, -0.4);
@@ -247,7 +248,7 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
         [cyl(0.03, 0.032, 0.16, 12), m.tin, 0, 0.04, -0.3, HALF],
         [cyl(0.042, 0.042, 0.04, 12), m.red, 0, 0.04, -0.38, HALF],
         [rbox(0.03, 0.05, 0.04, 0.012), m.ink, 0, 0.1, 0.03, -0.3],
-        [new THREE.TorusGeometry(0.035, 0.009, 6, 12), m.ink, 0, -0.04, -0.07, 0, HALF],
+        [G.torus(0.035, 0.009, 6, 12), m.ink, 0, -0.04, -0.07, 0, HALF],
       ]);
       P(mag, [[rbox(0.06, 0.08, 0.06, 0.02), m.tin, 0, 0, 0]]);
       mag.position.set(0, -0.17, 0.05);
@@ -269,8 +270,8 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
       ]);
       // a baby-rattle drum on the side (that's the name)
       P(mag, [
-        [new THREE.SphereGeometry(0.075, 14, 10), m.pink, 0, 0, 0],
-        [new THREE.TorusGeometry(0.076, 0.012, 6, 16), m.mustard, 0, 0, 0, HALF],
+        [G.sphere(0.075, 14, 10), m.pink, 0, 0, 0],
+        [G.torus(0.076, 0.012, 6, 16), m.mustard, 0, 0, 0, HALF],
       ]);
       mag.position.set(0.08, -0.02, -0.08);
       muzzleZ = -0.48;
@@ -299,21 +300,21 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
         [rbox(0.09, 0.11, 0.5, 0.04), m.woodD, 0, 0, -0.05],
         [rbox(0.08, 0.15, 0.24, 0.05), m.wood, 0, -0.03, 0.3, -0.1],
         [cyl(0.012, 0.018, 0.6, 8), m.tin, 0, 0.02, -0.6, HALF], // knitting needle
-        [new THREE.SphereGeometry(0.02, 8, 6), m.pink, 0, 0.02, -0.3],
+        [G.sphere(0.02, 8, 6), m.pink, 0, 0.02, -0.3],
         [cyl(0.035, 0.035, 0.26, 12), m.brass, 0, 0.12, -0.07, HALF], // spyglass scope
         [cyl(0.045, 0.04, 0.05, 12), m.brass, 0, 0.12, -0.21, HALF],
         [cyl(0.02, 0.02, 0.05, 6), m.iron, 0, 0.07, -0.07],
         [rbox(0.07, 0.14, 0.07, 0.03), m.wood, 0, -0.1, 0.07, 0.3],
         [rbox(0.095, 0.03, 0.06, 0.012), m.tape, 0, 0.0, 0.18],
       ]);
-      P(mag, [[new THREE.SphereGeometry(0.06, 12, 10), m.pink, 0, 0, 0]]); // yarn ball
+      P(mag, [[G.sphere(0.06, 12, 10), m.pink, 0, 0, 0]]); // yarn ball
       mag.position.set(0, -0.1, -0.15);
       muzzleZ = -0.92;
       muzzleY = 0.02;
       gripL = new THREE.Vector3(0, -0.04, -0.34);
       break;
     case 'thumper': {
-      const bell = new THREE.CylinderGeometry(0.14, 0.06, 0.22, 16, 1, true);
+      const bell = G.cylinder(0.14, 0.06, 0.22, 16, 1, true);
       P(stat, [
         [rbox(0.14, 0.15, 0.36, 0.05), m.wood, 0, 0, -0.02],
         [cyl(0.065, 0.07, 0.4, 14), m.iron, 0, 0.03, -0.36, HALF],
@@ -327,7 +328,7 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
       (bell as THREE.BufferGeometry).computeVertexNormals();
       (stat.children[2] as THREE.Mesh).material = toyMaterial(0xd9a441, { rough: 0.3, metal: 0.7 });
       ((stat.children[2] as THREE.Mesh).material as THREE.Material).side = THREE.DoubleSide;
-      P(mag, [[new THREE.SphereGeometry(0.055, 10, 8), m.iron, 0, 0, 0]]);
+      P(mag, [[G.sphere(0.055, 10, 8), m.iron, 0, 0, 0]]);
       mag.position.set(0, 0.12, 0.02);
       muzzleZ = -0.76;
       gripL = new THREE.Vector3(0, -0.06, -0.34);
@@ -366,7 +367,7 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
         [rbox(0.09, 0.12, 0.18, 0.04), m.red, 0, 0.02, -0.04],
         [rbox(0.08, 0.17, 0.09, 0.035), m.woodL, 0, -0.1, 0.05, 0.3],
         [rbox(0.085, 0.03, 0.1, 0.012), m.tape, 0, -0.06, 0.04, 0.3],
-        [new THREE.TorusGeometry(0.035, 0.009, 6, 12), m.ink, 0, -0.04, -0.04, 0, HALF],
+        [G.torus(0.035, 0.009, 6, 12), m.ink, 0, -0.04, -0.04, 0, HALF],
         [cyl(0.02, 0.02, 0.06, 8), m.brass, 0, 0.03, -0.14, HALF],
       ]);
       const sp = new THREE.Group();
@@ -394,7 +395,7 @@ export function buildWeaponView(def: WeaponDef, rarity: RarityIndex): WeaponView
 
   // mythic weapons get gilded trim
   if (rarity === 4) {
-    P(stat, [[new THREE.TorusGeometry(0.075, 0.012, 6, 16), m.brass, 0, 0.0, -0.02, 0, 0, 0]]);
+    P(stat, [[G.torus(0.075, 0.012, 6, 16), m.brass, 0, 0.0, -0.02, 0, 0, 0]]);
   }
   const merged = mergeToVertexColored(stat);
   merged.castShadow = true;

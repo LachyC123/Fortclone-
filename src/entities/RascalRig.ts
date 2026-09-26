@@ -6,6 +6,7 @@ import { WeaponView } from '../combat/Weapons';
 import { skinnedTube, bindTwoBone, finalizeBinds, deform, lathe, curveTube } from './Sculpt';
 import { mergeToVertexColored } from '../render/Merge';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { G } from '../render/Detail';
 
 export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf';
 
@@ -58,10 +59,10 @@ function mat(hex: number, rough = 0.62, emissive = 0x000000) {
 }
 
 function rbox(w: number, h: number, d: number, r: number) {
-  return new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
+  return G.rbox(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
 }
 function capsule(r: number, len: number) {
-  const g = new THREE.CapsuleGeometry(r, len, 4, 10);
+  const g = G.capsule(r, len, 4, 10);
   g.translate(0, -len / 2 - r * 0.3, 0);
   return g;
 }
@@ -259,7 +260,7 @@ export class RascalRig {
       });
       binds.push(bindTwoBone(lg, body, this.hips, leg.position, leg, knee));
       // sculpted boot: bulbous toe, flat sole, fold-over cuff
-      const boot = deform(new THREE.SphereGeometry(0.1, 20, 14), (v) => {
+      const boot = deform(G.sphere(0.1, 20, 14), (v) => {
         v.z *= v.z < 0 ? 1.55 : 1.05;
         v.x *= 0.95 + (v.z < 0 ? -v.z * 0.6 : 0);
         v.y *= 0.8;
@@ -267,8 +268,8 @@ export class RascalRig {
         if (v.z < -0.05) v.y += (-v.z - 0.05) * 0.25; // upturned toe
       });
       add(knee, boot, boots, 0, -0.215, -0.04);
-      add(knee, deform(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 20), (v) => (v.z *= v.z < 0 ? 1.55 : 1.05)), ink, 0, -0.265, -0.04);
-      add(knee, new THREE.TorusGeometry(0.068, 0.028, 8, 18), this.m(shadeHex(L.boots, 1.35), 0.8), 0, -0.155, 0, Math.PI / 2);
+      add(knee, deform(G.cylinder(0.1, 0.1, 0.03, 20), (v) => (v.z *= v.z < 0 ? 1.55 : 1.05)), ink, 0, -0.265, -0.04);
+      add(knee, G.torus(0.068, 0.028, 8, 18), this.m(shadeHex(L.boots, 1.35), 0.8), 0, -0.155, 0, Math.PI / 2);
     }
 
     // ---------------- arms: skinned sleeves -> cuffs -> forearms, with mitten hands
@@ -291,17 +292,17 @@ export class RascalRig {
       });
       binds.push(bindTwoBone(ag, body, this.torso, arm.position, arm, elbow));
       // mitten with a thumb
-      const mit = deform(new THREE.SphereGeometry(0.075, 16, 12), (v) => {
+      const mit = deform(G.sphere(0.075, 16, 12), (v) => {
         v.y *= 1.2;
         v.z *= 0.85;
         if (v.y < 0) v.x *= 1 + -v.y * 1.2;
       });
       add(hand, mit, glove, 0, -0.035, 0);
-      add(hand, new THREE.CapsuleGeometry(0.028, 0.045, 4, 8), glove, -sx * 0.055, -0.01, -0.035, 0.5, 0, -sx * 0.7);
+      add(hand, G.capsule(0.028, 0.045, 4, 8), glove, -sx * 0.055, -0.01, -0.035, 0.5, 0, -sx * 0.7);
     }
 
     // ---------------- scarf: soft wrap with a knot and two fluttering tails
-    const wrap = deform(new THREE.TorusGeometry(0.155, 0.06, 10, 28), (v) => {
+    const wrap = deform(G.torus(0.155, 0.06, 10, 28), (v) => {
       v.z += Math.sin(Math.atan2(v.y, v.x) * 3) * 0.008;
     });
     add(this.torso, wrap, scarf, 0, 0.47, 0.01, Math.PI / 2 - 0.12);
@@ -318,7 +319,7 @@ export class RascalRig {
     this.pack.position.set(0, 0.22, 0.2);
     this.torso.add(this.pack);
     const puff = (w: number, h: number, d: number, r: number, amt: number) =>
-      deform(new RoundedBoxGeometry(w, h, d, 4, r), (v) => {
+      deform(G.rbox(w, h, d, 4, r), (v) => {
         const k = 1 - Math.max(Math.abs(v.x) / (w / 2), Math.abs(v.y) / (h / 2), Math.abs(v.z) / (d / 2));
         const f = 1 + amt * Math.sqrt(Math.max(0, k));
         v.x *= f;
@@ -328,9 +329,9 @@ export class RascalRig {
     add(this.pack, puff(0.3, 0.19, 0.08, 0.05, 0.12), packA, 0, -0.08, 0.25); // front pocket
     add(this.pack, puff(0.36, 0.14, 0.22, 0.06, 0.06), packA, 0, 0.24, 0.1, -0.12); // flap
     add(this.pack, softSphere(0.03, 1, 1.4, 0.6), metal, 0, 0.17, 0.215); // clasp
-    add(this.pack, new THREE.CapsuleGeometry(0.075, 0.4, 6, 12), this.m(PAL.terracottaDark, 0.85), 0, -0.26, 0.12, 0, 0, Math.PI / 2); // bedroll
-    for (const bx of [-0.12, 0.12]) add(this.pack, new THREE.TorusGeometry(0.078, 0.012, 6, 14), packA, bx, -0.26, 0.12, 0, Math.PI / 2);
-    add(this.pack, new THREE.CapsuleGeometry(0.035, 0.1, 4, 8), this.m(0x9fdcf0, 0.25), 0.25, 0.04, 0.1); // bottle
+    add(this.pack, G.capsule(0.075, 0.4, 6, 12), this.m(PAL.terracottaDark, 0.85), 0, -0.26, 0.12, 0, 0, Math.PI / 2); // bedroll
+    for (const bx of [-0.12, 0.12]) add(this.pack, G.torus(0.078, 0.012, 6, 14), packA, bx, -0.26, 0.12, 0, Math.PI / 2);
+    add(this.pack, G.capsule(0.035, 0.1, 4, 8), this.m(0x9fdcf0, 0.25), 0.25, 0.04, 0.1); // bottle
     add(this.pack, softSphere(0.04, 1, 1, 1), this.m(PAL.pink, 0.6), -0.25, 0.14, 0.15); // charm
     for (const bx of [-1, 1]) {
       const strap = curveTube([new THREE.Vector3(bx * 0.12, 0.12, -0.19), new THREE.Vector3(bx * 0.14, 0.32, -0.2), new THREE.Vector3(bx * 0.15, 0.47, -0.06), new THREE.Vector3(bx * 0.14, 0.46, 0.14), new THREE.Vector3(bx * 0.12, 0.38, 0.22)], 0.022, 6, 16);
@@ -342,7 +343,7 @@ export class RascalRig {
     // ---------------- head: soft egg with chubby cheeks
     this.head.position.y = 0.47;
     this.torso.add(this.head);
-    const headGeo = deform(new THREE.SphereGeometry(0.27, 36, 28), (v) => {
+    const headGeo = deform(G.sphere(0.27, 36, 28), (v) => {
       v.y *= 0.93;
       const low = Math.max(0, Math.min(1, (0.05 - v.y) / 0.25));
       v.x *= 1 + 0.09 * low; // cheeks
@@ -356,12 +357,12 @@ export class RascalRig {
       g.position.set(x, 0.225, -0.232);
       g.rotation.y = -x * 1.6;
       this.head.add(g);
-      const w = add(g, new THREE.SphereGeometry(0.052, 16, 12), sclera);
+      const w = add(g, G.sphere(0.052, 16, 12), sclera);
       w.scale.set(0.85, 1.12, 0.5);
-      const pu = add(g, new THREE.SphereGeometry(0.036, 14, 10), ink, 0, -0.004, -0.018);
+      const pu = add(g, G.sphere(0.036, 14, 10), ink, 0, -0.004, -0.018);
       pu.scale.set(0.85, 1.12, 0.55);
-      add(g, new THREE.SphereGeometry(0.011, 8, 6), white, 0.012, 0.018, -0.04);
-      add(g, new THREE.SphereGeometry(0.006, 6, 4), white, -0.01, -0.016, -0.038);
+      add(g, G.sphere(0.011, 8, 6), white, 0.012, 0.018, -0.04);
+      add(g, G.sphere(0.006, 6, 4), white, -0.01, -0.016, -0.038);
       return g;
     };
     this.eyeL = mkEye(-0.092);
@@ -380,18 +381,18 @@ export class RascalRig {
     add(this.head, softSphere(0.05, 1, 0.55, 0.35), blush, -0.165, 0.14, -0.2, 0, 0.55);
     add(this.head, softSphere(0.05, 1, 0.55, 0.35), blush, 0.165, 0.14, -0.2, 0, -0.55);
     add(this.head, softSphere(0.038, 1.1, 0.9, 0.8), this.m(shadeHex(L.skin, 0.93), 0.5), 0, 0.165, -0.262); // button nose
-    this.mouth = add(this.head, new THREE.TorusGeometry(0.036, 0.011, 6, 14, Math.PI), ink, 0, 0.1, -0.252, 0.15, 0, Math.PI);
+    this.mouth = add(this.head, G.torus(0.036, 0.011, 6, 14, Math.PI), ink, 0, 0.1, -0.252, 0.15, 0, Math.PI);
     add(this.head, softSphere(0.055, 0.55, 1, 0.8), skin, -0.268, 0.19, 0.01); // ears
     add(this.head, softSphere(0.055, 0.55, 1, 0.8), skin, 0.268, 0.19, 0.01);
     // hair tufts peeking out under the hat
     for (let i = 0; i < 5; i++) {
       const t = (i - 2) / 2;
-      const tuft = deform(new THREE.ConeGeometry(0.045, 0.12, 8), (v) => {
+      const tuft = deform(G.cone(0.045, 0.12, 8), (v) => {
         v.z += (v.y + 0.06) * (v.y + 0.06) * 2.2; // curl
       });
       add(this.head, tuft, hairM, t * 0.12, 0.34 - Math.abs(t) * 0.03, -0.215 + Math.abs(t) * 0.04, Math.PI - 0.5, t * 0.3, t * 0.4);
     }
-    for (const sx of [-1, 1]) add(this.head, deform(new THREE.ConeGeometry(0.05, 0.16, 8), (v) => (v.x += (v.y + 0.08) ** 2 * sx * -2)), hairM, sx * 0.235, 0.2, -0.06, Math.PI, 0, sx * 0.25);
+    for (const sx of [-1, 1]) add(this.head, deform(G.cone(0.05, 0.16, 8), (v) => (v.x += (v.y + 0.08) ** 2 * sx * -2)), hairM, sx * 0.235, 0.2, -0.06, Math.PI, 0, sx * 0.25);
 
     // ---------------- hats
     this.hat.position.set(0, 0.24, 0.02);
@@ -400,42 +401,42 @@ export class RascalRig {
     switch (L.hat) {
       case 'beanie': {
         add(this.hat, lathe([[0.001, 0.33], [0.12, 0.31], [0.24, 0.22], [0.29, 0.1], [0.3, 0.04]], 28), hatM, 0, 0, 0.01);
-        add(this.hat, new THREE.TorusGeometry(0.29, 0.05, 10, 28), this.m(shadeHex(L.hatColor, 0.82), 0.85), 0, 0.05, 0.01, Math.PI / 2);
-        add(this.hat, deform(new THREE.IcosahedronGeometry(0.085, 2), (v) => v.multiplyScalar(1 + Math.sin(v.x * 90) * 0.06)), this.m(0xffffff, 0.95), 0, 0.37, 0.02);
+        add(this.hat, G.torus(0.29, 0.05, 10, 28), this.m(shadeHex(L.hatColor, 0.82), 0.85), 0, 0.05, 0.01, Math.PI / 2);
+        add(this.hat, deform(G.ico(0.085, 2), (v) => v.multiplyScalar(1 + Math.sin(v.x * 90) * 0.06)), this.m(0xffffff, 0.95), 0, 0.37, 0.02);
         break;
       }
       case 'aviator': {
         add(this.hat, lathe([[0.001, 0.31], [0.14, 0.29], [0.25, 0.2], [0.3, 0.08], [0.305, 0.0]], 28), hatM, 0, 0, 0.02);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.SphereGeometry(0.1, 14, 10), (v) => ((v.x *= 0.45), (v.y *= 1.35))), hatM, sx * 0.285, -0.12, 0.06, -0.3, 0, sx * 0.2);
-        add(this.hat, new THREE.TorusGeometry(0.3, 0.03, 6, 30), this.m(0xf4e7c8, 0.9), 0, 0.0, 0.02, Math.PI / 2); // fleece rim
+        for (const sx of [-1, 1]) add(this.hat, deform(G.sphere(0.1, 14, 10), (v) => ((v.x *= 0.45), (v.y *= 1.35))), hatM, sx * 0.285, -0.12, 0.06, -0.3, 0, sx * 0.2);
+        add(this.hat, G.torus(0.3, 0.03, 6, 30), this.m(0xf4e7c8, 0.9), 0, 0.0, 0.02, Math.PI / 2); // fleece rim
         break;
       }
       case 'pot': {
         add(this.hat, lathe([[0.001, 0.26], [0.24, 0.255], [0.27, 0.2], [0.29, 0.06], [0.35, 0.05], [0.35, 0.03], [0.28, 0.03]], 26), hatM, 0, 0, 0);
-        add(this.hat, new THREE.CapsuleGeometry(0.025, 0.2, 4, 8), this.m(0x6b7380, 0.4), 0.42, 0.1, 0, 0, 0, Math.PI / 2 + 0.2);
+        add(this.hat, G.capsule(0.025, 0.2, 4, 8), this.m(0x6b7380, 0.4), 0.42, 0.1, 0, 0, 0, Math.PI / 2 + 0.2);
         add(this.hat, softSphere(0.028, 1, 1, 1), metal, 0, 0.27, 0);
         break;
       }
       case 'hood': {
         add(this.hat, lathe([[0.001, 0.34], [0.16, 0.31], [0.28, 0.2], [0.315, 0.05], [0.3, -0.12]], 28, 28, 1.05), hatM, 0, -0.01, 0.04);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.ConeGeometry(0.09, 0.18, 12), (v) => (v.z *= 0.55)), hatM, sx * 0.17, 0.3, 0.03, 0, 0, -sx * 0.45);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.ConeGeometry(0.05, 0.1, 10), (v) => (v.z *= 0.4)), this.m(0xffc2d6, 0.8), sx * 0.165, 0.29, 0.005, 0, 0, -sx * 0.45);
+        for (const sx of [-1, 1]) add(this.hat, deform(G.cone(0.09, 0.18, 12), (v) => (v.z *= 0.55)), hatM, sx * 0.17, 0.3, 0.03, 0, 0, -sx * 0.45);
+        for (const sx of [-1, 1]) add(this.hat, deform(G.cone(0.05, 0.1, 10), (v) => (v.z *= 0.4)), this.m(0xffc2d6, 0.8), sx * 0.165, 0.29, 0.005, 0, 0, -sx * 0.45);
         break;
       }
       case 'leaf': {
         add(this.hat, lathe([[0.001, 0.3], [0.2, 0.26], [0.29, 0.12], [0.3, 0.05]], 26), this.m(PAL.brown, 0.75), 0, 0, 0.01);
-        const leaf = add(this.hat, deform(new THREE.SphereGeometry(0.16, 14, 8), (v) => ((v.x *= 0.45), (v.y *= 0.1), (v.z *= 1.4), (v.y += v.z * v.z * 2))), hatM, 0.06, 0.34, 0.05, 0.3, 0, -0.4);
+        const leaf = add(this.hat, deform(G.sphere(0.16, 14, 8), (v) => ((v.x *= 0.45), (v.y *= 0.1), (v.z *= 1.4), (v.y += v.z * v.z * 2))), hatM, 0.06, 0.34, 0.05, 0.3, 0, -0.4);
         leaf.castShadow = true;
-        add(this.hat, new THREE.CapsuleGeometry(0.014, 0.1, 3, 6), this.m(PAL.brownDark, 0.7), 0, 0.33, 0);
+        add(this.hat, G.capsule(0.014, 0.1, 3, 6), this.m(PAL.brownDark, 0.7), 0, 0.33, 0);
         break;
       }
     }
     if (L.hat !== 'pot') {
       const gy = L.hat === 'hood' ? 0.1 : 0.1;
-      add(this.hat, new THREE.TorusGeometry(0.298, 0.022, 6, 30), this.m(0x3b2a22, 0.8), 0, gy - 0.02, 0.01, Math.PI / 2 + 0.3);
+      add(this.hat, G.torus(0.298, 0.022, 6, 30), this.m(0x3b2a22, 0.8), 0, gy - 0.02, 0.01, Math.PI / 2 + 0.3);
       for (const sx of [-1, 1]) {
-        add(this.hat, new THREE.TorusGeometry(0.058, 0.02, 8, 18), metal, sx * 0.09, gy + 0.04, -0.262, -0.55);
-        add(this.hat, deform(new THREE.SphereGeometry(0.056, 14, 10), (v) => (v.z *= 0.45)), gog, sx * 0.09, gy + 0.04, -0.262, -0.55);
+        add(this.hat, G.torus(0.058, 0.02, 8, 18), metal, sx * 0.09, gy + 0.04, -0.262, -0.55);
+        add(this.hat, deform(G.sphere(0.056, 14, 10), (v) => (v.z *= 0.45)), gog, sx * 0.09, gy + 0.04, -0.262, -0.55);
       }
     }
 
@@ -950,14 +951,14 @@ function curveFn(pts: [number, number][]) {
 }
 
 function softSphere(r: number, sx: number, sy: number, sz: number) {
-  const g = new THREE.SphereGeometry(r, 14, 10);
+  const g = G.sphere(r, 14, 10);
   g.scale(sx, sy, sz);
   return g;
 }
 
 /** A tapered, slightly curved cloth ribbon (scarf tails). */
 function taperedRibbon(w: number, h: number, d: number) {
-  return deform(new RoundedBoxGeometry(w, h, d, 3, Math.min(d / 2 - 0.001, 0.015)), (v) => {
+  return deform(G.rbox(w, h, d, 3, Math.min(d / 2 - 0.001, 0.015)), (v) => {
     const t = (h / 2 - v.y) / h; // 0 top .. 1 bottom
     v.x *= 1 - t * 0.2;
     v.z += Math.sin(t * Math.PI) * 0.012;

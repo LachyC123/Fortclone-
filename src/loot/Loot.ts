@@ -10,6 +10,7 @@ import { audio } from '../audio/Audio';
 import { toyMaterial } from '../render/Materials';
 import { mergeToVertexColored } from '../render/Merge';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { G, detail } from '../render/Detail';
 
 export type LootKind = 'weapon' | 'ammo' | 'heal' | 'util';
 
@@ -170,7 +171,7 @@ const crateMats = {
 function buildCrate(): { root: THREE.Group; lid: THREE.Group; lock: THREE.Object3D; lights: THREE.Mesh[] } {
   const root = new THREE.Group();
   const base = new THREE.Group();
-  const rb = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 3, r);
+  const rb = (w: number, h: number, d: number, r: number) => G.rbox(w, h, d, 3, r);
   const add = (p: THREE.Object3D, g: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
     const mesh = new THREE.Mesh(g, m);
     mesh.position.set(x, y, z);
@@ -221,13 +222,13 @@ function buildCrate(): { root: THREE.Group; lid: THREE.Group; lock: THREE.Object
   // padlock (shakes before opening)
   const lock = new THREE.Group();
   add(lock, rb(0.2, 0.18, 0.08, 0.04), crateMats.lock, 0, 0, 0);
-  add(lock, new THREE.TorusGeometry(0.065, 0.02, 6, 12, Math.PI), crateMats.plate, 0, 0.09, 0);
+  add(lock, G.torus(0.065, 0.02, 6, 12, Math.PI), crateMats.plate, 0, 0.09, 0);
   lock.position.set(0, 0.62, 0.47);
   root.add(lock);
   // blinking lights
   const lights: THREE.Mesh[] = [];
   for (let i = 0; i < 4; i++) {
-    const l = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: [0xff5c8a, 0x6ff7ff, 0xfff27a, 0x7ee06a][i] }));
+    const l = new THREE.Mesh(G.sphere(0.04, 8, 6), new THREE.MeshBasicMaterial({ color: [0xff5c8a, 0x6ff7ff, 0xfff27a, 0x7ee06a][i] }));
     l.position.set(-0.45 + i * 0.3, 0.2, 0.44);
     root.add(l);
     lights.push(l);
@@ -264,13 +265,13 @@ export class LootSystem {
     if (kind === 'ammo') {
       const t = defId as AmmoType;
       const tin = new THREE.Group();
-      const box = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.26, 12), toyMaterial(0x9aa4b0, { rough: 0.35, metal: 0.5 }));
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.165, 0.1, 12), toyMaterial(AMMO_INFO[t].color));
-      const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.04, 12), toyMaterial(0x6b7380, { rough: 0.35, metal: 0.5 }));
+      const box = new THREE.Mesh(G.cylinder(0.16, 0.16, 0.26, 12), toyMaterial(0x9aa4b0, { rough: 0.35, metal: 0.5 }));
+      const band = new THREE.Mesh(G.cylinder(0.165, 0.165, 0.1, 12), toyMaterial(AMMO_INFO[t].color));
+      const lid = new THREE.Mesh(G.cylinder(0.13, 0.13, 0.04, 12), toyMaterial(0x6b7380, { rough: 0.35, metal: 0.5 }));
       lid.position.y = 0.15;
       tin.add(box, band, lid);
       for (let i = 0; i < 3; i++) {
-        const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.08, 2, 6), toyMaterial(AMMO_INFO[t].color, { metal: 0.4, rough: 0.3 }));
+        const b = new THREE.Mesh(G.capsule(0.025, 0.08, 2, 6), toyMaterial(AMMO_INFO[t].color, { metal: 0.4, rough: 0.3 }));
         b.position.set(-0.05 + i * 0.05, 0.22, 0);
         tin.add(b);
       }
@@ -299,7 +300,7 @@ export class LootSystem {
     glow.scale.setScalar(kind === 'weapon' ? 2.4 + rarity * 0.35 : 1.4);
     root.add(glow);
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.16, 2.6 + rarity * 0.5, 8, 1, true),
+      G.cylinder(0.06, 0.16, 2.6 + rarity * 0.5, 8, 1, true),
       new THREE.MeshBasicMaterial({ map: beamTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.18 + rarity * 0.07, side: THREE.DoubleSide }),
     );
     beam.position.y = 1.3 + rarity * 0.2;
@@ -512,7 +513,7 @@ export class LootSystem {
     const cam = ctx.camera.position;
     for (const c of this.crates) {
       c.t += dt;
-      c.root.visible = c.pos.distanceToSquared(cam) < 75 * 75;
+      c.root.visible = c.pos.distanceToSquared(cam) < (75 * detail.cull) ** 2;
       if (!c.root.visible) continue;
       // blinking lights & idle hum
       c.lights.forEach((l, i) => {
@@ -604,7 +605,8 @@ export class LootSystem {
       }
       // distance cull (glow + beam + model are 3 draw calls per item)
       const camD = p.pos.distanceToSquared(ctx.camera.position);
-      p.root.visible = camD < 60 * 60;
+      p.root.visible = camD < (60 * detail.cull) ** 2;
+      p.glow.visible = camD < (30 * detail.cull) ** 2;
       if (!p.root.visible) continue;
       p.beam.visible = camD > 3 * 3 && ((p.kind === 'weapon' && p.rarity >= 1) || (p.kind !== 'ammo' && p.rarity >= 2));
       const bob = p.settled ? Math.sin(p.t * 2.2) * 0.08 + 0.35 : 0;

@@ -121,6 +121,7 @@ node tools/m6shots.mjs                        # KO tumble, birds, casings, victo
 node tools/thirdparty.mjs                     # third-partying a bot fight (no spinning) + Blinkbug escape
 node tools/placeshots.mjs [--only=tickerton]   # the peninsula places from the air and the ground
 node tools/densitymap.mjs                     # ASCII map of buildings / cover / open ground + counts
+node tools/tierprobe.mjs [low medium high]    # per-quality boot time, triangles and draw calls
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

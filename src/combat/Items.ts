@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { toyMaterial } from '../render/Materials';
 import { PAL, RarityIndex } from '../render/Palette';
 import { mergeToVertexColored } from '../render/Merge';
+import { G } from '../render/Detail';
 
 export type HealId = 'jamjar' | 'fizzle' | 'biscuit';
 export type UtilId = 'fizzbomb' | 'bouncejam' | 'chicken' | 'gust' | 'stickypop';
@@ -63,9 +64,9 @@ function mk(parts: [THREE.BufferGeometry, number, number, number, number, number
   return g;
 }
 
-const cyl = (rt: number, rb: number, h: number, s = 14) => new THREE.CylinderGeometry(rt, rb, h, s);
+const cyl = (rt: number, rb: number, h: number, s = 14) => G.cylinder(rt, rb, h, s);
 const sph = (r: number, sx = 1, sy = 1, sz = 1) => {
-  const g = new THREE.SphereGeometry(r, 14, 10);
+  const g = G.sphere(r, 14, 10);
   g.scale(sx, sy, sz);
   return g;
 };
@@ -119,7 +120,7 @@ export function buildItemModel(id: HealId | UtilId, merged = true): THREE.Object
       g = mk([
         [sph(0.1, 1, 0.9, 1.25), 0xffffff, 0, 0.12, 0],
         [sph(0.06), 0xffffff, 0, 0.23, -0.09],
-        [new THREE.ConeGeometry(0.02, 0.05, 6), PAL.mustard, 0, 0.22, -0.16, -Math.PI / 2],
+        [G.cone(0.02, 0.05, 6), PAL.mustard, 0, 0.22, -0.16, -Math.PI / 2],
         [sph(0.025, 1, 1.4, 0.6), 0xe53935, 0, 0.3, -0.09],
         [cyl(0.012, 0.012, 0.08), PAL.mustard, 0.04, 0.03, 0],
         [cyl(0.012, 0.012, 0.08), PAL.mustard, -0.04, 0.03, 0],
@@ -131,7 +132,7 @@ export function buildItemModel(id: HealId | UtilId, merged = true): THREE.Object
         [cyl(0.07, 0.08, 0.2), 0xbfeaf2, 0, 0.1, 0],
         [cyl(0.035, 0.06, 0.06), 0xbfeaf2, 0, 0.23, 0],
         [cyl(0.037, 0.037, 0.04), 0x8a5a3b, 0, 0.28, 0],
-        [new THREE.TorusGeometry(0.04, 0.012, 6, 12), 0xffffff, 0, 0.1, 0],
+        [G.torus(0.04, 0.012, 6, 12), 0xffffff, 0, 0.1, 0],
       ]);
       break;
     case 'stickypop':

@@ -13,6 +13,7 @@ const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
+if (process.env.Q) await page.addInitScript((q) => localStorage.setItem('rr.settings', JSON.stringify({ quality: q, autoQuality: false })), process.env.Q);
 await page.goto(`http://localhost:${PORT}/`);
 await page.waitForFunction(() => window.__game, null, { timeout: 120000 });
 await page.evaluate(() => { const g = window.__game; g.startPlayground(); g.freeze = true; g.hud.root.style.display = 'none'; });

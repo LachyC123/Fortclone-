@@ -37,6 +37,26 @@ const _v = new THREE.Vector3();
  * DOM HUD styled like chunky hand-made toy packaging. Everything animates: hitmarkers pop,
  * slots bounce on pickup, the health bar has a "ghost" drain, damage numbers arc upward.
  */
+/* per-frame DOM writes only when the value actually changes (phones hate needless layout work) */
+type El = HTMLElement | SVGElement;
+const domCache = new WeakMap<El, Record<string, string>>();
+function cached(el: El, key: string, v: string) {
+  let c = domCache.get(el);
+  if (!c) domCache.set(el, (c = {}));
+  if (c[key] === v) return false;
+  c[key] = v;
+  return true;
+}
+function setText(el: El, v: string) {
+  if (cached(el, '#t', v)) el.textContent = v;
+}
+function setHtml(el: El, v: string) {
+  if (cached(el, '#h', v)) el.innerHTML = v;
+}
+function setStyle(el: El, prop: string, v: string) {
+  if (cached(el, prop, v)) (el.style as unknown as Record<string, string>)[prop] = v;
+}
+
 export class HUD implements HudEvents {
   root = h('div', 'hud hidden');
   private crosshair = h('div', 'crosshair');
@@ -237,9 +257,9 @@ export class HUD implements HudEvents {
     d.t = 0;
     d.pos.copy(pos);
     d.vx = (Math.random() - 0.5) * 60;
-    d.el.textContent = String(amount);
+    setText(d.el, String(amount));
     d.el.className = `dmgnum${headshot ? ' head' : ''}`;
-    d.el.style.display = 'block';
+    setStyle(d.el, 'display', 'block');
   }
 
   damageFrom(dirWorld: THREE.Vector3) {
@@ -341,11 +361,11 @@ export class HUD implements HudEvents {
     // health
     const hp = Math.max(0, p.hp);
     const k = hp / p.maxHp;
-    this.hpFill.style.transform = `scaleX(${k})`;
-    this.hpGhost.style.transform = `scaleX(${k})`;
-    this.hpNum.textContent = String(Math.ceil(hp));
+    setStyle(this.hpFill, 'transform', `scaleX(${k})`);
+    setStyle(this.hpGhost, 'transform', `scaleX(${k})`);
+    setText(this.hpNum, String(Math.ceil(hp)));
     this.health.classList.toggle('low', k < 0.35);
-    this.vignette.style.opacity = String(k < 0.35 ? 0.5 + Math.sin(performance.now() / 180) * 0.2 : 0);
+    setStyle(this.vignette, 'opacity', String(k < 0.35 ? 0.5 + Math.sin(performance.now() / 180) * 0.2 : 0));
     if (hp < this.lastHp) {
       this.health.animate([{ transform: 'translateX(-50%) translateX(-6px)' }, { transform: 'translateX(-50%) translateX(6px)' }, { transform: 'translateX(-50%)' }], { duration: 180 });
     }
@@ -359,7 +379,7 @@ export class HUD implements HudEvents {
         const s = this.slotEls[i];
         s.classList.toggle('empty', !w);
         s.classList.toggle('active', i === p.activeSlot && !!w);
-        (s.querySelector('.rar') as HTMLDivElement).style.background = w ? RARITY[w.rarity].css : 'transparent';
+        setStyle((s.querySelector('.rar') as HTMLDivElement), 'background', w ? RARITY[w.rarity].css : 'transparent');
         const icon = w ? (ICONS as Record<string, string>)[w.def.id] ?? ICONS.tincan : ICONS.tincan;
         const old = s.querySelector('svg');
         if (old) old.outerHTML = icon;
@@ -376,8 +396,8 @@ export class HUD implements HudEvents {
         [this.healSlot, p.healItem, ICONS.heal],
       ] as [HTMLDivElement, { id: string; count: number } | null, string][]) {
         el.classList.toggle('empty', !st);
-        (el.querySelector('.ic') as HTMLElement).innerHTML = st ? (ICONS as Record<string, string>)[st.id] : fallback;
-        (el.querySelector('.cnt') as HTMLElement).textContent = st && st.count > 1 ? `x${st.count}` : '';
+        setHtml((el.querySelector('.ic') as HTMLElement), st ? (ICONS as Record<string, string>)[st.id] : fallback);
+        setText((el.querySelector('.cnt') as HTMLElement), st && st.count > 1 ? `x${st.count}` : '');
         el.style.setProperty('--rc', st ? '#' + ITEM_COLOR[st.id as HealId].toString(16).padStart(6, '0') : 'transparent');
       }
     }
@@ -386,7 +406,7 @@ export class HUD implements HudEvents {
     const w = p.weapon;
     if (w) {
       const reserve = p.ammo[w.def.ammo];
-      this.ammoEl.innerHTML = `${w.mag}<small> / ${reserve}</small>`;
+      setHtml(this.ammoEl, `${w.mag}<small> / ${reserve}</small>`);
       this.ammoEl.classList.toggle('empty', w.mag === 0);
       this.ammoEl.classList.toggle('low', w.mag > 0 && w.mag <= Math.ceil(w.def.mag * 0.25));
       // a little kick on every shot, a bigger pop when a reload lands
@@ -397,23 +417,23 @@ export class HUD implements HudEvents {
       }
       this.lastMagSig = sig;
       this.lastMag = w.mag;
-      this.ammoEl.style.display = 'block';
-    } else this.ammoEl.style.display = 'none';
+      setStyle(this.ammoEl, 'display', 'block');
+    } else setStyle(this.ammoEl, 'display', 'none');
     const bar = this.reloadBar.firstElementChild as HTMLElement;
     if (p.healT >= 0 && p.healItem) {
-      this.reloadBar.style.opacity = '1';
+      setStyle(this.reloadBar, 'opacity', '1');
       this.reloadBar.classList.add('heal');
-      bar.style.transform = `scaleX(${clamp(p.healT / HEALS[p.healItem.id].useTime, 0, 1)})`;
+      setStyle(bar, 'transform', `scaleX(${clamp(p.healT / HEALS[p.healItem.id].useTime, 0, 1)})`);
     } else if (w && w.reloading) {
-      this.reloadBar.style.opacity = '1';
+      setStyle(this.reloadBar, 'opacity', '1');
       this.reloadBar.classList.remove('heal');
-      bar.style.transform = `scaleX(${clamp(w.reloadT / w.reloadTime, 0, 1)})`;
-    } else this.reloadBar.style.opacity = '0';
+      setStyle(bar, 'transform', `scaleX(${clamp(w.reloadT / w.reloadTime, 0, 1)})`);
+    } else setStyle(this.reloadBar, 'opacity', '0');
 
     // spyglass scope for precision weapons
     const scoped = !!(w && p.ads && w.def.adsFov <= 40);
     this.scope.classList.toggle('on', scoped);
-    this.crosshair.style.visibility = scoped ? 'hidden' : 'visible';
+    setStyle(this.crosshair, 'visibility', scoped ? 'hidden' : 'visible');
 
     // crosshair spread + enemy tint
     const gap = 6 + spreadDeg * 5;
@@ -423,7 +443,7 @@ export class HUD implements HudEvents {
     ch[2].style.left = `${-gap - 9}px`;
     ch[3].style.left = `${gap}px`;
     this.crosshair.classList.toggle('unarmed', !w);
-    this.crosshair.style.opacity = p.throwAiming ? '0.3' : '1';
+    setStyle(this.crosshair, 'opacity', p.throwAiming ? '0.3' : '1');
 
     // context prompt + loot comparison card
     this.updatePrompt(p, pickup, crate);
@@ -434,26 +454,26 @@ export class HUD implements HudEvents {
     const nameKey = `${p.bugName}|${bug.species.id}`;
     if (nameKey !== this.bugNameKey) {
       this.bugNameKey = nameKey;
-      (this.bugWidget.querySelector('.nm') as HTMLElement).textContent = `${p.bugName} · ${bug.species.name}`;
-      (this.bugWidget.querySelector('.ic') as HTMLElement).style.color = `#${bug.tint.toString(16).padStart(6, '0')}`;
+      setText((this.bugWidget.querySelector('.nm') as HTMLElement), `${p.bugName} · ${bug.species.name}`);
+      setStyle((this.bugWidget.querySelector('.ic') as HTMLElement), 'color', `#${bug.tint.toString(16).padStart(6, '0')}`);
       (this.bugWidget.querySelector('.arc') as SVGCircleElement).dataset.tint = `#${bug.tint.toString(16).padStart(6, '0')}`;
     }
     const arc = this.bugWidget.querySelector('.arc') as SVGCircleElement;
     if (bug.canBlink) {
-      st.textContent = `BLINK! ${bug.window.toFixed(1)}s`;
-      st.style.color = '#5b4bff';
-      arc.style.strokeDashoffset = String(176 * (1 - bug.window / bug.stats.window));
-      arc.style.stroke = '#6ff7ff';
+      setText(st, `BLINK! ${bug.window.toFixed(1)}s`);
+      setStyle(st, 'color', '#5b4bff');
+      setStyle(arc, 'strokeDashoffset', String(176 * (1 - bug.window / bug.stats.window)));
+      setStyle(arc, 'stroke', '#6ff7ff');
     } else if (bug.ready) {
-      st.textContent = p.throwAiming ? 'AIMING…' : 'READY';
-      st.style.color = '#2a9d8f';
-      arc.style.strokeDashoffset = '0';
-      arc.style.stroke = '#6ff7ff';
+      setText(st, p.throwAiming ? 'AIMING…' : 'READY');
+      setStyle(st, 'color', '#2a9d8f');
+      setStyle(arc, 'strokeDashoffset', '0');
+      setStyle(arc, 'stroke', '#6ff7ff');
     } else {
-      st.textContent = bug.state === 'returning' ? 'COMING HOME' : `NAPPING ${bug.cooldown.toFixed(1)}s`;
-      st.style.color = '#8a7a9a';
-      arc.style.strokeDashoffset = String(176 * (bug.cooldown / Math.max(0.01, bug.cooldownMax)));
-      arc.style.stroke = '#b49be0';
+      setText(st, bug.state === 'returning' ? 'COMING HOME' : `NAPPING ${bug.cooldown.toFixed(1)}s`);
+      setStyle(st, 'color', '#8a7a9a');
+      setStyle(arc, 'strokeDashoffset', String(176 * (bug.cooldown / Math.max(0.01, bug.cooldownMax))));
+      setStyle(arc, 'stroke', '#b49be0');
     }
 
     // bug locator (screen-space, clamped to edges)
@@ -475,15 +495,15 @@ export class HUD implements HudEvents {
         sx = cx + dx * s;
         sy = cy + dy * s;
       }
-      this.locator.style.display = 'block';
-      this.locator.style.transform = `translate(${sx}px, ${sy - (onScreen ? 34 : 0)}px)`;
-      (this.locator.querySelector('.arc') as SVGCircleElement).style.strokeDashoffset = String(119.4 * (1 - bug.window / bug.stats.window));
+      setStyle(this.locator, 'display', 'block');
+      setStyle(this.locator, 'transform', `translate(${sx}px, ${sy - (onScreen ? 34 : 0)}px)`);
+      setStyle((this.locator.querySelector('.arc') as SVGCircleElement), 'strokeDashoffset', String(119.4 * (1 - bug.window / bug.stats.window)));
       this.locator.classList.toggle('urgent', bug.window < 1.5);
-    } else this.locator.style.display = 'none';
+    } else setStyle(this.locator, 'display', 'none');
 
     // speed lines when sprinting/sliding fast
     const hs = p.motor.horizontalSpeed();
-    this.speedLines.style.opacity = String(clamp((hs - 7.2) / 5, 0, 0.6));
+    setStyle(this.speedLines, 'opacity', String(clamp((hs - 7.2) / 5, 0, 0.6)));
 
     // damage numbers
     const W = window.innerWidth, H = window.innerHeight;
@@ -492,26 +512,26 @@ export class HUD implements HudEvents {
       d.t += dt;
       if (d.t > 0.9) {
         d.active = false;
-        d.el.style.display = 'none';
+        setStyle(d.el, 'display', 'none');
         continue;
       }
       _v.copy(d.pos).project(this.camera);
       if (_v.z > 1) {
-        d.el.style.display = 'none';
+        setStyle(d.el, 'display', 'none');
         continue;
       }
-      d.el.style.display = 'block';
+      setStyle(d.el, 'display', 'block');
       const sx = (_v.x * 0.5 + 0.5) * W + d.vx * d.t;
       const sy = (-_v.y * 0.5 + 0.5) * H - 40 * d.t + 60 * d.t * d.t;
       const sc = d.t < 0.12 ? 0.6 + (d.t / 0.12) * 0.8 : Math.max(1, 1.4 - (d.t - 0.12) * 2);
-      d.el.style.transform = `translate(-50%, -50%) translate(${sx}px, ${sy}px) scale(${sc})`;
-      d.el.style.opacity = String(d.t > 0.6 ? 1 - (d.t - 0.6) / 0.3 : 1);
+      setStyle(d.el, 'transform', `translate(-50%, -50%) translate(${sx}px, ${sy}px) scale(${sc})`);
+      setStyle(d.el, 'opacity', String(d.t > 0.6 ? 1 - (d.t - 0.6) / 0.3 : 1));
     }
 
     // counters
     const alive = others.filter((a) => !a.out && !a.parked).length;
-    (this.aliveEl.lastElementChild as HTMLElement).textContent = String(alive);
-    (this.elimsEl.lastElementChild as HTMLElement).textContent = String(p.kills);
+    setText((this.aliveEl.lastElementChild as HTMLElement), String(alive));
+    setText((this.elimsEl.lastElementChild as HTMLElement), String(p.kills));
     if (p.kills > this.lastKills) this.bump(this.elimsEl, 'bump');
     if (this.lastAlive >= 0 && alive < this.lastAlive) this.bump(this.aliveEl, 'tick');
     this.lastKills = p.kills;
@@ -523,17 +543,17 @@ export class HUD implements HudEvents {
     if (zn !== this.lastZone) {
       this.lastZone = zn;
       if (zn) {
-        this.zoneLabel.textContent = zn;
+        setText(this.zoneLabel, zn);
         this.zoneT = 3;
       }
     }
     this.zoneT -= dt;
-    this.zoneLabel.style.opacity = this.zoneT > 0 ? '1' : '0';
+    setStyle(this.zoneLabel, 'opacity', this.zoneT > 0 ? '1' : '0');
 
     this.drawMinimap(p, others);
-    this.fpsEl.style.display = this.showFps ? 'block' : 'none';
-    if (this.showFps) this.fpsEl.textContent = `${fps.toFixed(0)} fps`;
-    this.bugWidget.style.display = touch ? 'none' : 'flex';
+    setStyle(this.fpsEl, 'display', this.showFps ? 'block' : 'none');
+    if (this.showFps) setText(this.fpsEl, `${fps.toFixed(0)} fps`);
+    setStyle(this.bugWidget, 'display', touch ? 'none' : 'flex');
   }
 
   private updatePrompt(p: Actor, pickup: Pickup | null, crate: Crate | null) {

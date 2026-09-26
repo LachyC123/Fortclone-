@@ -40,6 +40,19 @@ export function buildTerrain(k: Kit, paths: [number, number][][]) {
   const cove = POI_BY_ID.cove;
   // vertices well past the rim are only kept where a triangle still touches land
   const outside = new Uint8Array(pos.count);
+  // distance to the nearest path/road, rasterised once around each segment (not per vertex x segment)
+  const pathD = new Float32Array(n * n).fill(99);
+  for (const p of allPaths)
+    for (let s2 = 0; s2 < p.length - 1; s2++) {
+      const [ax, az] = p[s2], [bx, bz] = p[s2 + 1];
+      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - 3 + size) / HF_STEP)), i1 = Math.min(n - 1, Math.ceil((Math.max(ax, bx) + 3 + size) / HF_STEP));
+      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - 3 + size) / HF_STEP)), j1 = Math.min(n - 1, Math.ceil((Math.max(az, bz) + 3 + size) / HF_STEP));
+      for (let j = j0; j <= j1; j++)
+        for (let i = i0; i <= i1; i++) {
+          const d = distToSeg(-size + i * HF_STEP, -size + j * HF_STEP, ax, az, bx, bz);
+          if (d < pathD[j * n + i]) pathD[j * n + i] = d;
+        }
+    }
   for (let idx = 0; idx < pos.count; idx++) {
     const i = idx % n, j = Math.floor(idx / n);
     let x = -size + i * HF_STEP, z = -size + j * HF_STEP;
@@ -66,8 +79,7 @@ export function buildTerrain(k: Kit, paths: [number, number][][]) {
     const sz = heightAt(i, Math.min(n - 1, j + 1)) - heightAt(i, Math.max(0, j - 1));
     const slope = r > R - 2 ? 0 : Math.hypot(sx, sz) / (2 * e);
     if (slope > 0.5) c.lerp(slope > 0.85 ? rockC : mossy, smoothstep(0.5, 1.0, slope) * 0.6);
-    let pd = 99;
-    for (const p of allPaths) for (let s2 = 0; s2 < p.length - 1; s2++) pd = Math.min(pd, distToSeg(x, z, p[s2][0], p[s2][1], p[s2 + 1][0], p[s2 + 1][1]));
+    const pd = pathD[idx];
     const pathW = 1.3 + noise2(x * 0.5, z * 0.5) * 0.6;
     if (pd < pathW + 0.6) c.lerp(dirt, smoothstep(pathW + 0.6, pathW - 0.2, pd) * 0.92);
     const sd = Math.abs(x - STREAM_X);

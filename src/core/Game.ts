@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Renderer, Quality, QUALITY_PRESETS } from '../render/Renderer';
+import { detail } from '../render/Detail';
 import { FX } from '../fx/FX';
 import { World } from '../world/World';
 import { LootSystem, rollWeapon, ammoFor, rollFloor } from '../loot/Loot';
@@ -71,6 +72,8 @@ export class Game implements GameCtx {
   private lowFpsTime = 0;
   private titleOrbit = 0;
   bubbles: Bubbles;
+  /** the tier the geometry was built at (detail changes need a reload) */
+  bootQuality: Quality;
   birds: Birds;
   private emoteIdx = 0;
   /** the battle royale in progress (null in the playground / on the title screen) */
@@ -85,6 +88,12 @@ export class Game implements GameCtx {
   constructor(canvas: HTMLCanvasElement) {
     this.settings = loadSettings();
     this.r = new Renderer(canvas, this.settings.quality);
+    // geometry detail is baked at boot from the quality tier (phones get lighter rascals and props)
+    const qp = QUALITY_PRESETS[this.settings.quality];
+    detail.model = qp.model;
+    detail.lite = qp.lite;
+    detail.cull = qp.cull;
+    this.bootQuality = this.settings.quality;
     this.scene = this.r.scene;
     this.camera = this.r.camera;
     this.world = null as unknown as World;
@@ -424,7 +433,11 @@ export class Game implements GameCtx {
     const s = this.settings;
     if (this.r.quality !== s.quality) this.r.applyQuality(s.quality);
     this.fx?.setParticleLimit(QUALITY_PRESETS[s.quality].particles);
-    if (this.world) this.world.drawDist = QUALITY_PRESETS[s.quality].drawDist;
+    if (this.world) {
+      this.world.drawDist = QUALITY_PRESETS[s.quality].drawDist;
+      this.world.smallDist = QUALITY_PRESETS[s.quality].smallDist;
+      this.world.setPropShadows(s.quality === 'high');
+    }
     this.camRig.sensitivity = s.sensitivity;
     this.touch.sensitivity = s.sensitivity;
     this.camRig.baseFov = s.fov;
@@ -562,8 +575,10 @@ export class Game implements GameCtx {
     // thin the haze with altitude so the whole island reads from the Sky Barge
     const fog = this.scene.fog as THREE.Fog;
     const fk = Math.min(1, Math.max(0, (this.camera.position.y - 18) / 40));
-    fog.near = 60 + fk * 150;
-    fog.far = 230 + fk * 260;
+    // lower tiers draw less far, so the haze closes in to match (and hides the cut-off)
+    const dd = Math.min(230, this.world.drawDist * 1.05);
+    fog.near = dd * 0.26 + fk * 150;
+    fog.far = dd + fk * 260;
     this.fx.update(dt, this.camera);
     this.r.followShadows(p.motor.pos);
 
