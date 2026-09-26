@@ -75,16 +75,15 @@ export class Menus {
   private buildPause() {
     const s = this.game.settings;
     this.pauseEl.innerHTML = `<div class="menu panel">
-      <h2>PAUSED</h2>
-      <div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
+      <div class="menuhead"><h2>PAUSED</h2><button class="btn resume">RESUME</button></div>
+      <div class="rows"><div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
       <div class="row"><span>Auto-adjust graphics</span><div class="seg" data-k="autoQuality"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Look sensitivity</span><input type="range" min="0.3" max="2.5" step="0.05" data-k="sensitivity"></div>
       <div class="row"><span>Field of view</span><input type="range" min="60" max="90" step="1" data-k="fov"></div>
       <div class="row"><span>Volume</span><input type="range" min="0" max="1" step="0.05" data-k="volume"></div>
       <div class="row"><span>Aim assist (touch)</span><div class="seg" data-k="aimAssist"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Auto-fire</span><div class="seg" data-k="autoFire"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
-      <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
-      <div class="btns"><button class="btn resume">${'RESUME'}</button></div>
+      <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div></div>
     </div>`;
     const sync = () => {
       this.pauseEl.querySelectorAll<HTMLDivElement>('.seg').forEach((seg) => {

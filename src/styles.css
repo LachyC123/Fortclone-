@@ -1119,3 +1119,53 @@ input[type='range'] {
   bottom: calc(62px + var(--safe-b));
   font-size: 22px;
 }
+/* hidden overlays must never swallow taps (their children set pointer-events:auto) */
+.overlay.hidden,
+.overlay.hidden * {
+  pointer-events: none !important;
+}
+.overlay.hidden {
+  visibility: hidden;
+  transition: opacity 0.35s, visibility 0s 0.35s;
+}
+.menu {
+  max-height: calc(100% - 20px - var(--safe-t) - var(--safe-b));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+.menuhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.menuhead h2 {
+  margin: 0;
+}
+.menuhead .btn {
+  font-size: 22px;
+  padding: 8px 22px;
+}
+@media (max-height: 500px) {
+  .menu {
+    width: min(620px, 94vw);
+    padding: 10px 16px;
+  }
+  .menu .rows {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 20px;
+  }
+  .row {
+    padding: 4px 0;
+    font-size: 15px;
+  }
+  .menu h2 {
+    font-size: 26px;
+  }
+  input[type='range'] {
+    width: 110px;
+  }
+}
