@@ -164,3 +164,21 @@ bug's stats so the aiming arc, bots and gameplay agree. Arrival tricks live in `
 `ui/BugPreview.ts` (a tiny separate WebGL turntable) implement MY BUGS and the cocoon hatch.
 
 Crowd LOD: in the lobby and on the barge, non-local rascals swap to their single-mesh LOD beyond ~7m.
+
+## 12. The island (`world/Heightmap.ts`, `world/Island.ts`, `world/pois/*`)
+
+- **One height function** (`terrainHeight`) = rolling noise + hills + ridges, with roads cutting passes,
+  level pads under each place (the manor's pad is raised 7.5m), the stream valley and the cove lagoon.
+  It is sampled once into a 1m grid; `ground(x, z)` interpolates with the same triangle split as the render
+  mesh, so the mesh, collision and prop placement agree exactly.
+- **`HeightfieldCollider`** extends `OBB` (one-sided, only solid from above), so the motor, bullets, bot line
+  of sight, Blinkbug and nav bake treat the ground like any other collider. Raycasts sphere-trace using a
+  slope bound, then bisect.
+- Places are builders in `world/pois/`; `pois/common.ts` has ground-aware helpers (`on`, `cottage`, `outcrop`,
+  `woods`, `groundLine`, `ropeBridge`, `stilt`, loot/crate helpers). `World.settleLoot` nudges any loot spot
+  that ended up inside furniture or rock to the nearest clear spot.
+- Sightlines are broken on purpose: hills/ridges between places, copses (canopies block sight), outcrops,
+  hedgerows and stone walls, crates and stalls.
+- Scale knobs: nav grid half-size `ISLAND_R + 6` (cells outside the rim are skipped), Gloom phases
+  (150 → 72 → 44 → 24 → 10 → 0.5), world chunks 40m (solid/foliage) / 56m / 72m, distance culling for
+  butterflies, kickables, signs, crates and loot, fog thinned with altitude for the Sky Barge view.

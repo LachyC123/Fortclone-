@@ -12,7 +12,7 @@ export interface PartOpts {
   pitch?: number;
   roll?: number;
   /** which batch: world solids or wind-swayed foliage */
-  batch?: 'solid' | 'foliage' | 'nocast' | 'glow';
+  batch?: 'solid' | 'foliage' | 'nocast' | 'glow' | 'detail';
   ao?: number;
   top?: number;
   noise?: number;
@@ -30,6 +30,9 @@ export class Kit {
   oy = 0;
   oz = 0;
   oyaw = 0;
+
+  /** small ground clutter (grass, flowers): no shadows, hidden at distance */
+  detail: Batcher | null = null;
 
   constructor(public solid: Batcher, public foliage: Batcher, public nocast: Batcher, public glow: Batcher, public cw: CollisionWorld) {}
 
@@ -59,7 +62,7 @@ export class Kit {
   }
 
   private batch(o: PartOpts) {
-    return o.batch === 'foliage' ? this.foliage : o.batch === 'nocast' ? this.nocast : o.batch === 'glow' ? this.glow : this.solid;
+    return o.batch === 'foliage' ? this.foliage : o.batch === 'detail' ? (this.detail ?? this.foliage) : o.batch === 'nocast' ? this.nocast : o.batch === 'glow' ? this.glow : this.solid;
   }
 
   private shape(color: number, o: PartOpts): ShapeOpts {
@@ -69,7 +72,7 @@ export class Kit {
       s.topLight = 0;
       s.noise = 0;
     }
-    if (o.batch === 'foliage') s.wind = o.wind ?? 0;
+    if (o.batch === 'foliage' || o.batch === 'detail') s.wind = o.wind ?? 0;
     return s;
   }
 

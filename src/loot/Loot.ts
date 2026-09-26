@@ -489,8 +489,11 @@ export class LootSystem {
 
   private updateCrates(dt: number, ctx: GameCtx) {
     const local = ctx.localActor;
+    const cam = ctx.camera.position;
     for (const c of this.crates) {
       c.t += dt;
+      c.root.visible = c.pos.distanceToSquared(cam) < 75 * 75;
+      if (!c.root.visible) continue;
       // blinking lights & idle hum
       c.lights.forEach((l, i) => {
         const on = c.opened ? 0.2 : 0.55 + Math.sin(c.t * 6 + i * 2) * 0.2;

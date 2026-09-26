@@ -23,6 +23,7 @@ import { CollisionWorld, ColFlags } from '../physics/Collision';
 import { Throwables } from '../combat/Throwables';
 import { geoStats } from '../render/GeoKit';
 import { Match } from './Match';
+import { ISLAND_R } from '../world/Heightmap';
 import { SPECIES_BY_ID, Collection, loadCollection, saveCollection, randomBugName, randomSpecies } from '../progression/Bugs';
 
 const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo', 'Beans4Brains', 'Noodle', 'Gran Turbo', 'Mr. Wiggles', 'SoggyWaffle', 'Pip', 'Honk', 'Tater Tot', 'Lady Fizz', 'Gloomzilla', 'Crumpet', 'Bop'];
@@ -83,17 +84,20 @@ export class Game implements GameCtx {
     this.world = null as unknown as World;
     this.fx = null as unknown as FX;
     // World needs FX at runtime and FX needs the world's collision: build world first, then bind
+    const tw = performance.now();
     this.world = new World(this.scene, null as unknown as FX);
+    const tw2 = performance.now();
     this.cw = this.world.cw;
     this.fx = new FX(this.scene, this.cw, QUALITY_PRESETS[this.settings.quality].particles);
     (this.world as unknown as { fx: FX }).fx = this.fx;
     this.loot = new LootSystem(this.scene, this.cw);
     this.throwables = new Throwables(this.scene);
-    this.nav = new NavGrid(this.cw, 48);
+    this.nav = new NavGrid(this.cw, ISLAND_R + 6);
     // doors swing open for anyone who approaches, so bake the nav mesh with them open
     for (const d of this.world.doors) d.collider.enabled = false;
     this.nav.bake();
     for (const d of this.world.doors) d.collider.enabled = true;
+    if (location.search.includes('timing')) console.log(`[t] world ${(tw2 - tw).toFixed(0)}ms nav ${(performance.now() - tw2).toFixed(0)}ms`);
 
     this.input = new Input(canvas);
     this.camRig = new CameraRig(this.camera, this.cw);
@@ -345,6 +349,7 @@ export class Game implements GameCtx {
     const s = this.settings;
     if (this.r.quality !== s.quality) this.r.applyQuality(s.quality);
     this.fx?.setParticleLimit(QUALITY_PRESETS[s.quality].particles);
+    if (this.world) this.world.drawDist = QUALITY_PRESETS[s.quality].drawDist;
     this.camRig.sensitivity = s.sensitivity;
     this.touch.sensitivity = s.sensitivity;
     this.camRig.baseFov = s.fov;
@@ -431,6 +436,7 @@ export class Game implements GameCtx {
 
   private simulate(dt: number) {
     this.time += dt;
+    this.nav.budget = 3;
 
     // --- simulation
     for (const a of this.actors) a.update(dt, this);
@@ -461,6 +467,11 @@ export class Game implements GameCtx {
     audio.setListener(this.camera.position, _right);
     audio.setWind(Math.max(0, (p.motor.horizontalSpeed() - 7) / 8) + (p.motor.airTime > 0.5 ? Math.min(1, -p.motor.vel.y / 30) : 0));
 
+    // thin the haze with altitude so the whole island reads from the Sky Barge
+    const fog = this.scene.fog as THREE.Fog;
+    const fk = Math.min(1, Math.max(0, (this.camera.position.y - 18) / 40));
+    fog.near = 60 + fk * 150;
+    fog.far = 230 + fk * 260;
     this.fx.update(dt, this.camera);
     this.r.followShadows(p.motor.pos);
 

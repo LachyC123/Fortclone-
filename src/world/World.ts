@@ -53,6 +53,9 @@ interface Kickable {
   color: number;
 }
 
+import { buildIsland } from './Island';
+import { ISLAND_R } from './Heightmap';
+
 /** A named region used for indoor reverb, minimap labels and (later) POI logic. */
 export interface Zone {
   name: string;
@@ -82,13 +85,18 @@ export class World {
   crateSpots: { pos: THREE.Vector3; yaw: number }[] = [];
   nests: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }[] = [];
   /** Launch Isle (pre-match lobby) */
-  lobby = { center: new THREE.Vector3(0, 40, -175), radius: 16, bargeDock: new THREE.Vector3(20, 42, -175) };
+  lobby = { center: new THREE.Vector3(0, 40, -205), radius: 16, bargeDock: new THREE.Vector3(20, 42, -205) };
   playerSpawns: { pos: THREE.Vector3; yaw: number }[] = [];
   botSpawns: THREE.Vector3[] = [];
-  islandRadius = 46;
-  mapBounds = 48;
+  islandRadius = ISLAND_R;
+  mapBounds = ISLAND_R + 6;
   signs: THREE.Object3D[] = [];
   private birdTimer = 2;
+  private cullT = 0;
+  private detailChunks: THREE.Mesh[] = [];
+  private bigChunks: THREE.Mesh[] = [];
+  /** chunks further than this (plus their radius) are skipped; set from the quality preset */
+  drawDist = 400;
   private t = 0;
   bellPos = new THREE.Vector3();
 
@@ -97,21 +105,62 @@ export class World {
     const foliage = new Batcher();
     const nocast = new Batcher();
     const glow = new Batcher();
+    const detail = new Batcher();
     const k = new Kit(solid, foliage, nocast, glow, this.cw);
+    k.detail = detail;
     const doorSpecs: DoorSpec[] = [];
 
     buildVillageBlock(k, this, doorSpecs);
+    buildIsland(k, this, doorSpecs);
 
     const wm = worldMaterial();
     const fm = foliageMaterial();
     const gm = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-    for (const m of solid.buildChunked(wm, 24)) this.group.add(m);
-    for (const m of foliage.buildChunked(fm, 24)) this.group.add(m);
-    for (const m of nocast.buildChunked(wm, 32, false, true)) this.group.add(m);
-    for (const m of glow.buildChunked(gm, 32, false, false)) this.group.add(m);
+    // big island: larger chunks keep the draw-call count sane when you can see everything
+    for (const m of [...solid.buildChunked(wm, 40), ...foliage.buildChunked(fm, 40)]) {
+      m.geometry.computeBoundingSphere();
+      this.bigChunks.push(m);
+      this.group.add(m);
+    }
+    for (const m of nocast.buildChunked(wm, 56, false, true)) this.group.add(m);
+    for (const m of detail.buildChunked(fm, 20, false, true)) {
+      m.geometry.computeBoundingSphere();
+      this.detailChunks.push(m);
+      this.group.add(m);
+    }
+    for (const m of glow.buildChunked(gm, 72, false, false)) this.group.add(m);
     for (const d of doorSpecs) this.makeDoor(d);
+    this.signs = this.group.children.filter((c) => c.userData.sign);
+    this.settleLoot();
     this.scene.add(this.group);
     this.makeClouds();
+  }
+
+  /** Nudge any loot spot that ended up inside furniture/rock (or floating) to the nearest clear spot. */
+  private settleLoot() {
+    const up = new THREE.Vector3(), down = new THREE.Vector3(0, -1, 0), q = new THREE.Vector3();
+    const ok = (p: THREE.Vector3) => {
+      const hit = this.cw.raycast(up.set(p.x, p.y + 0.8, p.z), down, 2.2, ColFlags.BlocksMove);
+      if (!hit) return false;
+      p.y = hit.point.y + 0.05;
+      return !this.cw.sphereOverlaps(q.set(p.x, p.y + 0.5, p.z), 0.28, ColFlags.BlocksMove);
+    };
+    this.lootSpots = this.lootSpots.filter((s) => {
+      const t = s.pos.clone();
+      if (ok(t)) {
+        s.pos.copy(t);
+        return true;
+      }
+      for (let r = 0.5; r <= 3; r += 0.5)
+        for (let a = 0; a < 8; a++) {
+          t.set(s.pos.x + Math.cos((a / 8) * Math.PI * 2) * r, s.pos.y, s.pos.z + Math.sin((a / 8) * Math.PI * 2) * r);
+          if (ok(t)) {
+            s.pos.copy(t);
+            return true;
+          }
+        }
+      return false;
+    });
   }
 
   /* ------------------------------------------------------------ builders called by the layout */
@@ -344,6 +393,22 @@ export class World {
   update(dt: number, actors: Actor[], camPos: THREE.Vector3) {
     this.t += dt;
     shared.time.value = this.t;
+
+    // distance culling for the small separate meshes (a few per frame is plenty)
+    this.cullT -= dt;
+    if (this.cullT <= 0) {
+      this.cullT = 0.25;
+      const far = (o: THREE.Object3D, d: number) => (o.visible = o.position.distanceToSquared(camPos) < d * d);
+      for (const f of this.flyers) if (f.kind === 'butterfly') far(f.mesh, 45);
+      for (const kk of this.kickables) far(kk.mesh, 55);
+      for (const s of this.signs) far(s, 85);
+      for (const m of this.detailChunks) m.visible = m.geometry.boundingSphere!.center.distanceToSquared(camPos) < 62 * 62;
+      for (const m of this.bigChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = this.drawDist + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
+    }
 
     // doors auto-open for anyone approaching, close when clear
     for (const d of this.doors) {

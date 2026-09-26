@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CollisionWorld, ColFlags } from '../physics/Collision';
+import { islandRadius } from './Heightmap';
 
 const LAYERS = 4;
 const STEP = 0.55; // max height change between neighbouring cells (stairs ~0.4 per 0.5m cell)
@@ -39,7 +40,8 @@ export class NavGrid {
     for (let j = 0; j < this.h; j++)
       for (let i = 0; i < this.w; i++) {
         const x = this.ox + (i + 0.5) * this.cell, z = this.oz + (j + 0.5) * this.cell;
-        let y = 16;
+        if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) + 0.5) continue;
+        let y = 32;
         let layer = 0;
         for (let guard = 0; guard < 8 && layer < LAYERS && y > -3; guard++) {
           o.set(x, y, z);
@@ -163,31 +165,51 @@ export class NavGrid {
   }
 
   private g = new Float32Array(0);
+  private fs = new Float32Array(0);
   private parent = new Int32Array(0);
   private stampArr = new Int32Array(0);
   private stamp = 0;
+  private heap = new Int32Array(1 << 16);
+  /** true if the last findPath only got part of the way */
+  lastPartial = false;
+  /** path searches left this frame (reset by the game loop) */
+  budget = 3;
+  canPlan() {
+    return this.budget > 0;
+  }
 
-  /** A* over layered nodes. Returns smoothed world waypoints or null. */
-  findPath(from: THREE.Vector3, to: THREE.Vector3, maxNodes = 5000): THREE.Vector3[] | null {
+  /**
+   * A* over layered nodes. Returns smoothed world waypoints or null. If the goal isn't reached
+   * within the node budget, returns a partial path to the explored node closest to the goal
+   * (bots walk that far and plan again) so long trips across the island stay cheap.
+   */
+  findPath(from: THREE.Vector3, to: THREE.Vector3, maxNodes = 3000): THREE.Vector3[] | null {
+    this.budget--;
     const start = this.nearestNode(from.x, from.y, from.z);
-    const goal = this.nearestNode(to.x, to.y, to.z);
+    let goal = this.nearestNode(to.x, to.y, to.z);
     if (start < 0 || goal < 0) return null;
     const N = this.w * this.h * LAYERS;
     if (this.g.length !== N) {
       this.g = new Float32Array(N);
+      this.fs = new Float32Array(N);
       this.parent = new Int32Array(N);
       this.stampArr = new Int32Array(N);
     }
     const st = (this.stamp += 2);
-    const heap: number[] = [];
-    const f = new Map<number, number>();
+    const f = this.fs;
+    let heap = this.heap;
+    let hn = 0;
     const push = (n: number, fv: number) => {
-      f.set(n, fv);
-      heap.push(n);
-      let i = heap.length - 1;
+      f[n] = fv;
+      if (hn >= heap.length) {
+        const bigger = new Int32Array(heap.length * 2);
+        bigger.set(heap);
+        heap = this.heap = bigger;
+      }
+      let i = hn++;
       while (i > 0) {
         const p = (i - 1) >> 1;
-        if (f.get(heap[p])! <= fv) break;
+        if (f[heap[p]] <= fv) break;
         heap[i] = heap[p];
         i = p;
       }
@@ -195,18 +217,18 @@ export class NavGrid {
     };
     const pop = () => {
       const top = heap[0];
-      const last = heap.pop()!;
-      if (heap.length) {
+      const last = heap[--hn];
+      if (hn > 0) {
         let i = 0;
-        const fv = f.get(last)!;
+        const fv = f[last];
         for (;;) {
           const l = i * 2 + 1, r = l + 1;
           let m = i, mv = fv;
-          if (l < heap.length && f.get(heap[l])! < mv) {
+          if (l < hn && f[heap[l]] < mv) {
             m = l;
-            mv = f.get(heap[l])!;
+            mv = f[heap[l]];
           }
-          if (r < heap.length && f.get(heap[r])! < mv) m = r;
+          if (r < hn && f[heap[r]] < mv) m = r;
           if (m === i) break;
           heap[i] = heap[m];
           i = m;
@@ -224,13 +246,15 @@ export class NavGrid {
     this.g[start] = 0;
     this.stampArr[start] = st;
     this.parent[start] = -1;
+    let best = start, bestH = Infinity;
     {
       const c = Math.floor(start / LAYERS);
-      push(start, hfn(c % this.w, Math.floor(c / this.w), this.groundY[start]));
+      bestH = hfn(c % this.w, Math.floor(c / this.w), this.groundY[start]);
+      push(start, bestH);
     }
     let expanded = 0;
     let found = false;
-    while (heap.length) {
+    while (hn > 0) {
       const cur = pop();
       if (cur === goal) {
         found = true;
@@ -242,6 +266,11 @@ export class NavGrid {
       const cc = Math.floor(cur / LAYERS);
       const ci = cc % this.w, cj = Math.floor(cc / this.w);
       const cy = this.groundY[cur];
+      const hc = f[cur] - this.g[cur];
+      if (hc < bestH) {
+        bestH = hc;
+        best = cur;
+      }
       for (let dj = -1; dj <= 1; dj++)
         for (let di = -1; di <= 1; di++) {
           if (!di && !dj) continue;
@@ -259,7 +288,11 @@ export class NavGrid {
           }
         }
     }
-    if (!found) return null;
+    this.lastPartial = !found;
+    if (!found) {
+      if (best === start) return null;
+      goal = best;
+    }
     const nodes: number[] = [];
     for (let c = goal; c !== -1; c = this.parent[c]) {
       nodes.push(c);
@@ -272,7 +305,7 @@ export class NavGrid {
     let k = 0;
     while (k < pts.length - 1) {
       let far = k + 1;
-      for (let m = pts.length - 1; m > k + 1; m--) {
+      for (let m = Math.min(pts.length - 1, k + 60); m > k + 1; m--) {
         if (this.clearLine(anchor.x, anchor.y, anchor.z, pts[m].x, pts[m].y, pts[m].z)) {
           far = m;
           break;
@@ -283,7 +316,7 @@ export class NavGrid {
       k = far;
     }
     if (!out.length) out.push(pts[pts.length - 1]);
-    if (to.distanceTo(out[out.length - 1]) < 1.2) out[out.length - 1] = new THREE.Vector3(to.x, out[out.length - 1].y, to.z);
+    if (found && to.distanceTo(out[out.length - 1]) < 1.2) out[out.length - 1] = new THREE.Vector3(to.x, out[out.length - 1].y, to.z);
     return out;
   }
 }

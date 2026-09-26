@@ -19,11 +19,11 @@ page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}\n${e.stack}`))
 await page.goto(`http://localhost:${PORT}/`);
 await page.waitForFunction(() => window.__game, null, { timeout: 60000 });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${out}/01-title${mobile ? '-m' : ''}.png` });
+await page.screenshot({ path: `${out}/01-title${mobile ? '-m' : ''}.png`, timeout: 120000 });
 const steps = process.argv.includes('--steps');
 await page.evaluate(() => { const g = window.__game; g.play(); });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${out}/02-spawn${mobile ? '-m' : ''}.png` });
+await page.screenshot({ path: `${out}/02-spawn${mobile ? '-m' : ''}.png`, timeout: 120000 });
 const res = await page.evaluate(() => {
   const g = window.__game;
   const s = g.input.s;

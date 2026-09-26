@@ -14,7 +14,7 @@ import { PAL, RarityIndex } from '../render/Palette';
 import { ColFlags } from '../physics/Collision';
 import { PShape } from '../fx/Particles';
 import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
-import { islandRadius } from '../world/Terrain';
+import { islandRadius, groundHeight } from '../world/Terrain';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -691,7 +691,8 @@ export class Actor implements BugOwner {
       const ang = Math.atan2(m.pos.z, m.pos.x);
       const R = islandRadius(ang);
       if (hd > R + 1.5) {
-        const p = new THREE.Vector3(Math.cos(ang) * (R - 3), 3, Math.sin(ang) * (R - 3));
+        const p = new THREE.Vector3(Math.cos(ang) * (R - 3), 0, Math.sin(ang) * (R - 3));
+        p.y = groundHeight(p.x, p.z) + 2;
         ctx.fx.blinkBurst(m.pos, false);
         m.teleport(p);
         ctx.fx.blinkBurst(p, true);

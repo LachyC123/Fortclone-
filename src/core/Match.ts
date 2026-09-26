@@ -152,6 +152,7 @@ export class Match implements MatchHooks {
       if (enter < 0 && d < ISLAND_R + 4) enter = t;
       if (enter >= 0 && d < ISLAND_R - 8) exit = t;
     }
+    g.hud.route = { sx: S.x, sz: S.z, ex: E.x, ez: E.z, bx: 0, bz: 0 };
     this.enterAt = enter < 0 ? 0.3 : enter;
     this.exitAt = exit < 0 ? 0.7 : exit;
     this.lastCallSaid = false;
@@ -237,7 +238,7 @@ export class Match implements MatchHooks {
     this.barge.update(dt);
     this.gloom.update(dt, g.camera.position);
     this.safeCenter.copy(this.gloom.nextC);
-    this.safeRadius = this.gloom.state === 'idle' ? 60 : this.gloom.nextR;
+    this.safeRadius = this.gloom.state === 'idle' ? 999 : this.gloom.nextR;
 
     if (this.phase === 'lobby') {
       // nobody falls off Launch Isle for good: pop them back on the plaza

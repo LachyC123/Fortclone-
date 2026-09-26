@@ -29,7 +29,7 @@ for (let run = 0; run < 6; run++) {
       g.debugStep(1, 1 / 30); t += 1 / 30;
     }
     g.debugStep(30, 1 / 30);
-    const R = (a) => 46 + Math.sin(a * 3 + 1.3) * 2.2 + Math.sin(a * 7 + 0.4) * 1.2 + Math.sin(a * 13) * 0.5;
+    const R = (a) => 100 + Math.sin(a * 3 + 1.3) * 4 + Math.sin(a * 7 + 0.4) * 2.2 + Math.sin(a * 13) * 0.9;
     const outside = g.actors.filter((a) => { const d = Math.hypot(a.motor.pos.x, a.motor.pos.z); return a.alive && d > R(Math.atan2(a.motor.pos.z, a.motor.pos.x)) - 0.5; });
     const pd = Math.hypot(p.motor.pos.x, p.motor.pos.z);
     const maxD = Math.max(...g.actors.map((a) => Math.hypot(a.motor.pos.x, a.motor.pos.z)));

@@ -13,12 +13,13 @@ export interface GloomPhase {
 
 /** Tuned for ~5–7 minute matches on the island. */
 export const GLOOM_PHASES: GloomPhase[] = [
-  { wait: 55, shrink: 30, radius: 32, dps: 1 },
-  { wait: 35, shrink: 25, radius: 19, dps: 2 },
-  { wait: 30, shrink: 20, radius: 10, dps: 4 },
-  { wait: 22, shrink: 18, radius: 4.5, dps: 7 },
-  { wait: 15, shrink: 16, radius: 0.5, dps: 12 },
+  { wait: 60, shrink: 40, radius: 72, dps: 1 },
+  { wait: 40, shrink: 32, radius: 44, dps: 2 },
+  { wait: 32, shrink: 26, radius: 24, dps: 4 },
+  { wait: 24, shrink: 20, radius: 10, dps: 7 },
+  { wait: 16, shrink: 18, radius: 0.5, dps: 12 },
 ];
+const START_R = 150;
 
 /**
  * THE GLOOM: a colourful, strange storm that swallows the island. A tall swirling violet wall
@@ -26,11 +27,11 @@ export const GLOOM_PHASES: GloomPhase[] = [
  */
 export class Gloom {
   center = new THREE.Vector2(0, 0);
-  radius = 64;
+  radius = 150;
   private fromC = new THREE.Vector2();
-  private fromR = 64;
+  private fromR = 150;
   nextC = new THREE.Vector2();
-  nextR = 64;
+  nextR = 150;
   phase = 0;
   phaseT = 0;
   state: 'idle' | 'waiting' | 'shrinking' | 'done' = 'idle';
@@ -86,9 +87,9 @@ export class Gloom {
 
   reset() {
     this.center.set(0, 0);
-    this.radius = 64;
+    this.radius = START_R;
     this.nextC.set(0, 0);
-    this.nextR = 64;
+    this.nextR = START_R;
     this.phase = 0;
     this.phaseT = 0;
     this.state = 'idle';
@@ -110,7 +111,7 @@ export class Gloom {
     for (let i = 0; i < 20; i++) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * slack * 0.85;
       const c = new THREE.Vector2(this.center.x + Math.cos(a) * r, this.center.y + Math.sin(a) * r);
-      if (c.length() + ph.radius < 44 || i === 19) {
+      if (c.length() + ph.radius < 94 || i === 19) {
         this.nextC.copy(c);
         break;
       }

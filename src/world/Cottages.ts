@@ -21,6 +21,8 @@ export interface CottageSpec {
   roof: number;
   shutters: number;
   seed: number;
+  /** ground level (defaults to 0) */
+  y?: number;
 }
 
 /**
@@ -33,7 +35,10 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
   const hw = c.w / 2, hd = c.d / 2;
   const style: WallStyle = { outer: c.wall, inner: shade(c.wall, 1.08), trim: PAL.brown, surface: 'wood', beams: rng.chance(0.5) ? PAL.brownDark : undefined, plinth: PAL.stoneDark };
   const inner: WallStyle = { outer: 0xefe0c4, inner: 0xefe0c4, trim: PAL.brown, surface: 'wood', thickness: 0.2 };
-  k.push(c.x, 0, c.z, c.yaw);
+  const Y = c.y ?? 0;
+  k.push(c.x, Y, c.z, c.yaw);
+  // foundation skirt so houses on uneven ground never float
+  k.box(0, -0.9, 0, c.w + 0.2, 1.8, c.d + 0.2, PAL.stoneDark, { col: 'stone' });
   floor(k, -hw + 0.15, -hd + 0.15, hw - 0.15, hd - 0.15, 0.04, 0.08, rng.pick([0xc08a5a, 0xa87248, 0xd8c8b0]), 'wood');
   const doorAt = c.w * rng.range(0.35, 0.65);
   const win = (at: number, big = false) => ({ at, w: big ? 1.3 : 1.0, h: big ? 1.2 : 1.0, sill: 1.0, shutters: rng.chance(0.7) ? c.shutters : undefined, flowers: rng.chance(0.5) });
@@ -77,11 +82,11 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
     k.pop();
     floor(k, -hw + 0.15, -hd + 0.15, hw - 0.15, hd - 0.15, H1 + H2, 0.24, 0x9a6a44, 'wood', undefined, shade(c.wall, 1.05));
     gableRoof(k, 0, H1 + H2, 0, 0, c.w + 0.4, c.d + 0.4, 2.2, c.roof, { overhang: 0.5, gableColor: c.wall, trim: PAL.brown });
-    world.addZone(c.name, c.x - Math.max(hw, hd), c.z - Math.max(hw, hd), c.x + Math.max(hw, hd), c.z + Math.max(hw, hd), -1, H1 + H2 + 2, true);
+    world.addZone(c.name, c.x - Math.max(hw, hd), c.z - Math.max(hw, hd), c.x + Math.max(hw, hd), c.z + Math.max(hw, hd), Y - 1, Y + H1 + H2 + 2, true);
   } else {
     floor(k, -hw + 0.15, -hd + 0.15, hw - 0.15, hd - 0.15, H1 + 0.24, 0.24, 0x9a6a44, 'wood', undefined, shade(c.wall, 1.05));
     gableRoof(k, 0, H1 + 0.24, 0, 0, c.w + 0.4, c.d + 0.4, 2.0, c.roof, { overhang: 0.5, gableColor: c.wall, trim: PAL.brown });
-    world.addZone(c.name, c.x - Math.max(hw, hd), c.z - Math.max(hw, hd), c.x + Math.max(hw, hd), c.z + Math.max(hw, hd), -1, H1 + 2, true);
+    world.addZone(c.name, c.x - Math.max(hw, hd), c.z - Math.max(hw, hd), c.x + Math.max(hw, hd), c.z + Math.max(hw, hd), Y - 1, Y + H1 + 2, true);
   }
   const chimH = (c.floors === 2 ? H1 + H2 : H1) + 2.6;
   k.box(hw - 1.2, chimH - 1.2, -0.8, 0.7, 2.6, 0.7, PAL.terracottaDark, { col: 'stone' });
@@ -98,7 +103,7 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
   const [x, , z] = k.w(0, 0, 0);
   const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
   const lx = doorAt - hw - 1.4, lz = hd + 0.2;
-  sign.position.set(c.x + lx * cs + lz * sn, 2.55, c.z - lx * sn + lz * cs);
+  sign.position.set(c.x + lx * cs + lz * sn, Y + 2.55, c.z - lx * sn + lz * cs);
   sign.rotation.y = c.yaw;
   world.group.add(sign);
   void x;
@@ -106,8 +111,8 @@ export function buildCottage(k: Kit, world: World, doors: DoorSpec[], c: Cottage
 }
 
 /** A Rift Nest: where a fleeing Blinkbug can rebuild its rascal (once per match). */
-export function buildNest(k: Kit, world: World, x: number, z: number) {
-  k.push(x, 0, z, 0);
+export function buildNest(k: Kit, world: World, x: number, z: number, y = 0) {
+  k.push(x, y, z, 0);
   k.cyl(0, 0.2, 0, 2.3, 2.5, 0.4, PAL.stoneDark, { col: 'stone', segs: 16 });
   k.cyl(0, 0.42, 0, 2.0, 2.0, 0.06, 0x5b4bff, { segs: 16, batch: 'glow' });
   for (let i = 0; i < 5; i++) {
@@ -122,7 +127,7 @@ export function buildNest(k: Kit, world: World, x: number, z: number) {
   k.pop();
   // floating crystal + spinning rings (animated)
   const g = new THREE.Group();
-  g.position.set(x, 1.8, z);
+  g.position.set(x, y + 1.8, z);
   const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), new THREE.MeshBasicMaterial({ color: 0x9ffcff }));
   crystal.scale.set(1, 1.6, 1);
   g.add(crystal);
@@ -132,5 +137,5 @@ export function buildNest(k: Kit, world: World, x: number, z: number) {
     g.add(ring);
   }
   world.addSpinner(g, 'y', 1.2);
-  world.nests.push({ pos: new THREE.Vector3(x, 0.45, z), used: false, fx: g });
+  world.nests.push({ pos: new THREE.Vector3(x, y + 0.45, z), used: false, fx: g });
 }

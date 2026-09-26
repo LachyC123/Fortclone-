@@ -9,6 +9,11 @@ import { HEALS, UTILS, HealId, UtilId, ITEM_COLOR } from '../combat/Items';
 import { BUG } from '../entities/Blinkbug';
 import type { World } from '../world/World';
 import { ISLAND_R } from '../world/Terrain';
+import { ground, groundNormal, islandRadius, roadDist, POIS, STREAM_X, LAGOON_POS } from '../world/Heightmap';
+
+const MAP_PX = 640;
+const MAP_HALF = ISLAND_R + 6;
+const MAP_S = MAP_PX / (MAP_HALF * 2);
 import { clamp } from '../core/math';
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -124,31 +129,66 @@ export class HUD implements HudEvents {
   onSlotTap: ((i: number) => void) | null = null;
 
   setMapBase(world: World) {
-    // pre-render the island map once
+    // pre-render the island map once: hill-shaded terrain, water, roads, buildings
+    const N = MAP_PX;
     const c = document.createElement('canvas');
-    c.width = c.height = 320;
+    c.width = c.height = N;
     const g = c.getContext('2d')!;
-    const S = 320 / (ISLAND_R * 2 + 8);
-    const tx = (x: number) => 160 + x * S, tz = (z: number) => 160 + z * S;
-    g.fillStyle = '#a9d8f0';
-    g.fillRect(0, 0, 320, 320);
-    g.fillStyle = '#7cc35a';
-    g.beginPath();
-    g.arc(160, 160, ISLAND_R * S, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#4fc3d9';
-    g.fillRect(tx(-29.5), 0, 3 * S, 320);
+    const img = g.createImageData(N, N);
+    const d = img.data;
+    const n = new THREE.Vector3();
+    const Lx = -0.55, Ly = 0.7, Lz = -0.45;
+    for (let py = 0; py < N; py++)
+      for (let px = 0; px < N; px++) {
+        const x = (px + 0.5) / MAP_S - MAP_HALF, z = (py + 0.5) / MAP_S - MAP_HALF;
+        const o = (py * N + px) * 4;
+        const r = Math.hypot(x, z), R = islandRadius(Math.atan2(z, x));
+        let cr: number, cg: number, cb: number;
+        if (r > R) {
+          cr = 169; cg = 216; cb = 240;
+        } else {
+          const h = ground(x, z);
+          groundNormal(x, z, n);
+          const shadeK = Math.max(0.55, Math.min(1.25, 0.72 + (n.x * Lx + n.y * Ly + n.z * Lz) * 0.55));
+          const hk = Math.max(0, Math.min(1, h / 10));
+          cr = 124 + hk * 40;
+          cg = 195 + hk * 18;
+          cb = 90 + hk * 30;
+          const rd = roadDist(x, z);
+          if (rd < 1.8) {
+            cr = 214; cg = 188; cb = 140;
+          }
+          if (h < -0.25 && (Math.abs(x - STREAM_X) < 1.6 || Math.hypot(x - LAGOON_POS.x, z - LAGOON_POS.z) < LAGOON_POS.r)) {
+            cr = 79; cg = 195; cb = 217;
+          }
+          if (r > R - 1.2) {
+            cr *= 0.8; cg *= 0.8; cb *= 0.8;
+          }
+          cr *= shadeK; cg *= shadeK; cb *= shadeK;
+        }
+        d[o] = cr; d[o + 1] = cg; d[o + 2] = cb; d[o + 3] = 255;
+      }
+    g.putImageData(img, 0, 0);
+    const tx = (x: number) => (x + MAP_HALF) * MAP_S, tz = (z: number) => (z + MAP_HALF) * MAP_S;
     g.fillStyle = '#cfc2ac';
-    g.fillRect(tx(-13), tz(-10), 26 * S, 20 * S);
+    g.fillRect(tx(-13), tz(-10), 26 * MAP_S, 20 * MAP_S);
     for (const z of world.zones) {
+      if (!z.indoor) continue;
       g.fillStyle = '#e8b890';
       g.strokeStyle = '#2b2238';
       g.lineWidth = 2;
-      g.fillRect(tx(z.min.x), tz(z.min.z), (z.max.x - z.min.x) * S, (z.max.z - z.min.z) * S);
-      g.strokeRect(tx(z.min.x), tz(z.min.z), (z.max.x - z.min.x) * S, (z.max.z - z.min.z) * S);
+      g.fillRect(tx(z.min.x), tz(z.min.z), (z.max.x - z.min.x) * MAP_S, (z.max.z - z.min.z) * MAP_S);
+      g.strokeRect(tx(z.min.x), tz(z.min.z), (z.max.x - z.min.x) * MAP_S, (z.max.z - z.min.z) * MAP_S);
     }
-    g.fillStyle = '#b49be0';
-    g.fillRect(tx(17.8), tz(1.8), 4.4 * S, 4.4 * S);
+    for (const nst of world.nests) {
+      g.fillStyle = '#9ffcff';
+      g.strokeStyle = '#2b2238';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(tx(nst.pos.x), tz(nst.pos.z), 5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
     this.mapBase = c;
   }
 
@@ -517,52 +557,68 @@ export class HUD implements HudEvents {
     this.lootCard.classList.add('show');
   }
 
+  /** Sky Barge route for the overview map (set by the match while it flies) */
+  route: { sx: number; sz: number; ex: number; ez: number; bx: number; bz: number } | null = null;
+
   private drawMinimap(p: Actor, others: Actor[]) {
     const c = this.mapCanvas;
     const g = c.getContext('2d')!;
-    const S = 320 / (ISLAND_R * 2 + 8);
-    const zoom = 2.2;
+    // overview (north-up, whole island) while riding the barge or skydiving; otherwise a
+    // rotating close-up centred on you
+    const overview = p.flight === 'barge' || p.flight === 'dive' || !!p.bugout;
+    const ppm = overview ? 150 / (MAP_HALF * 2) : MAP_S * 0.66;
+    const cx = overview ? 0 : p.motor.pos.x, cz = overview ? 0 : p.motor.pos.z;
+    const U = (x: number) => (x - cx) * ppm, V = (z: number) => (z - cz) * ppm;
+    const yaw = overview ? 0 : Math.atan2(-this.camera.getWorldDirection(_v).x, -_v.z);
     g.save();
     g.clearRect(0, 0, 160, 160);
+    g.fillStyle = '#a9d8f0';
+    g.fillRect(0, 0, 160, 160);
     g.translate(80, 80);
-    const yaw = Math.atan2(-this.camera.getWorldDirection(_v).x, -_v.z);
     g.rotate(yaw);
-    g.scale(zoom / 2, zoom / 2);
-    if (this.mapBase) g.drawImage(this.mapBase, -160 - p.motor.pos.x * S, -160 - p.motor.pos.z * S);
+    if (this.mapBase) g.drawImage(this.mapBase, U(-MAP_HALF), V(-MAP_HALF), MAP_HALF * 2 * ppm, MAP_HALF * 2 * ppm);
     if (this.gloom) {
       const G = this.gloom;
-      // storm outside the circle, white line where it's heading next
       g.fillStyle = 'rgba(110, 40, 180, 0.45)';
       g.beginPath();
       g.rect(-400, -400, 800, 800);
-      g.arc((G.center.x - p.motor.pos.x) * S, (G.center.y - p.motor.pos.z) * S, Math.max(0.5, G.radius) * S, 0, Math.PI * 2, true);
+      g.arc(U(G.center.x), V(G.center.y), Math.max(0.5, G.radius) * ppm, 0, Math.PI * 2, true);
       g.fill('evenodd');
       g.strokeStyle = '#e8a0ff';
       g.lineWidth = 3;
       g.beginPath();
-      g.arc((G.center.x - p.motor.pos.x) * S, (G.center.y - p.motor.pos.z) * S, Math.max(0.5, G.radius) * S, 0, Math.PI * 2);
+      g.arc(U(G.center.x), V(G.center.y), Math.max(0.5, G.radius) * ppm, 0, Math.PI * 2);
       g.stroke();
       if (G.nextR < G.radius - 0.5) {
         g.strokeStyle = '#ffffff';
         g.setLineDash([6, 5]);
         g.lineWidth = 2.5;
         g.beginPath();
-        g.arc((G.nextC.x - p.motor.pos.x) * S, (G.nextC.y - p.motor.pos.z) * S, Math.max(0.5, G.nextR) * S, 0, Math.PI * 2);
+        g.arc(U(G.nextC.x), V(G.nextC.y), Math.max(0.5, G.nextR) * ppm, 0, Math.PI * 2);
         g.stroke();
         g.setLineDash([]);
       }
     }
-    // bug marker
+    if (overview && this.route && p.flight === 'barge') {
+      const r = this.route;
+      g.strokeStyle = 'rgba(255,255,255,0.9)';
+      g.setLineDash([4, 4]);
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(U(r.sx), V(r.sz));
+      g.lineTo(U(r.ex), V(r.ez));
+      g.stroke();
+      g.setLineDash([]);
+    }
     if (p.bug.out) {
       g.fillStyle = '#6ff7ff';
       g.strokeStyle = '#2b2238';
       g.lineWidth = 2;
       g.beginPath();
-      g.arc((p.bug.pos.x - p.motor.pos.x) * S, (p.bug.pos.z - p.motor.pos.z) * S, 5, 0, Math.PI * 2);
+      g.arc(U(p.bug.pos.x), V(p.bug.pos.z), 5, 0, Math.PI * 2);
       g.fill();
       g.stroke();
     }
-    // enemies only if recently shooting & close (sound-based "radar"), not all the time
     for (const o of others) {
       if (!o.alive || o === p) continue;
       if (o.pingT > 0 && o.pingedBy === p) {
@@ -570,31 +626,59 @@ export class HUD implements HudEvents {
         g.strokeStyle = '#2b2238';
         g.lineWidth = 2;
         g.beginPath();
-        g.arc((o.motor.pos.x - p.motor.pos.x) * S, (o.motor.pos.z - p.motor.pos.z) * S, 5, 0, Math.PI * 2);
+        g.arc(U(o.motor.pos.x), V(o.motor.pos.z), 5, 0, Math.PI * 2);
         g.fill();
         g.stroke();
         continue;
       }
-      if (o.stealthT > 0) continue;
+      if (o.stealthT > 0 || overview) continue;
+      // enemies only if recently shooting & close (sound-based "radar")
       if (o.weapon && o.weapon.cooldown > -1.2 && o.motor.pos.distanceTo(p.motor.pos) < 40) {
         g.fillStyle = '#ff6b6b';
         g.beginPath();
-        g.arc((o.motor.pos.x - p.motor.pos.x) * S, (o.motor.pos.z - p.motor.pos.z) * S, 4, 0, Math.PI * 2);
+        g.arc(U(o.motor.pos.x), V(o.motor.pos.z), 4, 0, Math.PI * 2);
         g.fill();
       }
     }
     g.restore();
-    // player arrow (always pointing up since the map rotates)
+    // place names (kept upright)
+    g.font = overview ? '700 9px Fredoka, sans-serif' : '700 10px Fredoka, sans-serif';
+    g.textAlign = 'center';
+    g.lineWidth = 3;
+    g.strokeStyle = '#2b2238';
+    g.fillStyle = '#fff8e8';
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    for (const poi of POIS) {
+      const u = U(poi.x), v = V(poi.z);
+      const rx = u * cy - v * sy, ry = u * sy + v * cy;
+      if (Math.hypot(rx, ry) > 66) continue;
+      if (!overview && Math.hypot(rx, ry) < 14) continue;
+      g.strokeText(poi.name, 80 + rx, 80 + ry);
+      g.fillText(poi.name, 80 + rx, 80 + ry);
+    }
+    // you
     g.fillStyle = '#fff8e8';
     g.strokeStyle = '#2b2238';
     g.lineWidth = 2.5;
+    let ax = 80, ay = 80, ang = 0;
+    if (overview) {
+      const pp = p.bugout ? p.bug.pos : p.motor.pos;
+      ax = 80 + U(pp.x);
+      ay = 80 + V(pp.z);
+      const f = this.camera.getWorldDirection(_v);
+      ang = Math.atan2(f.x, -f.z);
+    }
+    g.save();
+    g.translate(ax, ay);
+    g.rotate(ang);
     g.beginPath();
-    g.moveTo(80, 70);
-    g.lineTo(88, 88);
-    g.lineTo(80, 84);
-    g.lineTo(72, 88);
+    g.moveTo(0, -10);
+    g.lineTo(8, 8);
+    g.lineTo(0, 4);
+    g.lineTo(-8, 8);
     g.closePath();
     g.fill();
     g.stroke();
+    g.restore();
   }
 }

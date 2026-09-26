@@ -226,7 +226,7 @@ export function tree(k: Kit, x: number, z: number, s = 1, y = 0, kind: 'round' |
     for (let i = 0; i < blobs; i++) {
       const a = (i / blobs) * Math.PI * 2 + R.next();
       const rr = (0.75 + R.next() * 0.3) * s;
-      k.ico(Math.cos(a) * rr, trunkH + (0.5 + R.next() * 0.9) * s, Math.sin(a) * rr, (0.75 + R.next() * 0.3) * s, shade(leaf, 0.9 + R.next() * 0.25), { batch: 'foliage', wind: 0.8, detail: 1 });
+      k.ico(Math.cos(a) * rr, trunkH + (0.5 + R.next() * 0.9) * s, Math.sin(a) * rr, (0.75 + R.next() * 0.3) * s, shade(leaf, 0.9 + R.next() * 0.25), { batch: 'foliage', wind: 0.8, detail: 0 });
     }
     if (kind === 'blossom') for (let i = 0; i < 6; i++) k.ico(R.range(-1, 1) * s, trunkH + R.range(0.3, 1.8) * s, R.range(-1, 1) * s, 0.25 * s, 0xffffff, { batch: 'foliage', wind: 0.9, detail: 0 });
   }
@@ -239,8 +239,8 @@ export function bush(k: Kit, x: number, z: number, s = 1, color = PAL.leaf, flow
   k.push(x, 0, z, R.next() * 6);
   const c = j(color, 0.6);
   k.ico(0, 0.45 * s, 0, 0.6 * s, c, { batch: 'foliage', wind: 0.3, detail: 1, sy: 0.8 });
-  k.ico(0.45 * s, 0.35 * s, 0.1 * s, 0.42 * s, shade(c, 1.1), { batch: 'foliage', wind: 0.35, detail: 1 });
-  k.ico(-0.4 * s, 0.32 * s, -0.15 * s, 0.4 * s, shade(c, 0.92), { batch: 'foliage', wind: 0.35, detail: 1 });
+  k.ico(0.45 * s, 0.35 * s, 0.1 * s, 0.42 * s, shade(c, 1.1), { batch: 'foliage', wind: 0.35, detail: 0 });
+  k.ico(-0.4 * s, 0.32 * s, -0.15 * s, 0.4 * s, shade(c, 0.92), { batch: 'foliage', wind: 0.35, detail: 0 });
   if (flowers) for (let i = 0; i < 5; i++) k.ico(R.range(-0.5, 0.5) * s, R.range(0.55, 0.85) * s, R.range(-0.4, 0.4) * s, 0.09 * s, R.pick([PAL.pink, 0xffffff, PAL.mustard, PAL.lavender]), { batch: 'foliage', wind: 0.4, detail: 0 });
   k.collider(0, 0.4 * s, 0, 1.3 * s, 0.8 * s, 1.1 * s, 'grass', { flags: ColFlags.BlocksSight });
   k.pop();
@@ -249,8 +249,8 @@ export function bush(k: Kit, x: number, z: number, s = 1, color = PAL.leaf, flow
 export function flowerPatch(k: Kit, x: number, z: number, n = 8, spread = 1.2) {
   for (let i = 0; i < n; i++) {
     const fx = x + R.range(-spread, spread), fz = z + R.range(-spread, spread);
-    k.cyl(fx, 0.15, fz, 0.015, 0.015, 0.3, PAL.leafDark, { batch: 'foliage', wind: 0.5, segs: 4 });
-    k.ico(fx, 0.32, fz, 0.08, R.pick([PAL.pink, 0xffffff, PAL.mustard, PAL.lavender, 0xff7a6b, PAL.softBlue]), { batch: 'foliage', wind: 0.9, detail: 0 });
+    k.cyl(fx, 0.15, fz, 0.015, 0.015, 0.3, PAL.leafDark, { batch: 'detail', wind: 0.5, segs: 3 });
+    k.ico(fx, 0.32, fz, 0.08, R.pick([PAL.pink, 0xffffff, PAL.mustard, PAL.lavender, 0xff7a6b, PAL.softBlue]), { batch: 'detail', wind: 0.9, detail: 0 });
   }
 }
 

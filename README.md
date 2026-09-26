@@ -7,6 +7,12 @@
 > **THE GLOOM** closes in → last rascal standing. Knocked out? Your Blinkbug carries your spark to a
 > **Rift Nest** (once per match). Plus the **Blinkbug collection**: hatch cocoons, name your bugs, equip one.
 > PRACTICE keeps the respawning combat playground from Milestones 1–2.
+>
+> **Milestone 4 — the island.** It's now ~200m across with rolling hills, ridges and six places:
+> **Buttonbury** (the village), **Wobblewood** (giant mushrooms, treehouses, rope bridges), **Tumble Market**
+> (stall aisles, crate towers, warehouses), **Crooked Manor** (a leaning mansion on the big hill, hedge maze),
+> **Rattleworks** (workshop halls, turning gears, silo, containers) and **Crash Cove** (beach, crashed sky-ship,
+> lighthouse, lagoon waterfall) — plus Lookout Hill, farms, barns, boulder outcrops and copses in between.
 
 ## Run it
 

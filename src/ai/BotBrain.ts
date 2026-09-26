@@ -9,6 +9,7 @@ import { UTILS } from '../combat/Items';
 import { WEAPONS } from '../combat/Weapons';
 import { simulateThrow, throwVelocity, THROW } from '../combat/Throwables';
 import type { AmmoType } from '../combat/Weapons';
+import { POIS } from '../world/Heightmap';
 
 export type Archetype = 'aggressive' | 'cautious' | 'goblin' | 'rooftop' | 'chaotic' | 'sniper';
 
@@ -126,7 +127,9 @@ export class BotController implements Controller {
     if (wasBlink && me.bug.canBlink) it.blink = true;
 
     this.jumpCd -= dt;
+    this.repathCd -= dt;
     if (this.matchMode(me, ctx, dt)) return;
+    if (this.pendingPlan && this.hasGoal && ctx.nav.canPlan()) this.setGoal(me, ctx, this.goal, true);
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
       const local = ctx.localActor;
@@ -152,6 +155,10 @@ export class BotController implements Controller {
   private dropDist = Infinity;
   private dropDelay = -1;
   private zoneSprint = false;
+  private repathCd = 0;
+  /** loot we tried and failed to path to (blink-only perches) -> retry after this time */
+  private unreachable = new Map<object, number>();
+  private pendingPlan = false;
 
   /** Lobby, Sky Barge, skydive and bugout: simple purpose-built steering. True if handled. */
   private matchMode(me: Actor, ctx: GameCtx, dt: number): boolean {
@@ -249,7 +256,7 @@ export class BotController implements Controller {
   /** Stay ahead of the Gloom: true if we're heading for safety this tick. */
   private zoneRun(me: Actor, ctx: GameCtx): boolean {
     const m = ctx.match;
-    if (!m || m.phase !== 'live' || m.safeRadius > 50) return false;
+    if (!m || m.phase !== 'live' || m.safeRadius > 120) return false;
     const c = m.safeCenter;
     const d = Math.hypot(me.motor.pos.x - c.x, me.motor.pos.z - c.y);
     const inGloom = m.gloomOutside(me.motor.pos);
@@ -624,6 +631,7 @@ export class BotController implements Controller {
     const worst = me.weapons.some((x) => !x) ? -1 : Math.min(...me.weapons.map((x) => x!.score));
     for (const p of ctx.loot.pickups) {
       if (p.collectT >= 0 || !p.settled) continue;
+      if ((this.unreachable.get(p) ?? -1) > ctx.time) continue;
       const d = p.pos.distanceTo(me.motor.pos);
       if (d > 45) continue;
       let v = -99;
@@ -652,9 +660,10 @@ export class BotController implements Controller {
     }
     for (const c of ctx.loot.crates) {
       if (c.opened || c.openT >= 0) continue;
+      if ((this.unreachable.get(c) ?? -1) > ctx.time) continue;
       const d = c.pos.distanceTo(me.motor.pos);
       if (d > 45) continue;
-      const score = (goblin ? 34 : 20) - d * 0.4 - (c.pos.y > 4 ? 30 : 0); // rooftops/towers are blink-only
+      const score = (goblin ? 34 : 20) - d * 0.4;
       if (score > bestScore) {
         bestScore = score;
         bestCrate = c;
@@ -668,10 +677,14 @@ export class BotController implements Controller {
     const arch = this.profile.archetype;
     let c = me.motor.pos;
     let r = arch === 'sniper' ? 30 : 18;
-    // bias toward interesting places: the square & buildings
-    if (this.rng() < 0.5) c = _v.set(rand(-12, 12), 0, rand(-14, 8));
+    // bias toward interesting places: a nearby named place, sometimes a far one
+    if (this.rng() < 0.5) {
+      const near = POIS.slice().sort((a, b) => Math.hypot(a.x - me.motor.pos.x, a.z - me.motor.pos.z) - Math.hypot(b.x - me.motor.pos.x, b.z - me.motor.pos.z));
+      const p = this.rng() < 0.75 ? near[this.rng() < 0.6 ? 0 : 1] : near[Math.floor(this.rng() * near.length)];
+      c = _v.set(p.x + rand(-p.r, p.r) * 0.6, 0, p.z + rand(-p.r, p.r) * 0.6);
+    }
     const m = ctx.match;
-    if (m && m.phase === 'live' && m.safeRadius < 50) {
+    if (m && m.phase === 'live' && m.safeRadius < 120) {
       c = _v.set(m.safeCenter.x, 0, m.safeCenter.y);
       r = Math.max(2, Math.min(r, m.safeRadius * 0.7));
     }
@@ -685,9 +698,34 @@ export class BotController implements Controller {
     this.goal.copy(p);
     this.hasGoal = true;
     this.goalTimeout = Math.max(this.goalTimeout, 6);
+    if (!ctx.nav.canPlan()) {
+      // over this frame's planning budget: keep walking the old path (or straight) and retry soon
+      if (!this.path.length) {
+        this.path = [p.clone()];
+        this.pathIdx = 0;
+      }
+      this.repathCd = 0;
+      this.pendingPlan = true;
+      return;
+    }
+    this.pendingPlan = false;
     const path = ctx.nav.findPath(me.motor.pos, p);
     this.path = path ?? [p.clone()];
     this.pathIdx = 0;
+    // loot that pathing can't reach (or only gets under): forget it for a while
+    const tgt = this.lootTarget ?? this.crateTarget;
+    if (tgt && tgt.pos.distanceToSquared(p) < 0.01) {
+      const end = path?.[path.length - 1];
+      const nearEnough = end && Math.hypot(end.x - p.x, end.z - p.z) < 1.8 && Math.abs(end.y - p.y) < 1.2;
+      const bad = !path || (!nearEnough && (!ctx.nav.lastPartial || me.motor.pos.distanceTo(p) < 30));
+      if (bad) {
+        this.unreachable.set(tgt, ctx.time + 25);
+        this.lootTarget = null;
+        this.crateTarget = null;
+        this.hasGoal = false;
+        this.path = [];
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ steering */
@@ -705,7 +743,11 @@ export class BotController implements Controller {
         this.pathIdx++;
         if (this.pathIdx >= this.path.length) {
           this.path = [];
-          if (this.state === 'wander') this.idleT = rand(0.2, 1.2);
+          // a partial path (long trip): keep going toward the real goal
+          if (this.hasGoal && Math.hypot(this.goal.x - me.motor.pos.x, this.goal.z - me.motor.pos.z) > 2.5 && this.repathCd <= 0) {
+            this.repathCd = 0.4;
+            this.setGoal(me, ctx, this.goal, true);
+          } else if (this.state === 'wander') this.idleT = rand(0.2, 1.2);
         }
       } else {
         mx = dx / d;
