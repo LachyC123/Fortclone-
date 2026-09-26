@@ -72,8 +72,12 @@ export class HUD implements HudEvents {
   private lastZone = '';
   private zoneT = 0;
   private slotSig = '';
+  private bugNameKey = '';
   showFps = false;
   onPlayerEliminated: ((by: string) => void) | null = null;
+  /** the Gloom, when a match is running (drawn on the minimap) */
+  gloom: { center: THREE.Vector2; radius: number; nextC: THREE.Vector2; nextR: number } | null = null;
+  private gloomFlash = h('div', 'gloomflash');
 
   constructor(private camera: THREE.PerspectiveCamera) {
     const r = this.root;
@@ -111,10 +115,10 @@ export class HUD implements HudEvents {
     top.append(this.aliveEl, this.elimsEl);
     this.minimap.appendChild(this.mapCanvas);
     this.mapCanvas.width = this.mapCanvas.height = 160;
-    this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
+    this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="nm"></div><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
     this.locator.innerHTML = `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" stroke="rgba(43,34,56,0.5)" stroke-width="5" fill="rgba(43,34,56,0.35)"/><circle class="arc" cx="22" cy="22" r="19" stroke="#6ff7ff" stroke-width="5" fill="none" stroke-dasharray="119.4" stroke-linecap="round"/></svg><div class="ic">${ICONS.bug}</div>`;
     r.append(this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
-    document.body.append(this.scope, this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
+    document.body.append(this.gloomFlash, this.scope, this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
   }
 
   onSlotTap: ((i: number) => void) | null = null;
@@ -191,7 +195,12 @@ export class HUD implements HudEvents {
     const verbs = ['bonked', 'blasted', 'popped', 'sent packing', 'confetti\'d', 'tickled out'];
     const verb = killer === 'THE SKY' || weapon === 'THE SKY' ? '' : verbs[Math.floor(Math.random() * verbs.length)];
     const e = h('div', `kf${local ? ' local' : ''}`);
-    e.innerHTML = weapon === 'THE SKY' ? `<b>${victim}</b> fell off the island` : `<b>${killer}</b> ${verb} <b>${victim}</b> with <span class="w">${weapon}</span>`;
+    const pos = (n: string) => (n === 'You' ? 'Your' : `${n}'s`);
+    if (weapon === 'THE SKY') e.innerHTML = `<b>${victim}</b> fell off the island`;
+    else if (weapon === 'TIME') e.innerHTML = `<b>${pos(victim.replace(/'s spark$/, ''))}</b> spark fizzled out`;
+    else if (weapon === 'REBUILT') e.innerHTML = `<b>${killer}</b> was <span class="w">REBUILT</span> at a Rift Nest!`;
+    else if (weapon === 'THE GLOOM') e.innerHTML = `<b>${victim}</b> was swallowed by <span class="w gloom">THE GLOOM</span>`;
+    else e.innerHTML = `<b>${killer}</b> ${verb} <b>${victim.replace(/^You's /, 'Your ')}</b> with <span class="w">${weapon}</span>`;
     this.killfeedEl.prepend(e);
     while (this.killfeedEl.children.length > 5) this.killfeedEl.lastElementChild!.remove();
     setTimeout(() => {
@@ -227,6 +236,12 @@ export class HUD implements HudEvents {
 
   playerEliminated(by: string) {
     this.onPlayerEliminated?.(by);
+  }
+
+  gloomHit() {
+    this.gloomFlash.classList.remove('on');
+    void this.gloomFlash.offsetWidth;
+    this.gloomFlash.classList.add('on');
   }
 
   playerElimination(victim: string) {
@@ -327,11 +342,18 @@ export class HUD implements HudEvents {
     // bug widget (desktop)
     const bug = p.bug;
     const st = this.bugWidget.querySelector('.st') as HTMLDivElement;
+    const nameKey = `${p.bugName}|${bug.species.id}`;
+    if (nameKey !== this.bugNameKey) {
+      this.bugNameKey = nameKey;
+      (this.bugWidget.querySelector('.nm') as HTMLElement).textContent = `${p.bugName} · ${bug.species.name}`;
+      (this.bugWidget.querySelector('.ic') as HTMLElement).style.color = `#${bug.tint.toString(16).padStart(6, '0')}`;
+      (this.bugWidget.querySelector('.arc') as SVGCircleElement).dataset.tint = `#${bug.tint.toString(16).padStart(6, '0')}`;
+    }
     const arc = this.bugWidget.querySelector('.arc') as SVGCircleElement;
     if (bug.canBlink) {
       st.textContent = `BLINK! ${bug.window.toFixed(1)}s`;
       st.style.color = '#5b4bff';
-      arc.style.strokeDashoffset = String(176 * (1 - bug.window / BUG.window));
+      arc.style.strokeDashoffset = String(176 * (1 - bug.window / bug.stats.window));
       arc.style.stroke = '#6ff7ff';
     } else if (bug.ready) {
       st.textContent = p.throwAiming ? 'AIMING…' : 'READY';
@@ -366,7 +388,7 @@ export class HUD implements HudEvents {
       }
       this.locator.style.display = 'block';
       this.locator.style.transform = `translate(${sx}px, ${sy - (onScreen ? 34 : 0)}px)`;
-      (this.locator.querySelector('.arc') as SVGCircleElement).style.strokeDashoffset = String(119.4 * (1 - bug.window / BUG.window));
+      (this.locator.querySelector('.arc') as SVGCircleElement).style.strokeDashoffset = String(119.4 * (1 - bug.window / bug.stats.window));
       this.locator.classList.toggle('urgent', bug.window < 1.5);
     } else this.locator.style.display = 'none';
 
@@ -398,7 +420,7 @@ export class HUD implements HudEvents {
     }
 
     // counters
-    const alive = others.filter((a) => a.alive).length;
+    const alive = others.filter((a) => !a.out && !a.parked).length;
     (this.aliveEl.lastElementChild as HTMLElement).textContent = String(alive);
     (this.elimsEl.lastElementChild as HTMLElement).textContent = String(p.kills);
 
@@ -507,6 +529,29 @@ export class HUD implements HudEvents {
     g.rotate(yaw);
     g.scale(zoom / 2, zoom / 2);
     if (this.mapBase) g.drawImage(this.mapBase, -160 - p.motor.pos.x * S, -160 - p.motor.pos.z * S);
+    if (this.gloom) {
+      const G = this.gloom;
+      // storm outside the circle, white line where it's heading next
+      g.fillStyle = 'rgba(110, 40, 180, 0.45)';
+      g.beginPath();
+      g.rect(-400, -400, 800, 800);
+      g.arc((G.center.x - p.motor.pos.x) * S, (G.center.y - p.motor.pos.z) * S, Math.max(0.5, G.radius) * S, 0, Math.PI * 2, true);
+      g.fill('evenodd');
+      g.strokeStyle = '#e8a0ff';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc((G.center.x - p.motor.pos.x) * S, (G.center.y - p.motor.pos.z) * S, Math.max(0.5, G.radius) * S, 0, Math.PI * 2);
+      g.stroke();
+      if (G.nextR < G.radius - 0.5) {
+        g.strokeStyle = '#ffffff';
+        g.setLineDash([6, 5]);
+        g.lineWidth = 2.5;
+        g.beginPath();
+        g.arc((G.nextC.x - p.motor.pos.x) * S, (G.nextC.y - p.motor.pos.z) * S, Math.max(0.5, G.nextR) * S, 0, Math.PI * 2);
+        g.stroke();
+        g.setLineDash([]);
+      }
+    }
     // bug marker
     if (p.bug.out) {
       g.fillStyle = '#6ff7ff';
@@ -520,6 +565,17 @@ export class HUD implements HudEvents {
     // enemies only if recently shooting & close (sound-based "radar"), not all the time
     for (const o of others) {
       if (!o.alive || o === p) continue;
+      if (o.pingT > 0 && o.pingedBy === p) {
+        g.fillStyle = '#ffe27a';
+        g.strokeStyle = '#2b2238';
+        g.lineWidth = 2;
+        g.beginPath();
+        g.arc((o.motor.pos.x - p.motor.pos.x) * S, (o.motor.pos.z - p.motor.pos.z) * S, 5, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+        continue;
+      }
+      if (o.stealthT > 0) continue;
       if (o.weapon && o.weapon.cooldown > -1.2 && o.motor.pos.distanceTo(p.motor.pos) < 40) {
         g.fillStyle = '#ff6b6b';
         g.beginPath();

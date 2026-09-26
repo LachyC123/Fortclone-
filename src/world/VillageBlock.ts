@@ -9,6 +9,8 @@ import { buildTerrain, buildSkyRocks, islandRadius, STREAM_X } from './Terrain';
 import { makeSign } from './Signs';
 import { Rng } from '../core/math';
 import { toyMaterial } from '../render/Materials';
+import { buildCottage, buildNest, CottageSpec } from './Cottages';
+import { buildLaunchIsle } from './LaunchIsle';
 
 /**
  * MILESTONE 1 — "The Combat Playground": one polished corner of Buttonbury on a floating island.
@@ -21,6 +23,7 @@ import { toyMaterial } from '../render/Materials';
  */
 
 const rng = new Rng(1337);
+const reserved: [number, number, number, number][] = [];
 
 const HOUSE: WallStyle = { outer: PAL.cream, inner: 0xe9d3a8, trim: PAL.brown, surface: 'wood', beams: PAL.brownDark, plinth: PAL.stoneDark };
 const HOUSE_UP: WallStyle = { outer: PAL.cream, inner: 0xcfe3e8, trim: PAL.brown, surface: 'wood', beams: PAL.brownDark };
@@ -50,6 +53,32 @@ export function buildVillageBlock(k: Kit, world: World, doors: DoorSpec[]) {
   buildWindmill(k, world, -18, 28);
   buildStream(k, world);
   buildFarm(k, world);
+  // the wider village: enterable cottages around the square (seeded variety)
+  const cottages: CottageSpec[] = [
+    { name: 'Nutmeg Cottage', sub: 'mind the cat', x: 25, z: -17, yaw: -Math.PI / 2, w: 7, d: 6, floors: 2, wall: 0xf3e3c3, roof: PAL.roofTeal, shutters: PAL.terracotta, seed: 11 },
+    { name: 'The Crooked Kettle', sub: 'tea, mostly', x: -2, z: -34, yaw: 0, w: 8, d: 6, floors: 2, wall: 0xcfe3e8, roof: PAL.roofRed, shutters: PAL.mustard, seed: 12 },
+    { name: 'Moss Lodge', sub: 'wipe your feet', x: -19, z: -33, yaw: 0, w: 6.5, d: 5.5, floors: 1, wall: 0xd8e8c0, roof: PAL.roofPurple, shutters: PAL.teal, seed: 13 },
+    { name: 'Pip & Dot', sub: 'repairs (ish)', x: 17, z: 31, yaw: Math.PI, w: 7.5, d: 6, floors: 2, wall: 0xf7d0bd, roof: PAL.roofBlue, shutters: PAL.teal, seed: 14 },
+    { name: 'Button Hut', sub: 'no refunds', x: -10, z: 37, yaw: Math.PI, w: 6, d: 5, floors: 1, wall: 0xfff1d8, roof: PAL.roofTeal, shutters: PAL.pink, seed: 15 },
+    { name: 'Grove Cabin', sub: 'ssh, mushrooms sleeping', x: -38, z: 15, yaw: Math.PI / 2, w: 6, d: 5.5, floors: 1, wall: 0xc9a878, roof: PAL.roofRed, shutters: PAL.mustard, seed: 16 },
+  ];
+  for (const c of cottages) {
+    buildCottage(k, world, doors, c);
+    const r = Math.max(c.w, c.d) / 2 + 2.5;
+    reserved.push([c.x - r, c.z - r, c.x + r, c.z + r]);
+    // loot inside (and upstairs)
+    const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+    const at = (lx: number, ly: number, lz: number) => new THREE.Vector3(c.x + lx * cs + lz * sn, ly, c.z - lx * sn + lz * cs);
+    world.lootSpots.push({ pos: at(0.6, 0.05, 0.4), kind: 'weapon', rarity: 0 });
+    world.lootSpots.push({ pos: at(-1.2, 0.05, -0.6), kind: 'ammo', rarity: 0 });
+    if (c.floors === 2) world.lootSpots.push({ pos: at(0.4, 3.05, 0.6), kind: 'weapon', rarity: 0 });
+  }
+  // Rift Nests (bug-revive stations)
+  for (const [x, z] of [[-35, -21], [31, -6], [7, 39]] as [number, number][]) {
+    buildNest(k, world, x, z);
+    reserved.push([x - 4, z - 4, x + 4, z + 4]);
+  }
+  buildLaunchIsle(k, world);
   buildNature(k, world);
 
   world.playerSpawns.push({ pos: new THREE.Vector3(0, 0.05, 27), yaw: 0 });
@@ -587,6 +616,7 @@ function buildNature(k: Kit, world: World) {
     (x > -4 && x < 4 && z > 12 && z < 40) || // spawn path
     (x > 26 && x < 38 && z > 11 && z < 24) || // farm
     (x > -22 && x < -14 && z > 23 && z < 33) || // windmill
+    reserved.some(([x0, z0, x1, z1]) => x > x0 && x < x1 && z > z0 && z < z1) ||
     Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 3;
   let placed = 0;
   for (let i = 0; i < 400 && placed < 58; i++) {
@@ -609,6 +639,7 @@ function buildNature(k: Kit, world: World) {
   for (let i = 0, n = 0; i < 1400 && n < 650; i++) {
     const x = rng.range(-44, 44), z = rng.range(-44, 44);
     if ((x > -13.5 && x < 13.5 && z > -10.5 && z < 10.8) || Math.abs(x - STREAM_X) < 1.4) continue;
+    if (reserved.some(([x0, z0, x1, z1]) => x > x0 + 1.5 && x < x1 - 1.5 && z > z0 + 1.5 && z < z1 - 1.5)) continue;
     if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 1) continue;
     n++;
     const c = rng.pick([PAL.grass, PAL.grassLight, PAL.grassDark]);
@@ -618,6 +649,7 @@ function buildNature(k: Kit, world: World) {
   for (let i = 0; i < 9; i++) {
     const x = rng.range(-43, -33), z = rng.range(-25, 25);
     if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 3) continue;
+    if (reserved.some(([x0, z0, x1, z1]) => x > x0 && x < x1 && z > z0 && z < z1)) continue;
     P.mushroom(k, x, z, rng.range(0.8, 2.6), rng.pick([PAL.terracotta, PAL.lavender, PAL.mustard]));
   }
   k.push(-37, 0, -12, 0);

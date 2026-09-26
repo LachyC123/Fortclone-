@@ -282,6 +282,7 @@ export class LootSystem {
     const root = new THREE.Group();
     const model = this.buildModel(kind, defId, rarity);
     root.add(model);
+    model.traverse((o) => ((o as THREE.Mesh).castShadow = false));
     const color = this.colorOf({ kind, defId, rarity });
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8 }));
     glow.rotation.x = -Math.PI / 2;

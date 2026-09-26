@@ -4,6 +4,8 @@ import { PAL } from '../render/Palette';
 import { clamp, damp, lerp, TAU } from '../core/math';
 import { WeaponView } from '../combat/Weapons';
 import { skinnedTube, bindTwoBone, finalizeBinds, deform, lathe, curveTube } from './Sculpt';
+import { mergeToVertexColored } from '../render/Merge';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf';
 
@@ -82,6 +84,9 @@ export interface AnimInput {
   ads: boolean;
   reloadK: number; // -1 none, else 0..1
   healing: boolean;
+  diving?: boolean;
+  gliding?: boolean;
+  onBarge?: boolean;
 }
 
 /**
@@ -436,10 +441,100 @@ export class RascalRig {
       if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = false;
     });
     finalizeBinds(this.root, binds);
+    this.mouth.userData.keep = true;
+    // far LOD: the whole rascal baked into one mesh at rest pose (1 draw call)
+    this.root.updateMatrixWorld(true);
+    this.lodMesh = mergeToVertexColored(this.body);
+    this.lodMesh.castShadow = false;
+    this.lodMesh.visible = false;
+    this.root.add(this.lodMesh);
+    this.mergeStatic(this.root);
+    for (const b of binds) {
+      // skinned meshes: generous bounds so they can be frustum culled like everything else
+      b.mesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -0.3, 0), 1.2);
+      b.mesh.frustumCulled = true;
+    }
+  }
+
+  lodMesh!: THREE.Mesh;
+  private flatMat: THREE.MeshStandardMaterial | null = null;
+  lod = false;
+
+  private ghost = 1;
+  /** Fade the whole rascal (Wisp shimmer). 1 = solid. */
+  setGhost(k: number) {
+    if (Math.abs(k - this.ghost) < 0.01) return;
+    this.ghost = k;
+    const solid = k >= 0.999;
+    for (const m of this.materials) {
+      m.transparent = !solid;
+      m.opacity = k;
+      m.depthWrite = solid;
+    }
+  }
+
+  /** Switch between the full animated rig and the single-mesh stand-in. */
+  setLod(far: boolean) {
+    if (far === this.lod) return;
+    this.lod = far;
+    this.body.visible = !far;
+    this.lodMesh.visible = far;
+  }
+
+  setShadows(on: boolean) {
+    this.body.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && !o.userData.noShadow) (o as THREE.Mesh).castShadow = on;
+    });
+  }
+
+  /**
+   * Merge each node's static child meshes into one vertex-coloured mesh. Animation lives on the
+   * groups, so nothing visible changes — but a rascal drops from ~45 draw calls to ~20.
+   */
+  private mergeStatic(node: THREE.Object3D) {
+    for (const c of [...node.children]) if (!(c as THREE.Mesh).isMesh) this.mergeStatic(c);
+    const meshes = node.children.filter((c) => {
+      const m = c as THREE.Mesh;
+      return m.isMesh && !(m as THREE.SkinnedMesh).isSkinnedMesh && !m.userData.keep && m !== this.lodMesh && !Array.isArray(m.material) && (m.material as THREE.Material).blending !== THREE.AdditiveBlending;
+    }) as THREE.Mesh[];
+    if (meshes.length < 2) return;
+    if (!this.flatMat) {
+      this.flatMat = mat(0xffffff, 0.62);
+      this.flatMat.vertexColors = true;
+      this.materials.push(this.flatMat);
+    }
+    const parts: THREE.BufferGeometry[] = [];
+    for (const m of meshes) {
+      m.updateMatrix();
+      let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+      g.applyMatrix4(m.matrix);
+      const mm = m.material as THREE.MeshStandardMaterial;
+      const c = mm.color.clone();
+      if (mm.emissiveIntensity > 0 && mm.emissive.getHex() !== 0) c.lerp(mm.emissive, 0.3).multiplyScalar(1.3);
+      const n = g.getAttribute('position').count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = c.r;
+        col[i * 3 + 1] = c.g;
+        col[i * 3 + 2] = c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      parts.push(g);
+      node.remove(m);
+    }
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((p) => p.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, this.flatMat);
+    mesh.castShadow = true;
+    node.add(mesh);
   }
 
   private held: THREE.Object3D | null = null;
   private healK = 0;
+  private diveK = 0;
+  private glideK = 0;
   /** Put a consumable in the left hand (eating/drinking animation). */
   setHeld(obj: THREE.Object3D | null) {
     if (this.held) this.handL.remove(this.held);
@@ -653,6 +748,39 @@ export class RascalRig {
         this.head.rotation.x += 0.12 * k + nib * 0.3;
         if (this.expression === 'normal') this.eyeL.scale.y = this.eyeR.scale.y = 0.35; // blissful squint
       }
+    }
+
+    // --- skydive (belly down, limbs starfished) and glider hang
+    this.diveK = damp(this.diveK, a.diving ? 1 : 0, 6, dt);
+    this.glideK = damp(this.glideK, a.gliding ? 1 : 0, 8, dt);
+    this.body.rotation.x = -1.25 * this.diveK - 0.15 * this.glideK;
+    if (this.diveK > 0.02) {
+      const k = this.diveK, fl = Math.sin(t * 13) * 0.08;
+      _q.setFromEuler(new THREE.Euler(0.35 + fl, 0, -1.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(0.35 - fl, 0, 1.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.legL.rotation.x += (-0.35 - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (-0.35 - this.legR.rotation.x) * k;
+      this.legL.rotation.z += (-0.35 - this.legL.rotation.z) * k;
+      this.legR.rotation.z += (0.35 - this.legR.rotation.z) * k;
+      this.head.rotation.x += 0.9 * k; // look ahead while belly-down
+      if (this.weapon) this.weapon.group.visible = false;
+    }
+    if (this.glideK > 0.02) {
+      const k = this.glideK;
+      _q.setFromEuler(new THREE.Euler(2.95, 0, -0.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(2.95, 0, 0.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x *= 1 - k;
+      this.elbowR.rotation.x *= 1 - k;
+      const dang = Math.sin(t * 4) * 0.25;
+      this.legL.rotation.x += (dang - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (-dang - this.legR.rotation.x) * k;
+      this.kneeL.rotation.x += (-0.5 - this.kneeL.rotation.x) * k;
+      this.kneeR.rotation.x += (-0.3 - this.kneeR.rotation.x) * k;
+      if (this.weapon) this.weapon.group.visible = false;
     }
 
     // --- secondary motion: backpack, scarf, hat

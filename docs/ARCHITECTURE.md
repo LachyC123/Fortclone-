@@ -134,3 +134,33 @@ boots, pillowy backpack with straps, a draped scarf, hats tipped back so faces a
 Animation is fully procedural: gait phase from distance travelled, blended ground/air/slide poses,
 two-bone IK for weapon hands, squash & stretch, springs for backpack/scarf/hat, hit flash and
 reactions, throw, reload and equip animations.
+
+## 10. Match flow (`core/Match.ts`, `ui/MatchUI.ts`)
+
+`Match` implements `MatchHooks` (in `core/types.ts`), the only thing actors and bots know about the match:
+`phase`, the `SkyBarge`, `canDrop`, `allowBugout`, `onOut`, `onRevive`, `dropTargetFor`, `safeCenter/safeRadius`
+and `gloomOutside`. `GameCtx.match` is `null` in the playground, so every system degrades to M1/M2 behaviour.
+
+- **lobby** — Launch Isle (`world/LaunchIsle.ts`) sits 175m off the island at y=40. Bots are pre-created and
+  "join" with a poof over the first seconds. Damage is disabled; anyone falling off is put back.
+- **barge** — `world/SkyBarge.ts` flies a straight line across the island; riders are pinned to deck spots
+  (`riderWorld`). `Actor.flight` goes `barge → dive → glide → none` (`Motor.flyStep` handles airborne physics).
+  Bots pick a drop target (loot/crate spot) and jump when the barge stops getting closer to it.
+- **live** — `world/Gloom.ts` runs five wait/shrink phases (shader wall, ground ring, motes, lightning).
+  Damage ticks once per second outside. Bots rotate early (cautious) or late (aggressive) via `zoneRun`, and
+  `wanderGoal` samples inside the next circle.
+- **bugout** — `Actor.eliminate` asks `allowBugout`; if granted the Blinkbug enters the `piloted` state with a
+  timer and 30 HP (`Combat.raycastActors` can hit it). Reaching an unused Rift Nest (`Cottages.buildNest`)
+  calls `reviveAt`. Bots can target and shoot bugouts.
+- **end** — placement is `remaining + 1` at the moment you go out. XP/level and wins persist in `rr.profile`;
+  a cocoon is added to the bug collection.
+
+## 11. Blinkbug species (`progression/Bugs.ts`)
+
+A species is data: `ability`, stat overrides (`throwSpeed`, `gravity`, `restitution`, `window`, `cooldown`,
+`sticky`) and look flags. `Blinkbug` takes a species; `simulateBug` and `Blinkbug.throwVelocity` take the
+bug's stats so the aiming arc, bots and gameplay agree. Arrival tricks live in `Actor.bugAbility`; ongoing ones
+(Wisp shimmer via `RascalRig.setGhost`, Nimbus pings) in `Actor.updateBugTricks`. `ui/Collection.ts` +
+`ui/BugPreview.ts` (a tiny separate WebGL turntable) implement MY BUGS and the cocoon hatch.
+
+Crowd LOD: in the lobby and on the barge, non-local rascals swap to their single-mesh LOD beyond ~7m.

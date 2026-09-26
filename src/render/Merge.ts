@@ -47,3 +47,59 @@ export function mergeToVertexColored(root: THREE.Object3D, skip?: (m: THREE.Mesh
   mesh.castShadow = true;
   return mesh;
 }
+
+/**
+ * Merge a node's direct static child meshes into one vertex-coloured mesh (keeps groups, so any
+ * animation on the node itself still works). Meshes flagged userData.keep are left alone.
+ */
+export function mergeChildren(node: THREE.Object3D, material: THREE.Material, filter?: (m: THREE.Mesh) => boolean): THREE.Mesh | null {
+  const meshes = node.children.filter((c) => {
+    const m = c as THREE.Mesh;
+    return (
+      m.isMesh &&
+      !(m as THREE.SkinnedMesh).isSkinnedMesh &&
+      !m.userData.keep &&
+      !Array.isArray(m.material) &&
+      (m.material as THREE.Material).blending !== THREE.AdditiveBlending &&
+      !(m.material as THREE.Material).transparent &&
+      (!filter || filter(m))
+    );
+  }) as THREE.Mesh[];
+  if (meshes.length < 2) return null;
+  const parts: THREE.BufferGeometry[] = [];
+  let cast = false;
+  for (const m of meshes) {
+    m.updateMatrix();
+    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    g.applyMatrix4(m.matrix);
+    const mm = m.material as THREE.MeshStandardMaterial;
+    const c = (mm.color ?? new THREE.Color(1, 1, 1)).clone();
+    if (mm.emissive && mm.emissiveIntensity > 0 && mm.emissive.getHex() !== 0) c.lerp(mm.emissive, 0.4).multiplyScalar(1.25);
+    const n = g.getAttribute('position').count;
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    parts.push(g);
+    cast = cast || m.castShadow;
+    node.remove(m);
+  }
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((p) => p.dispose());
+  if (!merged) return null;
+  const mesh = new THREE.Mesh(merged, material);
+  mesh.castShadow = cast;
+  node.add(mesh);
+  return mesh;
+}
+
+const sharedFlat = new Map<string, THREE.MeshStandardMaterial>();
+export function flatMaterial(key = 'default', rough = 0.6) {
+  let m = sharedFlat.get(key);
+  if (!m) sharedFlat.set(key, (m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: rough })));
+  return m;
+}

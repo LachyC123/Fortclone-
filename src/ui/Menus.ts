@@ -2,6 +2,9 @@ import type { Game } from '../core/Game';
 import type { Quality } from '../render/Renderer';
 import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
+import { CollectionScreen } from './Collection';
+import { SPECIES_BY_ID } from '../progression/Bugs';
+import { RARITY } from '../render/Palette';
 
 export interface Settings {
   quality: Quality;
@@ -47,23 +50,55 @@ export class Menus {
   private title = h('div', 'overlay');
   private pauseEl = h('div', 'overlay hidden');
   private elimEl = h('div', 'overlay hidden');
+  collection!: CollectionScreen;
 
   constructor(private game: Game) {
-    this.title.innerHTML = `<div class="title">
+    this.title.innerHTML = `<div class="title home">
       <div class="logo">RIFT<span>RASCALS</span></div>
       <div class="tagline">DROP. BLINK. GRAB. RUN.</div>
+      <div class="profile big"></div>
       <button class="btn play">PLAY</button>
-      <div class="hint">Milestone 1 · Combat Playground<br>
+      <button class="mybug"></button>
+      <div class="homebtns">
+        <button class="btn secondary bugsbtn">MY BUGS<span class="badge"></span></button>
+        <button class="btn secondary practice">PRACTICE</button>
+        <button class="btn secondary howto">HOW TO PLAY</button>
+      </div>
+      <div class="hint hidden">
       <kbd>WASD</kbd> move · <kbd>Mouse</kbd> aim · <kbd>LMB</kbd> fire · <kbd>RMB</kbd> aim down sights<br>
-      <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump/climb · <kbd>C</kbd> crouch/slide · <kbd>R</kbd> reload · <kbd>F</kbd> pick up<br>
+      <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump/climb/<b>drop from the Sky Barge</b> · <kbd>C</kbd> crouch/slide · <kbd>R</kbd> reload · <kbd>F</kbd> pick up<br>
       <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!)<br>
       <kbd>G</kbd> hold/release to throw a utility · <kbd>H</kbd> heal · <kbd>X</kbd> drop gun · <kbd>1-3</kbd> weapons · <kbd>Esc</kbd> pause<br>
-      Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!</div></div>`;
+      Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!<br>
+      Knocked out? Your <b>Blinkbug</b> carries your spark to a <b>Rift Nest</b> — once per match. Stay out of <b>THE GLOOM</b>.</div></div>`;
     this.title.querySelector('.play')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();
-      this.game.play();
+      this.game.startMatch();
     });
+    this.title.querySelector('.practice')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.game.startPlayground();
+    });
+    this.collection = new CollectionScreen(this.game);
+    this.collection.onClose = () => {
+      this.refreshProfile();
+      this.title.classList.remove('hidden');
+    };
+    const openBugs = () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.collection.open();
+    };
+    this.title.querySelector('.bugsbtn')!.addEventListener('click', openBugs);
+    this.title.querySelector('.mybug')!.addEventListener('click', openBugs);
+    this.title.querySelector('.howto')!.addEventListener('click', () => {
+      audio.uiTap();
+      this.title.querySelector('.hint')!.classList.toggle('hidden');
+    });
+    this.refreshProfile();
 
     this.buildPause();
     this.elimEl.innerHTML = `<div class="elim"><div class="t">ELIMINATED!</div><div class="by"></div><div style="margin-top:18px"><button class="btn">RESPAWN</button></div></div>`;
@@ -117,7 +152,32 @@ export class Menus {
       this.game.play();
     });
     sync();
-    void ICONS;
+  }
+
+  refreshProfile() {
+    let p = { level: 1, wins: 0, matches: 0 };
+    try {
+      p = { ...p, ...JSON.parse(localStorage.getItem('rr.profile') || '{}') };
+    } catch {
+      /* ignore */
+    }
+    (this.title.querySelector('.profile') as HTMLElement).innerHTML = `<span>LV ${p.level}</span><span>${ICONS.skull} ${p.wins} wins</span>`;
+    const c = this.game.collection;
+    const own = c.bugs.find((b) => b.species === c.equipped)!;
+    const sp = SPECIES_BY_ID[own.species];
+    const mb = this.title.querySelector('.mybug') as HTMLElement;
+    mb.style.setProperty('--tint', `#${sp.tint.toString(16).padStart(6, '0')}`);
+    mb.style.setProperty('--rc', RARITY[sp.rarity].css);
+    mb.innerHTML = `<span class="ic">${ICONS.bug}</span><span>with <b>${own.name}</b> the ${sp.name}</span>`;
+    const badge = this.title.querySelector('.bugsbtn .badge') as HTMLElement;
+    badge.textContent = c.cocoons.length ? String(c.cocoons.length) : '';
+    badge.style.display = c.cocoons.length ? '' : 'none';
+  }
+
+  showTitle() {
+    this.hideAll();
+    this.refreshProfile();
+    this.title.classList.remove('hidden');
   }
 
   hideAll() {

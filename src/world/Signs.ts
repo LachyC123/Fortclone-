@@ -47,14 +47,7 @@ export function makeSign(text: string, opts: { w?: number; h?: number; bg?: stri
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 });
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), [
-    new THREE.MeshStandardMaterial({ color: 0x5e3b27 }),
-    new THREE.MeshStandardMaterial({ color: 0x5e3b27 }),
-    new THREE.MeshStandardMaterial({ color: 0x5e3b27 }),
-    new THREE.MeshStandardMaterial({ color: 0x5e3b27 }),
-    mat,
-    mat,
-  ]);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.06), mat);
   mesh.castShadow = true;
   return mesh;
 }

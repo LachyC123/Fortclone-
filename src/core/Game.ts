@@ -22,9 +22,10 @@ import { WEAPONS, AMMO_INFO, AmmoType } from '../combat/Weapons';
 import { CollisionWorld, ColFlags } from '../physics/Collision';
 import { Throwables } from '../combat/Throwables';
 import { geoStats } from '../render/GeoKit';
+import { Match } from './Match';
+import { SPECIES_BY_ID, Collection, loadCollection, saveCollection, randomBugName, randomSpecies } from '../progression/Bugs';
 
-const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo'];
-const BUG_TINTS = [PAL.blink, 0xffa3e0, 0xb6ff9a, 0xffd36b, 0xc7a8ff];
+const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo', 'Beans4Brains', 'Noodle', 'Gran Turbo', 'Mr. Wiggles', 'SoggyWaffle', 'Pip', 'Honk', 'Tater Tot', 'Lady Fizz', 'Gloomzilla', 'Crumpet', 'Bop'];
 
 /**
  * Top-level orchestrator. Holds the shared GameCtx, runs the frame loop in a fixed order and
@@ -65,6 +66,12 @@ export class Game implements GameCtx {
   private autoQualityT = 6;
   private lowFpsTime = 0;
   private titleOrbit = 0;
+  /** the battle royale in progress (null in the playground / on the title screen) */
+  match: Match | null = null;
+  private matchCtl!: Match;
+  mode: 'none' | 'playground' | 'match' = 'none';
+  /** your Blinkbug collection (saved locally) */
+  collection: Collection = loadCollection();
   /** test hook: fixed camera for visual review */
   debugCam: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 
@@ -103,6 +110,8 @@ export class Game implements GameCtx {
     this.createBot('chaotic');
     for (const s of this.world.lootSpots) this.spawnLootSpot(s);
     for (const c of this.world.crateSpots) this.loot.placeCrate(c.pos, c.yaw);
+    this.matchCtl = new Match(this);
+    this.matchCtl.ui.setVisible(false);
 
     this.hud.onPlayerEliminated = (by) => {
       this.respawnT = 3.5;
@@ -131,7 +140,8 @@ export class Game implements GameCtx {
   /* ------------------------------------------------------------------ setup */
 
   private createPlayer() {
-    const p = new Actor('You', LOOKS[0], this, PAL.blink);
+    const own = this.collection.bugs.find((b) => b.species === this.collection.equipped)!;
+    const p = new Actor('You', LOOKS[0], this, SPECIES_BY_ID[own.species], own.name);
     p.isLocal = true;
     this.pc = new PlayerController(this.input, this.camRig, this.scene);
     p.controller = this.pc;
@@ -163,7 +173,7 @@ export class Game implements GameCtx {
     const used = new Set(this.actors.map((a) => a.name));
     const name = BOT_NAMES.find((n) => !used.has(n) && Math.random() < 0.4) ?? BOT_NAMES.find((n) => !used.has(n)) ?? 'Rascal';
     const look = LOOKS[1 + Math.floor(Math.random() * (LOOKS.length - 1))];
-    const a = new Actor(name, look, this, pick(BUG_TINTS));
+    const a = new Actor(name, look, this, randomSpecies(), randomBugName());
     const brain = new BotController(PROFILES[arch]);
     a.controller = brain;
     a.onDamaged = (from, ctx) => brain.onDamaged(a, from, ctx);
@@ -228,7 +238,86 @@ export class Game implements GameCtx {
     loop();
   }
 
+  /** Equip a bug from the collection on your rascal. */
+  equipBug(speciesId: string) {
+    const own = this.collection.bugs.find((b) => b.species === speciesId);
+    if (!own) return;
+    this.collection.equipped = speciesId;
+    saveCollection(this.collection);
+    this.player.setSpecies(SPECIES_BY_ID[own.species], own.name);
+  }
+
+  saveCollection() {
+    saveCollection(this.collection);
+    const own = this.collection.bugs.find((b) => b.species === this.collection.equipped);
+    if (own) this.player.bugName = own.name;
+  }
+
+  /** Title screen PLAY: into Launch Isle for a real match. */
+  startMatch() {
+    this.mode = 'match';
+    this.match = this.matchCtl;
+    this.matchCtl.ui.setVisible(true);
+    this.respawnT = -1;
+    this.botRespawn.clear();
+    this.matchCtl.startLobby();
+    this.play();
+  }
+
+  /** Practice: the respawning combat playground from Milestones 1–2. */
+  startPlayground() {
+    if (this.mode === 'match') this.leaveMatch();
+    this.mode = 'playground';
+    this.play();
+  }
+
+  private leaveMatch() {
+    this.match = null;
+    this.matchCtl.ui.setVisible(false);
+    this.matchCtl.ui.hideSummary();
+    this.matchCtl.gloom.reset();
+    this.matchCtl.barge.active = false;
+    this.matchCtl.barge.group.visible = false;
+    // back to a small playground crew
+    while (this.actors.length > 4) {
+      const a = this.actors.pop()!;
+      a.dispose(this);
+    }
+    this.resetWorldForMatch();
+    for (const a of this.actors) {
+      a.parked = false;
+      a.flight = 'none';
+      if (a !== this.player) this.spawnBot(a);
+    }
+    this.respawnPlayer();
+  }
+
+  goHome() {
+    if (this.mode === 'match') this.leaveMatch();
+    this.mode = 'none';
+    this.paused = true;
+    this.input.enabled = false;
+    document.exitPointerLock?.();
+    this.hud.root.classList.add('hidden');
+    this.menus.showTitle();
+  }
+
+  /** Fresh loot, closed crates and recharged Rift Nests. */
+  resetWorldForMatch() {
+    for (const p of [...this.loot.pickups]) this.loot.remove(p);
+    for (const s of this.world.lootSpots) this.spawnLootSpot(s);
+    this.loot.resetCrates();
+    for (const n of this.world.nests) {
+      n.used = false;
+      n.fx.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+        if (m && m.color && o.userData.baseColor !== undefined) m.color.setHex(o.userData.baseColor);
+      });
+    }
+  }
+
   play() {
+    if (this.mode === 'none') this.mode = 'playground';
     audio.unlock();
     this.paused = false;
     this.menus.hideAll();
@@ -349,11 +438,18 @@ export class Game implements GameCtx {
     this.throwables.update(dt, this);
     this.world.update(dt, this.actors, this.camera.position);
 
+    this.match?.update(dt);
+
     // camera & listener
     const p = this.player;
-    if (p.alive) {
+    const spec = this.match && p.out ? this.match.spectateTarget() : null;
+    if (p.alive || p.bugout) {
       const w = p.weapon;
-      this.camRig.update(dt, p, p.ads && w ? w.def.adsFov : null);
+      this.camRig.update(dt, p, p.alive && p.ads && w ? w.def.adsFov : null);
+    } else if (spec && this.match!.phase !== 'end') {
+      // watch whoever is still fighting (usually the rascal who got you)
+      this.camRig.yaw += dt * 0.25;
+      this.camRig.update(dt, spec, null);
     } else {
       // slow drift up while eliminated
       this.camera.position.y += dt * 1.5;
@@ -371,8 +467,24 @@ export class Game implements GameCtx {
     // HUD
     const w = p.weapon;
     const spread = w ? (p.ads ? w.def.spreadAds : w.def.spreadHip) + w.bloom + (p.motor.horizontalSpeed() > 1 ? w.def.spreadMove : 0) : 0;
-    this.hud.update(dt, p, this.actors, this.pc.contextPickup, spread, this.fps, this.input.s.touchActive, this.world, this.pc.contextCrate);
-    this.touch.updateVisuals(p.bug, BUG.window, !!(this.pc.contextPickup || this.pc.contextCrate), p);
+    this.hud.update(dt, p, this.actors, p.alive ? this.pc.contextPickup : null, spread, this.fps, this.input.s.touchActive, this.world, p.alive ? this.pc.contextCrate : null);
+    this.touch.updateVisuals(p.bug, p.bug.stats.window, !!(this.pc.contextPickup || this.pc.contextCrate), p);
+
+    if (this.match) {
+      const gl = this.match.gloom;
+      const who = spec ?? p;
+      const inGloom = gl.state !== 'idle' && who.flight === 'none' ? gl.edgeness(who.bugout ? who.bug.pos : who.motor.pos) : 0;
+      this.match.ui.gloomAmount(Math.min(1, inGloom * 0.8));
+      this.hud.gloom = this.match.gloom.state !== 'idle' ? this.match.gloom : null;
+      this.hud.root.classList.toggle('flying', p.flight !== 'none' || !!p.bugout);
+      this.hud.root.classList.toggle('lobby', this.match.phase === 'lobby');
+      this.hud.root.classList.toggle('ended', this.match.phase === 'end');
+    } else {
+      this.hud.gloom = null;
+      this.hud.root.classList.remove('flying', 'lobby', 'ended');
+    }
+    if (this.sounds.length) this.sounds = this.sounds.filter((s) => this.time - s.time < 1);
+    if (this.mode === 'match') return;
 
     // playground flow: respawns & loot refresh
     if (this.respawnT > 0) {

@@ -162,7 +162,7 @@ export class PlayerController implements Controller {
       return;
     }
     const pos = _p.copy(a.eyePos(_v)).setY(a.motor.pos.y + 1.1);
-    const vel = Blinkbug.throwVelocity(a.intent.aimDir, _vel);
+    const vel = Blinkbug.throwVelocity(a.intent.aimDir, _vel, a.bug.stats.throwSpeed);
     vel.x += a.motor.vel.x * 0.5;
     vel.z += a.motor.vel.z * 0.5;
     const m = new THREE.Matrix4();
@@ -171,7 +171,7 @@ export class PlayerController implements Controller {
     const dt = BUG.step;
     let lastN: THREE.Vector3 | null = null;
     for (let i = 0; i < 360 && n < 40; i++) {
-      settled = simulateBug(ctx.cw, pos, vel, dt, (nn) => (lastN = nn.clone()));
+      settled = simulateBug(ctx.cw, pos, vel, dt, (nn) => (lastN = nn.clone()), a.bug.stats);
       if (i % 5 === 0 && i > 8) {
         const s = 1 - (n / 40) * 0.4 + Math.sin(performance.now() * 0.01 - n * 0.6) * 0.18;
         m.makeScale(s, s, s).setPosition(pos);

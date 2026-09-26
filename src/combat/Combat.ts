@@ -27,7 +27,15 @@ export interface ActorHit {
 export function raycastActors(ctx: GameCtx, o: THREE.Vector3, d: THREE.Vector3, maxT: number, ignore: Actor | null): ActorHit | null {
   let best: ActorHit | null = null;
   for (const a of ctx.actors) {
-    if (!a.alive || a === ignore) continue;
+    if (a === ignore) continue;
+    if (!a.alive) {
+      // a fleeing Blinkbug (bug-revive) can be swatted
+      if (a.bugout) {
+        const tb = raySphere(o, d, a.bug.pos, 0.38);
+        if (tb >= 0 && tb < maxT && (!best || tb < best.t)) best = { actor: a, t: tb, headshot: false };
+      }
+      continue;
+    }
     // cheap reject: distance from ray to actor centre
     _to.subVectors(a.motor.pos, o);
     const along = _to.dot(d);

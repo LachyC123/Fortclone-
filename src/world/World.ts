@@ -13,6 +13,7 @@ import { rand, Rng } from '../core/math';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildVillageBlock } from './VillageBlock';
 import { toyMaterial } from '../render/Materials';
+import { mergeChildren, flatMaterial } from '../render/Merge';
 
 export interface LootSpot {
   pos: THREE.Vector3;
@@ -79,6 +80,9 @@ export class World {
   zones: Zone[] = [];
   lootSpots: LootSpot[] = [];
   crateSpots: { pos: THREE.Vector3; yaw: number }[] = [];
+  nests: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }[] = [];
+  /** Launch Isle (pre-match lobby) */
+  lobby = { center: new THREE.Vector3(0, 40, -175), radius: 16, bargeDock: new THREE.Vector3(20, 42, -175) };
   playerSpawns: { pos: THREE.Vector3; yaw: number }[] = [];
   botSpawns: THREE.Vector3[] = [];
   islandRadius = 46;
@@ -246,6 +250,7 @@ export class World {
     win2.position.z = -0.05;
     win2.rotation.y = Math.PI;
     pivot.add(win, win2);
+    mergeChildren(pivot, flatMaterial('door', 0.7));
     this.group.add(pivot);
     const c = Math.cos(d.yaw), s = Math.sin(d.yaw);
     const cx = d.x + (d.w / 2) * c, cz = d.z - (d.w / 2) * s;

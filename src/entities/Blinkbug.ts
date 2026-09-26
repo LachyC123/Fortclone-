@@ -5,6 +5,8 @@ import { clamp, damp, lerp } from '../core/math';
 import type { FX } from '../fx/FX';
 import { PShape } from '../fx/Particles';
 import { audio } from '../audio/Audio';
+import { mergeChildren } from '../render/Merge';
+import { BugSpecies, BugStats, SPECIES_BY_ID, statsFor, BASE_BUG_STATS } from '../progression/Bugs';
 
 export const BUG = {
   radius: 0.14,
@@ -20,7 +22,7 @@ export const BUG = {
   step: 1 / 120,
 };
 
-export type BugState = 'docked' | 'flying' | 'landed' | 'returning';
+export type BugState = 'docked' | 'flying' | 'landed' | 'returning' | 'piloted';
 
 export interface BugOwner {
   isLocal: boolean;
@@ -30,19 +32,29 @@ export interface BugOwner {
 }
 
 const _n = new THREE.Vector3();
+/** normal of the last surface a sticky bug grabbed */
+export const _stuck = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
 
 /** Pure trajectory simulation — shared by gameplay and the aiming arc so the preview never lies. */
-export function simulateBug(cw: CollisionWorld, pos: THREE.Vector3, vel: THREE.Vector3, dt: number, onBounce?: (n: THREE.Vector3, speed: number, o: OBB) => void): boolean {
-  vel.y -= BUG.gravity * dt;
+export function simulateBug(cw: CollisionWorld, pos: THREE.Vector3, vel: THREE.Vector3, dt: number, onBounce?: (n: THREE.Vector3, speed: number, o: OBB) => void, stats: BugStats = BASE_BUG_STATS): boolean {
+  vel.y -= stats.gravity * dt;
   pos.addScaledVector(vel, dt);
   let settled = false;
   cw.resolveSphere(pos, BUG.radius, ColFlags.BlocksBug, (n, _d, o) => {
     const vn = vel.dot(n);
+    if (stats.sticky) {
+      // Stickle: splat and hold on to whatever it touched first
+      if (onBounce && vn < -1.2) onBounce(n, -vn, o);
+      vel.set(0, 0, 0);
+      _stuck.copy(n);
+      settled = true;
+      return;
+    }
     if (vn < 0) {
       const impact = -vn;
-      vel.addScaledVector(n, -vn * (1 + BUG.restitution));
+      vel.addScaledVector(n, -vn * (1 + stats.restitution));
       // tangential friction
       const vnn = vel.dot(n);
       _v.copy(vel).addScaledVector(n, -vnn).multiplyScalar(BUG.friction);
@@ -91,13 +103,25 @@ export class Blinkbug {
   private zzzT = 0;
   excited = false;
   panic = 0;
+  private baseScale = 1;
 
-  constructor(private cw: CollisionWorld, private fx: FX, private owner: BugOwner, tint = PAL.blink) {
-    this.bodyMat = new THREE.MeshStandardMaterial({ color: tint, emissive: tint, emissiveIntensity: 0.55, roughness: 0.3 });
-    const belly = new THREE.MeshStandardMaterial({ color: 0xe8ffff, emissive: 0xbff8ff, emissiveIntensity: 0.4, roughness: 0.4 });
+  species: BugSpecies;
+  stats: BugStats;
+  /** set when a sticky bug grabs a wall (blink lands you beside it) */
+  stuckN: THREE.Vector3 | null = null;
+  tint: number;
+
+  constructor(private cw: CollisionWorld, private fx: FX, private owner: BugOwner, species: BugSpecies = SPECIES_BY_ID.zippit) {
+    this.species = species;
+    this.stats = statsFor(species);
+    const tint = (this.tint = species.tint);
+    const L = species.look;
+    this.bodyMat = new THREE.MeshStandardMaterial({ color: tint, emissive: tint, emissiveIntensity: 0.55, roughness: 0.3, transparent: !!L.ghost, opacity: L.ghost ? 0.72 : 1 });
+    const belly = new THREE.MeshStandardMaterial({ color: species.belly, emissive: species.belly, emissiveIntensity: 0.3, roughness: 0.4 });
     const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
     const ink = new THREE.MeshStandardMaterial({ color: 0x1d1726, roughness: 0.2 });
-    const wingMat = new THREE.MeshBasicMaterial({ color: 0xe6ffff, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+    const gold = new THREE.MeshStandardMaterial({ color: 0xffc83d, roughness: 0.3, metalness: 0.2 });
+    const wingMat = new THREE.MeshBasicMaterial({ color: species.wing, transparent: true, opacity: L.longWings ? 0.7 : 0.55, side: THREE.DoubleSide, depthWrite: false });
     const bulb = new THREE.MeshBasicMaterial({ color: 0xfff6a0 });
 
     this.root.add(this.bodyG);
@@ -136,26 +160,95 @@ export class Blinkbug {
       this.bodyG.add(a);
       this.antennae.push(a);
     }
+    // species extras
+    if (L.horns) {
+      for (const sx of [-1, 1]) {
+        const h = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 6), new THREE.MeshStandardMaterial({ color: 0xfff1d8, roughness: 0.5 }));
+        h.position.set(sx * 0.075, 0.1, -0.05);
+        h.rotation.z = -sx * 0.6;
+        this.bodyG.add(h);
+      }
+    }
+    if (L.pincers) {
+      for (const sx of [-1, 1]) {
+        const pc = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 5, 10, Math.PI * 1.2), ink);
+        pc.position.set(sx * 0.045, -0.04, -0.13);
+        pc.rotation.set(Math.PI / 2, 0, sx > 0 ? Math.PI * 0.9 : -Math.PI * 0.1);
+        this.bodyG.add(pc);
+      }
+    }
+    if (L.crown) {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.04, 10, 1, true), gold);
+      c.position.set(0, 0.13, 0.01);
+      this.bodyG.add(c);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.035, 4), gold);
+        sp.position.set(Math.cos(a) * 0.048, 0.165, 0.01 + Math.sin(a) * 0.048);
+        this.bodyG.add(sp);
+      }
+    }
+    if (L.leaf) {
+      const lf = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0x4fbf4a, roughness: 0.6 }));
+      lf.scale.set(1, 0.18, 0.55);
+      lf.position.set(0.02, 0.13, 0.03);
+      lf.rotation.set(0.2, 0.6, 0.35);
+      this.bodyG.add(lf);
+    }
     // wings
     const wg = new THREE.CircleGeometry(0.12, 12);
-    wg.scale(0.6, 1, 1);
-    wg.translate(0, 0.1, 0);
+    wg.scale(L.longWings ? 0.55 : 0.6, L.longWings ? 1.45 : 1, 1);
+    wg.translate(0, L.longWings ? 0.15 : 0.1, 0);
     this.wingL = new THREE.Mesh(wg, wingMat);
     this.wingR = new THREE.Mesh(wg, wingMat);
     this.wingL.position.set(-0.05, 0.08, 0.05);
     this.wingR.position.set(0.05, 0.08, 0.05);
     this.bodyG.add(this.wingL, this.wingR);
-    // stubby legs
+    // stubby legs (springs for Hopper, sucker feet for Stickle)
     for (let i = 0; i < 4; i++) {
       const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.04, 2, 4), ink);
       l.position.set(i % 2 ? 0.06 : -0.06, -0.11, i < 2 ? -0.04 : 0.04);
       this.bodyG.add(l);
       this.legs.push(l);
+      if (L.springs) {
+        for (let k = 0; k < 3; k++) {
+          const coil = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 4, 10), gold);
+          coil.position.set(l.position.x, -0.13 - k * 0.016, l.position.z);
+          coil.rotation.x = Math.PI / 2;
+          this.bodyG.add(coil);
+        }
+      }
+      if (L.suckers) {
+        const sk = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff8fc0, roughness: 0.5 }));
+        sk.scale.set(1, 0.45, 1);
+        sk.position.set(l.position.x, -0.14, l.position.z);
+        this.bodyG.add(sk);
+      }
     }
     // soft halo
-    this.halo = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.halo = new THREE.Mesh(new THREE.SphereGeometry(species.ability === 'ping' ? 0.34 : 0.22, 12, 8), new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }));
     this.root.add(this.halo);
-    this.root.scale.setScalar(1);
+    this.bodyG.scale.setScalar(L.scale ?? 1);
+    this.baseScale = L.scale ?? 1;
+    // merge static bits: eyes, antennae and body+legs each become one draw call
+    const flat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, emissive: tint, emissiveIntensity: 0.0 });
+    for (const e of [this.eyeL, this.eyeR, ...this.antennae]) mergeChildren(e, flat);
+    body.userData.keep = true; // glows: keeps its own emissive material
+    mergeChildren(this.bodyG, flat);
+    this.legs = [];
+  }
+
+  /** a happy wiggle (collection screen taps, hatching) */
+  poke() {
+    this.squashV += 9;
+    this.excited = true;
+    this.idleLook = (Math.random() - 0.5) * 2;
+    audio.chirp(this.root.position, 1.1 + Math.random() * 0.4, 0.25);
+  }
+
+  /** hide the docked bug on far-away rascals (it's tiny at that range) */
+  setFar(far: boolean) {
+    this.root.visible = !(far && this.state === 'docked') && this.owner.alive;
   }
 
   get ready() {
@@ -169,13 +262,13 @@ export class Blinkbug {
   }
 
   /** Initial velocity for a throw along an aim direction. */
-  static throwVelocity(dir: THREE.Vector3, out: THREE.Vector3) {
+  static throwVelocity(dir: THREE.Vector3, out: THREE.Vector3, speed = BUG.throwSpeed) {
     const pitch = Math.asin(clamp(dir.y, -1, 1));
     const yawX = dir.x, yawZ = dir.z;
     const h = Math.hypot(yawX, yawZ) || 1;
     const p = clamp(pitch + BUG.upBias, -0.9, 1.35);
     const cp = Math.cos(p);
-    return out.set((yawX / h) * cp * BUG.throwSpeed, Math.sin(p) * BUG.throwSpeed, (yawZ / h) * cp * BUG.throwSpeed);
+    return out.set((yawX / h) * cp * speed, Math.sin(p) * speed, (yawZ / h) * cp * speed);
   }
 
   throw(from: THREE.Vector3, vel: THREE.Vector3) {
@@ -184,7 +277,8 @@ export class Blinkbug {
     this.pos.copy(from);
     this.vel.copy(vel);
     this.flightT = 0;
-    this.window = BUG.window;
+    this.window = this.stats.window;
+    this.stuckN = null;
     this.acc = 0;
     this.squashV = 6;
     audio.bugThrow(from);
@@ -197,7 +291,7 @@ export class Blinkbug {
   swapped(ownerOldPos: THREE.Vector3) {
     this.pos.copy(ownerOldPos).setY(ownerOldPos.y + 0.9);
     this.dizzyT = 0.3;
-    this.beginReturn(BUG.cooldownAfterBlink);
+    this.beginReturn(this.stats.cooldown);
   }
 
   private beginReturn(cd: number) {
@@ -219,6 +313,16 @@ export class Blinkbug {
     }
   }
 
+  /** Owner eliminated but gets a second chance: the bug carries their spark. */
+  startPilot(from: THREE.Vector3) {
+    this.state = 'piloted';
+    this.pos.copy(from);
+    this.window = 0;
+    this.cooldown = 0;
+    this.root.visible = true;
+    this.squashV = 10;
+  }
+
   /** Owner eliminated: shocked face, then vanish. */
   vanish() {
     this.panic = 1;
@@ -237,7 +341,7 @@ export class Blinkbug {
 
   update(dt: number) {
     this.t += dt;
-    if (!this.owner.alive) return;
+    if (!this.owner.alive && this.state !== 'piloted') return;
     if (this.cooldown > 0 && this.state !== 'returning') this.cooldown = Math.max(0, this.cooldown - dt);
     else if (this.state === 'returning') this.cooldown = Math.max(0, this.cooldown - dt);
 
@@ -292,12 +396,16 @@ export class Blinkbug {
     while (this.acc >= BUG.step) {
       this.acc -= BUG.step;
       settled = simulateBug(this.cw, this.pos, this.vel, BUG.step, (n, impact) => {
+        if (this.stats.sticky) {
+          this.stuckN = n.clone();
+          audio.splat(this.pos);
+        }
         this.squashV -= Math.min(10, impact * 0.9);
         audio.bugBounce(this.pos, impact);
         if (impact > 3) audio.chirp(this.pos, 1.4 + Math.random() * 0.3, 0.3);
         this.fx.dust(_p.copy(this.pos).addScaledVector(n, -BUG.radius), Math.min(5, impact * 0.5));
         this.fx.glow.emit(this.pos, { count: 3, color: [PAL.blink, 0xffffff], speed: [1, 3], spread: 1, life: 0.2, size: 0.08, shape: PShape.Sparkle });
-      }) || settled;
+      }, this.stats) || settled;
       if (settled) break;
     }
     this.fx.bugTrail(this.pos);
@@ -319,7 +427,8 @@ export class Blinkbug {
     this.squashV += (-this.squash * 220 - this.squashV * 12) * dt;
     this.squash += this.squashV * dt;
     const sq = clamp(this.squash * 0.06, -0.45, 0.45);
-    this.bodyG.scale.set(1 - sq * 0.6, 1 + sq, 1 - sq * 0.6);
+    const bs = this.baseScale;
+    this.bodyG.scale.set((1 - sq * 0.6) * bs, (1 + sq) * bs, (1 - sq * 0.6) * bs);
 
     let flap = 0;
     let glow = 0.55;
@@ -378,7 +487,7 @@ export class Blinkbug {
       this.yaw = damp(this.yaw, this.idleLook, 6, dt);
       flap = Math.sin(t * 5) * 0.4;
       // beacon pulse speeds up as the window closes
-      const urgency = 1 - this.window / BUG.window;
+      const urgency = 1 - this.window / this.stats.window;
       glow = 0.8 + Math.sin(t * (6 + urgency * 14)) * 0.4;
       if (Math.random() < dt * 6) this.fx.glow.emit(_p.copy(this.pos).setY(this.pos.y + 0.1), { count: 1, color: PAL.blink, speed: 0.3, up: 1.2, life: 0.6, size: 0.08, shape: PShape.Sparkle });
     } else {

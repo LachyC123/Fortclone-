@@ -96,6 +96,24 @@ export class CharacterMotor {
     this.mantleT = -1;
   }
 
+  /**
+   * Free flight integration (skydiving / gliding): no walking rules, same collision.
+   * Returns true when we touch walkable ground.
+   */
+  flyStep(dt: number): boolean {
+    this.grounded = false;
+    _disp.copy(this.vel).multiplyScalar(dt);
+    const steps = Math.max(1, Math.ceil(_disp.length() / 0.25));
+    _disp.divideScalar(steps);
+    for (let s = 0; s < steps; s++) {
+      this.pos.add(_disp);
+      this.resolve();
+      if (this.grounded) break;
+    }
+    if (!this.grounded && this.vel.y <= 0) this.probeGround(0.05);
+    return this.grounded;
+  }
+
   /** External push (explosions, gusts, bounce pads, knockback). */
   impulse(v: THREE.Vector3) {
     this.vel.add(v);

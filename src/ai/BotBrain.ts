@@ -126,6 +126,7 @@ export class BotController implements Controller {
     if (wasBlink && me.bug.canBlink) it.blink = true;
 
     this.jumpCd -= dt;
+    if (this.matchMode(me, ctx, dt)) return;
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
       const local = ctx.localActor;
@@ -144,19 +145,157 @@ export class BotController implements Controller {
     this.aim(me, ctx, dt);
   }
 
+  /* ------------------------------------------------------------------ match phases */
+
+  private lobbyGoal = new THREE.Vector3();
+  private lobbyT = 0;
+  private dropDist = Infinity;
+  private dropDelay = -1;
+  private zoneSprint = false;
+
+  /** Lobby, Sky Barge, skydive and bugout: simple purpose-built steering. True if handled. */
+  private matchMode(me: Actor, ctx: GameCtx, dt: number): boolean {
+    const m = ctx.match;
+    if (!m) return false;
+    const it = me.intent;
+    const setMove = (x: number, z: number, max = 1) => {
+      const l = Math.hypot(x, z);
+      const k = l > 0.01 ? Math.min(max, l) / l : 0;
+      it.moveX = x * k;
+      it.moveZ = z * k;
+      if (l > 0.3) {
+        this.aimYaw = yawFromDir(x, z);
+        it.aimYaw = this.aimYaw;
+      }
+      it.aimPitch = 0;
+      it.fire = false;
+      it.ads = false;
+    };
+    if (me.bugout) {
+      // race for the nearest Rift Nest, weaving a little
+      let best: THREE.Vector3 | null = null, bd = Infinity;
+      for (const n of ctx.world.nests) {
+        if (n.used) continue;
+        const d = n.pos.distanceTo(me.bug.pos);
+        if (d < bd) {
+          bd = d;
+          best = n.pos;
+        }
+      }
+      if (best) {
+        const wx = Math.sin(ctx.time * 3 + me.id) * 0.35;
+        const dx = best.x - me.bug.pos.x, dz = best.z - me.bug.pos.z;
+        const l = Math.hypot(dx, dz) || 1;
+        setMove(dx / l - (dz / l) * wx, dz / l + (dx / l) * wx);
+        it.sprint = bd > 6;
+      } else setMove(0, 0);
+      return true;
+    }
+    if (me.flight === 'barge') {
+      setMove(0, 0);
+      const tgt = m.dropTargetFor(me);
+      const d = Math.hypot(tgt.x - m.barge.pos.x, tgt.z - m.barge.pos.z);
+      if (m.canDrop && this.dropDelay < 0 && (d > this.dropDist + 0.05 || d < 16)) this.dropDelay = rand(0, 1.2);
+      this.dropDist = d;
+      if (this.dropDelay >= 0) {
+        this.dropDelay -= dt;
+        if (this.dropDelay < 0) it.jump = true;
+      }
+      return true;
+    }
+    this.dropDist = Infinity;
+    if (me.flight === 'dive' || me.flight === 'glide') {
+      const tgt = m.dropTargetFor(me);
+      const dx = tgt.x - me.motor.pos.x, dz = tgt.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      setMove(dx, dz, d < 3 ? d / 3 : 1);
+      this.state = 'loot';
+      this.hasGoal = false;
+      this.path = [];
+      return true;
+    }
+    if (m.phase === 'lobby') {
+      // mill about Launch Isle: amble, pause, hop, show off a blink now and then
+      const L = ctx.world.lobby;
+      this.lobbyT -= dt;
+      if (this.lobbyT <= 0) {
+        this.lobbyT = rand(1.5, 4);
+        const a = this.rng() * Math.PI * 2, r = Math.sqrt(this.rng()) * (L.radius - 3);
+        this.lobbyGoal.set(L.center.x + Math.cos(a) * r, L.center.y, L.center.z + Math.sin(a) * r);
+        if (this.rng() < 0.3) this.lobbyGoal.copy(me.motor.pos);
+        if (this.rng() < 0.15 && me.bug.ready) {
+          _v.copy(me.motor.pos).add(_v2.set(rand(-8, 8), 0, rand(-8, 8)));
+          if (this.throwAt(me, ctx, _v)) this.blinkPlanT = rand(0.6, 1.2);
+        }
+      }
+      const dx = this.lobbyGoal.x - me.motor.pos.x, dz = this.lobbyGoal.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      setMove(d > 0.8 ? dx : 0, d > 0.8 ? dz : 0, 0.6);
+      it.sprint = false;
+      if (this.rng() < dt * 0.3 && this.jumpCd <= 0) {
+        it.jump = true;
+        this.jumpCd = 2;
+      }
+      if (this.blinkPlanT >= 0) {
+        this.blinkPlanT -= dt;
+        if (this.blinkPlanT < 0 && me.bug.canBlink) it.blink = true;
+      }
+      this.target = null;
+      return true;
+    }
+    return false;
+  }
+
+  /** Stay ahead of the Gloom: true if we're heading for safety this tick. */
+  private zoneRun(me: Actor, ctx: GameCtx): boolean {
+    const m = ctx.match;
+    if (!m || m.phase !== 'live' || m.safeRadius > 50) return false;
+    const c = m.safeCenter;
+    const d = Math.hypot(me.motor.pos.x - c.x, me.motor.pos.z - c.y);
+    const inGloom = m.gloomOutside(me.motor.pos);
+    // cautious rascals rotate early; everyone runs once the Gloom is on top of them
+    const margin = this.profile.archetype === 'cautious' || this.profile.archetype === 'sniper' ? 0.7 : 0.9;
+    if (d < m.safeRadius * margin && !inGloom) return false;
+    if (this.state === 'engage' && !inGloom && me.hp > 50) return false;
+    if (!this.hasGoal || this.goalTimeout <= 0 || Math.hypot(this.goal.x - c.x, this.goal.z - c.y) > m.safeRadius * 0.8) {
+      const r = Math.max(1, m.safeRadius * 0.5);
+      const p = ctx.nav.randomWalkable(this.rng, c.x, c.y, r) ?? _v.set(c.x, 0, c.y);
+      this.setGoal(me, ctx, p, true);
+      this.goalTimeout = 8;
+    }
+    if (inGloom && me.bug.ready && this.rng() < 0.05) {
+      // blink toward safety
+      _v.set(c.x - me.motor.pos.x, 0, c.y - me.motor.pos.z).normalize();
+      if (this.throwAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 16))) this.blinkPlanT = rand(0.7, 1.1);
+    }
+    return true;
+  }
+
   /* ------------------------------------------------------------------ perception + decisions */
 
   private think(me: Actor, ctx: GameCtx, tick: number) {
+    this.zoneSprint = false;
     const eye = me.eyePos(_eye);
     const facing = me.intent.aimYaw;
     this.targetVisible = false;
     let bestNew: Actor | null = null;
     let bestD = Infinity;
     for (const o of ctx.actors) {
-      if (o === me || !o.alive) continue;
-      const tp = _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
+      if (o === me || o.parked || (!o.alive && !o.bugout)) continue;
+      const tp = o.bugout ? _v.copy(o.bug.pos) : _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
       const d = tp.distanceTo(eye);
       if (d > 70) continue;
+      // Nimbus: my bug sensed them — go have a look
+      if (o.pingT > 0 && o.pingedBy === me && !this.targetVisible) {
+        this.heardPos.copy(o.motor.pos);
+        this.heardT = ctx.time;
+      }
+      // Wisp: shimmering rascals are nearly invisible unless right on top of you
+      if (o.stealthT > 0 && d > 4) {
+        this.awareness.set(o.id, Math.max(0, (this.awareness.get(o.id) ?? 0) - tick));
+        if (o === this.target) this.lastSeenT = Math.min(this.lastSeenT, ctx.time - 2);
+        continue;
+      }
       const yawTo = yawFromDir(tp.x - eye.x, tp.z - eye.z);
       const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5;
       let aw = this.awareness.get(o.id) ?? 0;
@@ -191,7 +330,7 @@ export class BotController implements Controller {
       this.lastSeenPos.copy(bestNew.motor.pos);
       this.lastSeenT = ctx.time;
     }
-    if (this.target && !this.target.alive) {
+    if (this.target && !this.target.alive && !this.target.bugout) {
       this.target = null;
       this.targetVisible = false;
       this.idleT = rand(0.6, 1.4); // little victory pause
@@ -250,6 +389,14 @@ export class BotController implements Controller {
       this.state = next;
       this.hasGoal = false;
       this.path = [];
+    }
+    if ((this.state === 'wander' || this.state === 'loot' || this.state === 'investigate' || this.state === 'chase' || this.state === 'engage' || this.state === 'retreat') && this.zoneRun(me, ctx)) {
+      if (this.state !== 'engage') {
+        this.state = 'wander';
+        this.zoneSprint = true;
+        this.goalTimeout -= tick;
+        return;
+      }
     }
 
     switch (this.state) {
@@ -456,8 +603,8 @@ export class BotController implements Controller {
     const pos = new THREE.Vector3(), vel = new THREE.Vector3(), dir = new THREE.Vector3();
     for (let p = -0.3; p <= 0.9; p += 0.15) {
       pos.copy(start);
-      Blinkbug.throwVelocity(dirFromYawPitch(yaw, p, dir), vel);
-      for (let i = 0; i < 240; i++) if (simulateBug(ctx.cw, pos, vel, BUG.step * 2)) break;
+      Blinkbug.throwVelocity(dirFromYawPitch(yaw, p, dir), vel, me.bug.stats.throwSpeed);
+      for (let i = 0; i < 240; i++) if (simulateBug(ctx.cw, pos, vel, BUG.step * 2, undefined, me.bug.stats)) break;
       const err = Math.hypot(pos.x - pt.x, pos.z - pt.z) + Math.abs(pos.y - pt.y) * 0.5;
       if (err < bestErr) {
         bestErr = err;
@@ -520,9 +667,15 @@ export class BotController implements Controller {
   private wanderGoal(me: Actor, ctx: GameCtx) {
     const arch = this.profile.archetype;
     let c = me.motor.pos;
+    let r = arch === 'sniper' ? 30 : 18;
     // bias toward interesting places: the square & buildings
     if (this.rng() < 0.5) c = _v.set(rand(-12, 12), 0, rand(-14, 8));
-    const p = ctx.nav.randomWalkable(this.rng, c.x, c.z, arch === 'sniper' ? 30 : 18);
+    const m = ctx.match;
+    if (m && m.phase === 'live' && m.safeRadius < 50) {
+      c = _v.set(m.safeCenter.x, 0, m.safeCenter.y);
+      r = Math.max(2, Math.min(r, m.safeRadius * 0.7));
+    }
+    const p = ctx.nav.randomWalkable(this.rng, c.x, c.z, r);
     if (p) this.setGoal(me, ctx, p);
     this.goalTimeout = rand(8, 16);
   }
@@ -576,7 +729,7 @@ export class BotController implements Controller {
     }
     it.moveX = mx;
     it.moveZ = mz;
-    it.sprint = (this.state === 'chase' || this.state === 'retreat' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
+    it.sprint = (this.zoneSprint || this.state === 'chase' || this.state === 'retreat' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
     const wantCrouch = this.state === 'engage' && this.crouchWant;
     if (wantCrouch !== me.motor.crouching && me.motor.grounded && !me.motor.sliding) it.crouch = true;
     // aggressive bots slide into fights

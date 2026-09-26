@@ -6,6 +6,7 @@ import type { World } from '../world/World';
 import type { LootSystem } from '../loot/Loot';
 import type { NavGrid } from '../world/NavGrid';
 import type { Throwables } from '../combat/Throwables';
+import type { SkyBarge } from '../world/SkyBarge';
 
 /**
  * Everything an actor can "want" in a frame. Player input and bot brains both produce this —
@@ -102,4 +103,23 @@ export interface GameCtx {
   throwables: Throwables;
   /** line of sight that also respects smoke clouds */
   sightClear(a: THREE.Vector3, b: THREE.Vector3): boolean;
+  /** null in the free-play playground */
+  match: MatchHooks | null;
+}
+
+export type MatchPhase = 'lobby' | 'barge' | 'live' | 'end';
+
+export interface MatchHooks {
+  phase: MatchPhase;
+  barge: SkyBarge;
+  canDrop: boolean;
+  allowBugout(a: Actor): boolean;
+  onOut(a: Actor, by: Actor | null, weapon: string): void;
+  onRevive(a: Actor): void;
+  /** where a bot wants to land */
+  dropTargetFor(a: Actor): THREE.Vector3;
+  /** safe zone info for bots */
+  safeCenter: THREE.Vector2;
+  safeRadius: number;
+  gloomOutside(p: THREE.Vector3): boolean;
 }

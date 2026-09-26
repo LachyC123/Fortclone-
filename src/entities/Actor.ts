@@ -13,6 +13,7 @@ import { audio } from '../audio/Audio';
 import { PAL, RarityIndex } from '../render/Palette';
 import { ColFlags } from '../physics/Collision';
 import { PShape } from '../fx/Particles';
+import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -37,6 +38,21 @@ export class Actor implements BugOwner {
   isLocal = false;
   /** test/debug: removed from play (no AI, no respawn) */
   parked = false;
+
+  // --- match state
+  flight: 'none' | 'barge' | 'dive' | 'glide' = 'none';
+  bargeSpot = 0;
+  private glider: THREE.Group | null = null;
+  private gliderK = 0;
+  /** eliminated but piloting their Blinkbug toward a Rift Nest */
+  bugout: { t: number; hp: number; vel: THREE.Vector3 } | null = null;
+  reviveUsed = false;
+  /** fully out of the match */
+  out = false;
+  placement = 0;
+  distance = 0;
+  bestRarity = -1;
+  weaponDamage: Record<string, number> = {};
 
   hp = 100;
   maxHp = 100;
@@ -75,11 +91,31 @@ export class Actor implements BugOwner {
   onBlinked: ((from: THREE.Vector3, to: THREE.Vector3) => void) | null = null;
   onLanded: ((impact: number) => void) | null = null;
 
-  constructor(public name: string, look: RascalLook, public ctx: GameCtx, bugTint = PAL.blink) {
+  /** your Blinkbug's own name */
+  bugName: string;
+  /** Wisp: shimmering out of sight after a blink */
+  stealthT = 0;
+  /** Nimbus: seconds this rascal stays marked, and for whom */
+  pingT = 0;
+  pingedBy: Actor | null = null;
+  private pingTick = 0;
+
+  constructor(public name: string, look: RascalLook, public ctx: GameCtx, species: BugSpecies = SPECIES_BY_ID.zippit, bugName = randomBugName()) {
     this.motor = new CharacterMotor(ctx.cw);
     this.rig = new RascalRig(look);
-    this.bug = new Blinkbug(ctx.cw, ctx.fx, this, bugTint);
+    this.bug = new Blinkbug(ctx.cw, ctx.fx, this, species);
+    this.bugName = bugName;
     ctx.scene.add(this.rig.root, this.bug.root);
+  }
+
+  /** Swap in a different Blinkbug (equipped from the collection before a match). */
+  setSpecies(species: BugSpecies, name: string) {
+    this.bugName = name;
+    if (this.bug.species.id === species.id) return;
+    this.ctx.scene.remove(this.bug.root);
+    this.bug = new Blinkbug(this.ctx.cw, this.ctx.fx, this, species);
+    this.ctx.scene.add(this.bug.root);
+    this.bug.root.position.copy(this.motor.pos);
   }
 
   /* ----------------------------------------------------------------- BugOwner */
@@ -137,6 +173,13 @@ export class Actor implements BugOwner {
     this.bug.root.position.copy(p);
     this.eliminatedAt = -1;
     this.lastDamagedBy = null;
+    this.out = false;
+    this.bugout = null;
+    this.flight = 'none';
+    this.stealthT = 0;
+    this.pingT = 0;
+    this.rig.setGhost(1);
+    this.hideGlider();
     this.syncRig(0, 0);
   }
 
@@ -222,7 +265,16 @@ export class Actor implements BugOwner {
 
   /* ----------------------------------------------------------------- damage */
   takeDamage(amount: number, from: Actor | null, headshot: boolean, dir: THREE.Vector3, ctx: GameCtx, weaponName: string): boolean {
-    if (!this.alive) return false;
+    if (!this.alive) {
+      if (this.bugout) return this.damageBug(amount, from, ctx, weaponName);
+      return false;
+    }
+    // Launch Isle is a no-hurt zone: shoot all you like, nobody gets bonked
+    if (ctx.match?.phase === 'lobby') {
+      this.rig.onHit(0, 1);
+      return false;
+    }
+    if (from) from.weaponDamage[weaponName] = (from.weaponDamage[weaponName] ?? 0) + amount;
     this.hp -= amount;
     this.lastDamagedBy = from;
     this.lastDamageTime = ctx.time;
@@ -246,6 +298,13 @@ export class Actor implements BugOwner {
     return false;
   }
 
+  /** remove from the scene for good (lobby shrinking back to the playground crew) */
+  dispose(ctx: GameCtx) {
+    ctx.scene.remove(this.rig.root, this.bug.root);
+    this.alive = false;
+    this.parked = true;
+  }
+
   /** hook for controllers (bots react to being shot) */
   onDamaged(_from: Actor | null, _ctx: GameCtx) {}
 
@@ -262,11 +321,222 @@ export class Actor implements BugOwner {
     ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.3), new THREE.Vector3((Math.random() - 0.5) * 3, 8, (Math.random() - 0.5) * 3), L.pack, 0.4, 2.4);
     ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.8), new THREE.Vector3((Math.random() - 0.5) * 3, 10, (Math.random() - 0.5) * 3), L.hatColor, 0.3, 2.4);
     this.rig.root.visible = false;
-    this.bug.vanish();
     ctx.loot.dropInventory(this);
+    this.healT = -1;
+    this.rig.setHeld(null);
+    this.hideGlider();
+    this.flight = 'none';
     ctx.hud.killfeed(by ? by.name : 'THE GLOOM', this.name, weaponName, this.isLocal || !!by?.isLocal);
-    if (this.isLocal) ctx.hud.playerEliminated(by ? by.name : 'the island');
-    else if (by?.isLocal) ctx.hud.playerElimination(this.name);
+    if (by?.isLocal) ctx.hud.playerElimination(this.name);
+    // second chance: the Blinkbug carries your spark to a Rift Nest
+    if (ctx.match && weaponName !== 'THE SKY' && ctx.match.allowBugout(this)) {
+      this.startBugout(p, ctx);
+      return;
+    }
+    this.bug.vanish();
+    this.goOut(by, ctx, weaponName);
+  }
+
+  private goOut(by: Actor | null, ctx: GameCtx, weaponName: string) {
+    this.out = true;
+    this.bugout = null;
+    if (ctx.match) ctx.match.onOut(this, by, weaponName);
+    else if (this.isLocal) ctx.hud.playerEliminated(by ? by.name : 'the island');
+  }
+
+  /* ----------------------------------------------------------------- bug-revive */
+  private startBugout(from: THREE.Vector3, ctx: GameCtx) {
+    this.reviveUsed = true;
+    this.bugout = { t: 22, hp: 30, vel: new THREE.Vector3(0, 3, 0) };
+    this.bug.startPilot(from);
+    ctx.fx.blinkBurst(from, false);
+    audio.chirp(from, 0.7, 0.6);
+    if (this.isLocal) {
+      ctx.hud.bigToast('BUGOUT! FLY TO A RIFT NEST', '#6ff7ff');
+      audio.blink(from, true);
+    }
+  }
+
+  private damageBug(amount: number, from: Actor | null, ctx: GameCtx, weaponName: string): boolean {
+    const b = this.bugout!;
+    b.hp -= amount;
+    ctx.fx.sparkBurst(this.bug.pos, PAL.blink, 10);
+    audio.chirp(this.bug.pos, 1.8, 0.5);
+    if (b.hp > 0) return false;
+    // swatted!
+    ctx.fx.elimination(this.bug.pos.clone(), [PAL.blink, 0xffffff]);
+    this.bug.vanish();
+    ctx.hud.killfeed(from ? from.name : 'THE GLOOM', `${this.name}'s Blinkbug`, weaponName, this.isLocal || !!from?.isLocal);
+    this.goOut(from, ctx, weaponName);
+    return true;
+  }
+
+  private updateBugout(dt: number, ctx: GameCtx) {
+    const b = this.bugout!;
+    b.t -= dt;
+    this.controller?.update(this, ctx, dt);
+    const it = this.intent;
+    const bug = this.bug;
+    const wl = Math.min(1, Math.hypot(it.moveX, it.moveZ));
+    const speed = 9.5;
+    b.vel.x += (it.moveX * speed - b.vel.x) * Math.min(1, dt * 5);
+    b.vel.z += (it.moveZ * speed - b.vel.z) * Math.min(1, dt * 5);
+    // hover ~1.8m above whatever is below; jump gives a little hop
+    const down = this.ctx.cw.raycast(_v.copy(bug.pos), _v2.set(0, -1, 0), 30, ColFlags.BlocksMove);
+    const groundY = down ? down.point.y : bug.pos.y - 30;
+    const targetY = groundY + 1.8 + (it.sprint ? 1.5 : 0);
+    b.vel.y += ((targetY - bug.pos.y) * 4 - b.vel.y) * Math.min(1, dt * 4);
+    if (it.jump) b.vel.y += 6;
+    bug.pos.addScaledVector(b.vel, dt);
+    ctx.cw.resolveSphere(bug.pos, 0.2, ColFlags.BlocksBug);
+    if (wl > 0.1) this.bodyYaw = yawFromDir(b.vel.x, b.vel.z);
+    // keep the motor under the bug so cameras & bot aim follow it
+    this.motor.pos.set(bug.pos.x, bug.pos.y - 0.9, bug.pos.z);
+    if (Math.random() < dt * 25) ctx.fx.bugTrail(bug.pos);
+    if (this.isLocal && b.t < 5 && Math.random() < dt * 10) ctx.fx.sparkBurst(bug.pos, 0xff9a9a, 2);
+    // reached a Rift Nest?
+    for (const n of ctx.world.nests) {
+      if (n.used) continue;
+      if (Math.hypot(n.pos.x - bug.pos.x, n.pos.z - bug.pos.z) < 2.4 && Math.abs(n.pos.y + 1 - bug.pos.y) < 3) {
+        this.reviveAt(n, ctx);
+        return;
+      }
+    }
+    // out in the Gloom, the spark fades faster
+    if (ctx.match?.gloomOutside(bug.pos)) b.t -= dt * 2;
+    if (b.t <= 0 || bug.pos.y < -20) {
+      ctx.fx.sparkBurst(bug.pos, 0x9f7bff, 20);
+      audio.pop(bug.pos);
+      this.bug.vanish();
+      ctx.hud.killfeed('THE GLOOM', `${this.name}'s spark`, 'TIME', this.isLocal);
+      this.goOut(null, ctx, 'TIME');
+    }
+    bug.update(dt);
+  }
+
+  private reviveAt(n: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }, ctx: GameCtx) {
+    n.used = true;
+    n.fx.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+      if (!m || !m.color) return;
+      if (o.userData.baseColor === undefined) o.userData.baseColor = m.color.getHex();
+      m.color.setHex(0x6b6478);
+    });
+    this.bugout = null;
+    this.alive = true;
+    this.out = false;
+    const p = n.pos.clone().setY(n.pos.y + 0.1);
+    this.spawn(p, this.bodyYaw);
+    this.hp = 40;
+    this.weapons = [null, null, null];
+    this.giveWeapon('poppistol', 0, 0, true);
+    this.ammo.light = Math.max(this.ammo.light, 24);
+    this.bug.cooldown = 8;
+    this.bug.cooldownMax = 8;
+    ctx.fx.blinkBurst(p, true);
+    ctx.fx.ring(p.clone().setY(p.y + 0.2), 0x9ffcff, 0.3, 5, 0.6);
+    audio.blink(p, this.isLocal);
+    audio.fuse();
+    ctx.hud.killfeed(this.name, 'a Rift Nest', 'REBUILT', this.isLocal);
+    if (this.isLocal) {
+      ctx.hud.bigToast('BACK IN THE FIGHT!', '#9ffcff');
+      ctx.shake(0.3);
+    }
+    ctx.match?.onRevive(this);
+  }
+
+  /* ----------------------------------------------------------------- drop / glide */
+  private updateFlight(dt: number, ctx: GameCtx) {
+    const it = this.intent;
+    const m = this.motor;
+    const match = ctx.match;
+    if (this.flight === 'barge') {
+      if (!match) {
+        this.flight = 'none';
+        return;
+      }
+      match.barge.riderWorld(this.bargeSpot, m.pos);
+      m.vel.copy(match.barge.vel);
+      this.bodyYaw = dampAngle(this.bodyYaw, this.isLocal ? it.aimYaw : match.barge.yaw + Math.PI / 2, 6, dt);
+      if (it.jump && match.canDrop) this.startDive(ctx);
+      return;
+    }
+    const diving = this.flight === 'dive';
+    const maxH = diving ? 17 : 11;
+    const acc = diving ? 22 : 12;
+    const tx = it.moveX * maxH, tz = it.moveZ * maxH;
+    const dx = tx - m.vel.x, dz = tz - m.vel.z;
+    const dl = Math.hypot(dx, dz), st = acc * dt;
+    if (dl <= st) {
+      m.vel.x = tx;
+      m.vel.z = tz;
+    } else {
+      m.vel.x += (dx / dl) * st;
+      m.vel.z += (dz / dl) * st;
+    }
+    if (diving) m.vel.y = Math.max(-34, m.vel.y - 26 * dt);
+    else m.vel.y += (-5.2 - m.vel.y) * Math.min(1, dt * 3);
+    const hs = Math.hypot(m.vel.x, m.vel.z);
+    if (hs > 1) this.bodyYaw = dampAngle(this.bodyYaw, yawFromDir(m.vel.x, m.vel.z), 5, dt);
+    else this.bodyYaw = dampAngle(this.bodyYaw, it.aimYaw, 5, dt);
+    // auto-deploy the glider near the ground
+    if (diving) {
+      const hit = ctx.cw.raycast(_v.copy(m.pos).setY(m.pos.y + 0.5), _v2.set(0, -1, 0), 60, ColFlags.BlocksMove);
+      if ((hit && hit.t < 24) || m.pos.y < 20) this.deployGlider(ctx);
+      if (Math.random() < dt * 30) ctx.fx.soft.emit(_v.copy(m.pos).setY(m.pos.y + 1.6), { count: 1, color: 0xffffff, speed: 2, dir: _v2.set(0, 1, 0), spread: 0.4, life: 0.4, size: 0.12, sizeEnd: 0.3, alpha: 0.5 });
+    }
+    if (this.glider) {
+      this.gliderK = Math.min(1, this.gliderK + dt * 4);
+      const k = this.gliderK;
+      const s = k < 1 ? 1 + Math.sin(k * Math.PI) * 0.25 : 1;
+      this.glider.scale.set(s * k, k, s * k);
+      this.glider.rotation.z = Math.sin(ctx.time * 3) * 0.06 - (it.moveX * Math.cos(this.bodyYaw) - it.moveZ * Math.sin(this.bodyYaw)) * 0.15;
+    }
+    if (m.flyStep(dt)) this.land(ctx);
+    if (m.pos.y < -25) this.eliminate(null, ctx, 'THE SKY');
+  }
+
+  startDive(ctx: GameCtx) {
+    if (this.flight !== 'barge') return;
+    this.flight = 'dive';
+    this.motor.vel.set(this.motor.vel.x * 0.35, 2, this.motor.vel.z * 0.35);
+    this.motor.grounded = false;
+    this.rig.onJump();
+    audio.throwWhoosh(this.motor.pos);
+    if (this.isLocal) {
+      audio.jump(this.motor.pos);
+      ctx.shake(0.15);
+    }
+    ctx.fx.dust(this.motor.pos, 4, 0xffffff);
+  }
+
+  private deployGlider(ctx: GameCtx) {
+    this.flight = 'glide';
+    this.gliderK = 0;
+    if (!this.glider) this.glider = buildGlider(this.rig.look.scarf, this.rig.look.accent);
+    this.rig.root.add(this.glider);
+    this.glider.visible = true;
+    this.motor.vel.y = Math.max(this.motor.vel.y, -12);
+    audio.slide(this.motor.pos);
+    audio.pop(this.motor.pos);
+    ctx.fx.glow.emit(_v.copy(this.motor.pos).setY(this.motor.pos.y + 2.6), { count: 12, color: [0xffffff, this.rig.look.scarf], speed: [2, 5], spread: 1, life: 0.4, size: 0.14, shape: PShape.Star, drag: 3 });
+    if (this.isLocal) ctx.shake(0.2);
+  }
+
+  private hideGlider() {
+    if (this.glider) this.glider.visible = false;
+  }
+
+  private land(ctx: GameCtx) {
+    this.flight = 'none';
+    this.hideGlider();
+    const m = this.motor;
+    const impact = Math.max(4, -m.vel.y);
+    m.vel.set(m.vel.x * 0.5, 0, m.vel.z * 0.5);
+    this.rig.onLand(impact + 6);
+    ctx.fx.landBurst(m.pos, 12, m.surface);
+    audio.land(m.pos, 12, m.surface);
+    if (this.isLocal) this.onLanded?.(12);
   }
 
   onFired(pitch: number, yaw: number, kick: number) {
@@ -280,10 +550,21 @@ export class Actor implements BugOwner {
 
   /* ----------------------------------------------------------------- update */
   update(dt: number, ctx: GameCtx) {
+    if (this.bugout) {
+      this.updateBugout(dt, ctx);
+      return;
+    }
     if (!this.alive) return;
     this.controller?.update(this, ctx, dt);
     const it = this.intent;
     const m = this.motor;
+    if (this.flight !== 'none') {
+      this.updateFlight(dt, ctx);
+      this.bug.update(dt);
+      this.syncRig(dt, ctx.time);
+      return;
+    }
+    const px = m.pos.x, pz = m.pos.z;
 
     // --- weapon slot switching
     if (it.slot >= 0 && it.slot !== this.activeSlot) this.equip(it.slot);
@@ -320,6 +601,7 @@ export class Actor implements BugOwner {
     const wasSliding = m.sliding;
     m.update(dt, mi);
     const ev = m.events;
+    this.distance += Math.hypot(m.pos.x - px, m.pos.z - pz);
     if (ev.jumped) {
       this.rig.onJump();
       audio.jump(m.pos);
@@ -530,7 +812,7 @@ export class Actor implements BugOwner {
       // launch from just in front of the chest so it never starts inside a wall behind us
       const chest = this.eyePos(_v2).setY(this.motor.pos.y + 1.1);
       if (!ctx.cw.sphereOverlaps(chest, BUG.radius, ColFlags.BlocksBug)) from.copy(chest);
-      const vel = Blinkbug.throwVelocity(it.aimDir, _v3);
+      const vel = Blinkbug.throwVelocity(it.aimDir, _v3, bug.stats.throwSpeed);
       vel.x += this.motor.vel.x * 0.5;
       vel.z += this.motor.vel.z * 0.5;
       if (bug.throw(from, vel)) {
@@ -546,6 +828,7 @@ export class Actor implements BugOwner {
       }
     }
     bug.update(dt);
+    this.updateBugTricks(dt, ctx);
     this.swapT = Math.max(0, this.swapT - dt);
   }
 
@@ -555,6 +838,12 @@ export class Actor implements BugOwner {
     const m = this.motor;
     const baseY = b.y - BUG.radius - 0.02;
     const cands: [number, number, number][] = [[0, 0, 0], [0, 0.25, 0], [0, 0.5, 0], [0, -0.4, 0]];
+    const sn = this.bug.stuckN;
+    if (sn && sn.y < 0.65) {
+      // stuck to a wall or ceiling: stand just off the surface (below it for ceilings)
+      const off = sn.y < -0.5 ? 0 : 0.45;
+      cands.unshift([sn.x * off, sn.y < -0.5 ? -1.8 : -0.2, sn.z * off], [sn.x * (off + 0.3), -0.6, sn.z * (off + 0.3)]);
+    }
     for (let r = 0.35; r <= 0.75; r += 0.4) for (let k = 0; k < 8; k++) cands.push([Math.cos((k / 8) * Math.PI * 2) * r, 0.1, Math.sin((k / 8) * Math.PI * 2) * r]);
     for (const [dx, dy, dz] of cands) {
       out.set(b.x + dx, baseY + dy, b.z + dz);
@@ -584,10 +873,26 @@ export class Actor implements BugOwner {
     }
     const from = this.motor.pos.clone();
     const keepVel = this.motor.vel.clone();
+    const ability = this.bug.species.ability;
+    // Snatchet: grab the nearest rascal beside the bug and trade places with THEM
+    let victim: Actor | null = null;
+    if (ability === 'snatch') {
+      let bd = 3.4;
+      for (const o of ctx.actors) {
+        if (o === this || !o.alive || o.parked || o.flight !== 'none') continue;
+        const d = o.motor.pos.distanceTo(this.bug.pos);
+        if (d < bd) {
+          bd = d;
+          victim = o;
+        }
+      }
+      if (victim) spot.copy(victim.motor.pos);
+    }
     this.motor.teleport(spot);
     // keep a little horizontal momentum so blinking mid-run feels fluid
     this.motor.vel.set(keepVel.x * 0.4, Math.max(0, keepVel.y * 0.2), keepVel.z * 0.4);
     this.bug.swapped(from);
+    this.bugAbility(ctx, ability, from, spot, victim);
     this.blinks++;
     this.rig.onBlinkArrive();
     this.swapT = 0.3;
@@ -602,11 +907,116 @@ export class Actor implements BugOwner {
     this.onBlinked?.(from, spot);
   }
 
+  /** Species tricks that fire on arrival. */
+  private bugAbility(ctx: GameCtx, ability: string, from: THREE.Vector3, spot: THREE.Vector3, victim: Actor | null) {
+    const tint = this.bug.tint;
+    switch (ability) {
+      case 'hop':
+        this.motor.vel.y = 11.5;
+        this.motor.grounded = false;
+        audio.boing(spot);
+        ctx.fx.ring(_v.copy(spot).setY(spot.y + 0.1), tint, 0.2, 2.2, 0.35);
+        break;
+      case 'mend':
+        if (this.hp < this.maxHp) {
+          this.heal(12);
+          ctx.fx.glow.emit(_v.copy(spot).setY(spot.y + 1), { count: 14, color: [0x7ee06a, 0xffffff], speed: [1, 3], up: 2, spread: 1, life: [0.5, 0.9], size: 0.14, shape: PShape.Star });
+          if (this.isLocal) ctx.hud.toast('+12 patched up!', '#7ee06a');
+        }
+        break;
+      case 'boom': {
+        ctx.fx.ring(_v.copy(spot).setY(spot.y + 0.3), tint, 0.3, 5, 0.4);
+        ctx.fx.dust(spot, 10, 0xffe0c0);
+        audio.explosion(spot);
+        ctx.shake(this.isLocal ? 0.35 : 0);
+        for (const o of ctx.actors) {
+          if (o === this || !o.alive || o.parked) continue;
+          const d = o.motor.pos.distanceTo(spot);
+          if (d > 4.5) continue;
+          const k = 1 - d / 4.5;
+          _v2.subVectors(o.motor.pos, spot).setY(0).normalize();
+          o.motor.impulse(_v2.multiplyScalar(8 + 8 * k).setY(5 + 4 * k));
+          o.takeDamage(Math.round(6 + 8 * k), this, false, _v2.clone().normalize(), ctx, `${this.bug.species.name.toUpperCase()}`);
+        }
+        break;
+      }
+      case 'wisp':
+        this.stealthT = 2;
+        break;
+      case 'snatch':
+        if (victim) {
+          victim.motor.teleport(from);
+          victim.motor.vel.set(0, 2, 0);
+          victim.rig.onHit(0, 1);
+          ctx.fx.blinkBurst(from, true);
+          ctx.fx.smear(spot, from);
+          audio.chirp(from, 0.6, 0.6);
+          if (this.isLocal) ctx.hud.toast(`SNATCHED ${victim.name.toUpperCase()}!`, '#ff6bb5');
+          if (victim.isLocal) ctx.hud.bigToast('SNATCHED!', '#ff6bb5');
+        }
+        break;
+    }
+  }
+
+  /** Per-frame species effects: Wisp shimmer and Nimbus sensing. */
+  private updateBugTricks(dt: number, ctx: GameCtx) {
+    if (this.stealthT > 0) {
+      this.stealthT -= dt;
+      const k = this.stealthT > 0 ? (this.stealthT < 0.4 ? 1 - this.stealthT / 0.4 : 0) : 1;
+      this.rig.setGhost(this.isLocal ? 0.45 + k * 0.55 : 0.12 + k * 0.88);
+      if (Math.random() < dt * 20) ctx.fx.glow.emit(_v.copy(this.motor.pos).setY(this.motor.pos.y + Math.random() * 1.6), { count: 1, color: this.bug.tint, speed: 0.5, up: 1, life: 0.5, size: 0.08, shape: PShape.Sparkle });
+    }
+    if (this.pingT > 0) this.pingT -= dt;
+    if (this.bug.species.ability === 'ping' && this.bug.state === 'landed') {
+      this.pingTick -= dt;
+      if (this.pingTick <= 0) {
+        this.pingTick = 0.5;
+        let n = 0;
+        for (const o of ctx.actors) {
+          if (o === this || !o.alive || o.parked) continue;
+          if (o.motor.pos.distanceTo(this.bug.pos) < 14) {
+            if (o.pingT <= 0 || o.pingedBy !== this) n++;
+            o.pingT = 2.5;
+            o.pingedBy = this;
+          }
+        }
+        if (n > 0) {
+          ctx.fx.ring(_v.copy(this.bug.pos).setY(this.bug.pos.y - 0.1), this.bug.tint, 0.2, 14, 0.8);
+          audio.chirp(this.bug.pos, 1.6, 0.3);
+          if (this.isLocal) ctx.hud.toast(`${this.bugName} senses ${n} rascal${n > 1 ? 's' : ''}!`, '#ffe27a');
+        }
+      }
+    }
+  }
+
+  private shadowsOn = true;
   private syncRig(dt: number, time: number) {
     const m = this.motor;
     const r = this.rig;
     r.root.position.copy(m.pos);
     r.root.rotation.y = this.bodyYaw;
+    // level of detail: far rascals become a single baked mesh and skip animation entirely
+    if (!this.isLocal) {
+      const d2 = m.pos.distanceToSquared(this.ctx.camera.position);
+      // crowds (Launch Isle, the Sky Barge) switch to the cheap stand-in much sooner
+      const mt = this.ctx.match;
+      const crowd = !!mt && (mt.phase === 'lobby' || this.flight === 'barge');
+      const far = crowd ? (r.lod ? 6 : 7) : r.lod ? 30 : 34;
+      r.setLod(d2 > far * far);
+      this.bug.setFar(r.lod);
+      const wantShadow = d2 < (crowd ? 7 * 7 : 24 * 24);
+      if (wantShadow !== this.shadowsOn) {
+        this.shadowsOn = wantShadow;
+        r.setShadows(wantShadow);
+      }
+      if (r.lod) {
+        // cheap life at a distance: a little run bob
+        const hs = m.horizontalSpeed();
+        r.lodMesh.position.y = hs > 1 ? Math.abs(Math.sin(time * 9 + this.id)) * 0.08 : 0;
+        r.lodMesh.rotation.x = hs > 1 ? -0.12 : 0;
+        return;
+      }
+    }
     const c = Math.cos(this.bodyYaw), s = Math.sin(this.bodyYaw);
     // local velocity (forward = -z)
     const lx = m.vel.x * c - m.vel.z * s;
@@ -630,7 +1040,46 @@ export class Actor implements BugOwner {
       ads: this.ads,
       reloadK: w && w.reloading ? w.reloadT / w.reloadTime : -1,
       healing: this.healT >= 0,
+      diving: this.flight === 'dive',
+      gliding: this.flight === 'glide',
+      onBarge: this.flight === 'barge',
     });
     void clamp;
   }
+}
+
+/** A little kite-umbrella glider in the rascal's colours. */
+function buildGlider(c1: number, c2: number) {
+  const g = new THREE.Group();
+  const canopyGeo = new THREE.SphereGeometry(1.5, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2.6);
+  canopyGeo.scale(1.25, 0.55, 0.9);
+  const pos = canopyGeo.getAttribute('position') as THREE.BufferAttribute;
+  const col = new Float32Array(pos.count * 3);
+  const a = new THREE.Color(c1).convertSRGBToLinear(), b = new THREE.Color(c2).convertSRGBToLinear();
+  for (let i = 0; i < pos.count; i++) {
+    const seg = Math.floor(((Math.atan2(pos.getZ(i), pos.getX(i)) + Math.PI) / (Math.PI * 2)) * 8);
+    const c = seg % 2 ? a : b;
+    col[i * 3] = c.r;
+    col[i * 3 + 1] = c.g;
+    col[i * 3 + 2] = c.b;
+  }
+  canopyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const canopy = new THREE.Mesh(canopyGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide }));
+  canopy.position.y = 2.5;
+  canopy.castShadow = true;
+  g.add(canopy);
+  const strM = new THREE.MeshBasicMaterial({ color: 0x5e3b27 });
+  for (const [x, z] of [[-1.5, 0], [1.5, 0], [0, -1.1], [0, 1.1]]) {
+    const from = new THREE.Vector3(0, 1.3, 0), to = new THREE.Vector3(x * 1.15, 2.5, z * 0.8);
+    const len = from.distanceTo(to);
+    const s = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 3), strM);
+    s.position.copy(from).add(to).multiplyScalar(0.5);
+    s.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+    g.add(s);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.5, roughness: 0.3 }));
+  bar.rotation.z = Math.PI / 2;
+  bar.position.y = 1.3;
+  g.add(bar);
+  return g;
 }
