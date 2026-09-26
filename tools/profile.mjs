@@ -1,0 +1,24 @@
+import { createRequire } from 'module';
+import { spawn } from 'child_process';
+const require = createRequire(import.meta.url);
+const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const server = spawn('npx', ['vite', 'preview', '--port', '4174', '--strictPort'], { stdio: 'pipe' });
+await new Promise((r) => setTimeout(r, 2500));
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+await page.goto('http://localhost:4174/');
+await page.waitForFunction(() => window.__game, null, { timeout: 60000 });
+const r = await page.evaluate(() => {
+  const g = window.__game; g.play(); g.debugStep(10);
+  const counts = {}; let tris = {};
+  g.scene.traverse((o) => { if (!o.isMesh && !o.isPoints) return; if (!o.visible) return;
+    let top = o; while (top.parent && top.parent !== g.scene) top = top.parent;
+    const k = (top.type) + ':' + (top.name || top.constructor.name) + (top === g.world.group ? '(world)' : '');
+    counts[k] = (counts[k] || 0) + 1;
+    const geo = o.geometry; const n = geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+    tris[k] = (tris[k] || 0) + n * (o.isInstancedMesh ? o.count : 1);
+  });
+  return { counts, tris, geo: window.__geo };
+});
+console.log(JSON.stringify(r, null, 1));
+await browser.close(); server.kill(); process.exit(0);
