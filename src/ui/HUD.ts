@@ -83,6 +83,9 @@ export class HUD implements HudEvents {
   /** the Gloom, when a match is running (drawn on the minimap) */
   gloom: { center: THREE.Vector2; radius: number; nextC: THREE.Vector2; nextR: number } | null = null;
   private gloomFlash = h('div', 'gloomflash');
+  private emoteBtn = h('div', 'emotebtn panel big', ':)');
+  private emotePick = h('div', 'emotepick');
+  onEmote: ((k: 'dance' | 'wave' | 'laugh' | 'flex') => void) | null = null;
 
   constructor(private camera: THREE.PerspectiveCamera) {
     const r = this.root;
@@ -123,6 +126,19 @@ export class HUD implements HudEvents {
     this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="nm"></div><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
     this.locator.innerHTML = `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" stroke="rgba(43,34,56,0.5)" stroke-width="5" fill="rgba(43,34,56,0.35)"/><circle class="arc" cx="22" cy="22" r="19" stroke="#6ff7ff" stroke-width="5" fill="none" stroke-dasharray="119.4" stroke-linecap="round"/></svg><div class="ic">${ICONS.bug}</div>`;
     r.append(this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
+    this.emotePick.innerHTML = [['dance', 'DANCE'], ['wave', 'WAVE'], ['laugh', 'LOL'], ['flex', 'FLEX']].map(([k, l]) => `<button class="big" data-k="${k}">${l}</button>`).join('');
+    this.emoteBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.emotePick.classList.toggle('open');
+    });
+    this.emotePick.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      const b = (e.target as HTMLElement).closest('button');
+      if (!b) return;
+      this.onEmote?.(b.dataset.k as 'dance');
+      this.emotePick.classList.remove('open');
+    });
+    r.append(this.emoteBtn, this.emotePick);
     document.body.append(this.gloomFlash, this.scope, this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
   }
 
@@ -284,8 +300,13 @@ export class HUD implements HudEvents {
     this.gloomFlash.classList.add('on');
   }
 
-  playerElimination(victim: string) {
+  playerElimination(victim: string, callout = '') {
     this.bigToast(`${victim.toUpperCase()} ELIMINATED!`, '#ff8a8a');
+    if (callout) {
+      const e = h('div', 'callout big', callout);
+      this.toastsEl.appendChild(e);
+      setTimeout(() => e.remove(), 2200);
+    }
   }
 
   blink() {
@@ -557,6 +578,8 @@ export class HUD implements HudEvents {
     this.lootCard.classList.add('show');
   }
 
+  /** Loot Balloon landing spots (minimap stars) */
+  balloons: THREE.Vector3[] = [];
   /** Sky Barge route for the overview map (set by the match while it flies) */
   route: { sx: number; sz: number; ex: number; ez: number; bx: number; bz: number } | null = null;
 
@@ -609,6 +632,24 @@ export class HUD implements HudEvents {
       g.lineTo(U(r.ex), V(r.ez));
       g.stroke();
       g.setLineDash([]);
+    }
+    for (const b of this.balloons) {
+      const u = U(b.x), v = V(b.z);
+      g.save();
+      g.translate(u, v);
+      g.rotate(-yaw);
+      g.fillStyle = '#ffd36b';
+      g.strokeStyle = '#2b2238';
+      g.lineWidth = 2;
+      g.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2, rr = i % 2 ? 3.5 : 8;
+        g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      g.closePath();
+      g.fill();
+      g.stroke();
+      g.restore();
     }
     if (p.bug.out) {
       g.fillStyle = '#6ff7ff';

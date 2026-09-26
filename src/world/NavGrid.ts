@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CollisionWorld, ColFlags } from '../physics/Collision';
-import { islandRadius } from './Heightmap';
+import { islandRadius, ground } from './Heightmap';
+
+const _gp = new THREE.Vector3();
 
 const LAYERS = 4;
 const STEP = 0.55; // max height change between neighbouring cells (stairs ~0.4 per 0.5m cell)
@@ -83,6 +85,22 @@ export class NavGrid {
   }
 
   /** layer index in cell (i,j) whose floor is within tol of y, or -1 */
+  /** highest walkable layer between (y - maxDrop) and (y - STEP): somewhere you can hop down to */
+  layerBelow(i: number, j: number, y: number, maxDrop = 8): number {
+    if (i < 0 || j < 0 || i >= this.w || j >= this.h) return -1;
+    const base = (j * this.w + i) * LAYERS;
+    let best = -1, by = -Infinity;
+    for (let l = 0; l < LAYERS; l++) {
+      if (!this.walk[base + l]) continue;
+      const gy = this.groundY[base + l];
+      if (gy < y - STEP && gy > y - maxDrop && gy > by) {
+        by = gy;
+        best = l;
+      }
+    }
+    return best;
+  }
+
   layerNear(i: number, j: number, y: number, tol = STEP): number {
     if (i < 0 || j < 0 || i >= this.w || j >= this.h) return -1;
     const base = (j * this.w + i) * LAYERS;
@@ -140,7 +158,10 @@ export class NavGrid {
       const a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * radius;
       const n = this.nearestNode(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r);
       if (n < 0) continue;
-      if (groundOnly && this.groundY[n] > 0.6) continue;
+      if (groundOnly) {
+        const c = this.nodeCenter(n, _gp);
+        if (c.y > ground(c.x, c.z) + 0.6) continue; // on a roof or balcony, not the ground
+      }
       return this.nodeCenter(n);
     }
     return null;
@@ -172,6 +193,8 @@ export class NavGrid {
   private heap = new Int32Array(1 << 16);
   /** true if the last findPath only got part of the way */
   lastPartial = false;
+  /** why the last findPath returned null: the start ('start') or goal ('goal') wasn't on the grid */
+  lastFail: '' | 'start' | 'goal' = '';
   /** path searches left this frame (reset by the game loop) */
   budget = 3;
   canPlan() {
@@ -187,6 +210,7 @@ export class NavGrid {
     this.budget--;
     const start = this.nearestNode(from.x, from.y, from.z);
     let goal = this.nearestNode(to.x, to.y, to.z);
+    this.lastFail = start < 0 ? 'start' : goal < 0 ? 'goal' : '';
     if (start < 0 || goal < 0) return null;
     const N = this.w * this.h * LAYERS;
     if (this.g.length !== N) {
@@ -274,12 +298,18 @@ export class NavGrid {
       for (let dj = -1; dj <= 1; dj++)
         for (let di = -1; di <= 1; di++) {
           if (!di && !dj) continue;
-          const l = this.layerNear(ci + di, cj + dj, cy);
-          if (l < 0) continue;
-          if (di && dj && (this.layerNear(ci + di, cj, cy) < 0 || this.layerNear(ci, cj + dj, cy) < 0)) continue;
+          let l = this.layerNear(ci + di, cj + dj, cy);
+          let drop = 0;
+          if (l < 0) {
+            // one-way hop down (off a roof, balcony, ledge or mushroom cap)
+            if (di && dj) continue;
+            l = this.layerBelow(ci + di, cj + dj, cy);
+            if (l < 0) continue;
+            drop = 2 + (cy - this.groundY[((cj + dj) * this.w + (ci + di)) * LAYERS + l]) * 0.4;
+          } else if (di && dj && (this.layerNear(ci + di, cj, cy) < 0 || this.layerNear(ci, cj + dj, cy) < 0)) continue;
           const n = ((cj + dj) * this.w + (ci + di)) * LAYERS + l;
           if (this.stampArr[n] === st + 1) continue;
-          const ng = this.g[cur] + (di && dj ? 1.414 : 1) + this.cost[n] * 0.35 + Math.abs(this.groundY[n] - cy) * 0.5;
+          const ng = this.g[cur] + (di && dj ? 1.414 : 1) + this.cost[n] * 0.35 + (drop || Math.abs(this.groundY[n] - cy) * 0.5);
           if (this.stampArr[n] !== st || ng < this.g[n]) {
             this.stampArr[n] = st;
             this.g[n] = ng;
@@ -290,7 +320,10 @@ export class NavGrid {
     }
     this.lastPartial = !found;
     if (!found) {
-      if (best === start) return null;
+      if (best === start) {
+        this.lastFail = 'goal';
+        return null;
+      }
       goal = best;
     }
     const nodes: number[] = [];

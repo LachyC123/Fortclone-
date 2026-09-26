@@ -4,6 +4,7 @@ import { ICONS } from './icons';
 import { xpForLevel } from '../core/Match';
 
 export interface MatchSummary {
+  difficulty: string;
   cocoon: string;
   cocoonColor: string;
   bugName: string;
@@ -209,6 +210,7 @@ export class MatchUI {
       <div class="stats">${rows.map(([k, v, c]) => `<div class="st"><span>${k}</span><b class="big" ${c ? `style="color:${c}"` : ''}>${v}</b></div>`).join('')}</div>
       <div class="xp"><div class="lv big">LV <span class="n">${s.startLevel}</span></div><div class="xpbar"><div class="fill"></div></div><div class="gain big">+${s.xp} XP</div></div>
       <div class="xplines">${lines}</div>
+      <div class="diff">Bots: <b>${s.difficulty}</b> · change in Settings</div>
       <div class="cocoonwin" style="--rc:${s.cocoonColor}"><span class="coc"></span><span><b class="big">+1 ${s.cocoon.toUpperCase()} COCOON</b><br><small>${s.bugName} can't wait to meet a new friend · hatch it in MY BUGS</small></span></div>
       <div class="btns"><button class="btn again">PLAY AGAIN</button><button class="btn secondary home">HOME</button></div>
     </div>`;

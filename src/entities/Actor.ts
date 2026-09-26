@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CharacterMotor, MOTOR, MotorInput } from '../physics/Motor';
-import { RascalRig, RascalLook } from './RascalRig';
+import { RascalRig, RascalLook, EmoteKind } from './RascalRig';
 import { Blinkbug, BugOwner, BUG } from './Blinkbug';
 import { Intent, makeIntent, GameCtx } from '../core/types';
 import { WeaponInstance, buildWeaponView, AmmoType, WEAPONS, AMMO_INFO } from '../combat/Weapons';
@@ -94,6 +94,16 @@ export class Actor implements BugOwner {
 
   /** your Blinkbug's own name */
   bugName: string;
+  /** a speech bubble over their head */
+  speech: { text: string; color: string; t: number; dur: number } | null = null;
+  private sayCd = 0;
+  /** emote in progress (cancelled by moving, shooting or getting hit) */
+  emote: EmoteKind | null = null;
+  private emoteT = 0;
+  /** match stats for callouts */
+  lastBlinkAt = -99;
+  streak = 0;
+  lastKillAt = -99;
   /** Wisp: shimmering out of sight after a blink */
   stealthT = 0;
   /** Nimbus: seconds this rascal stays marked, and for whom */
@@ -275,10 +285,12 @@ export class Actor implements BugOwner {
       this.rig.onHit(0, 1);
       return false;
     }
+    if (from && !from.isLocal && !this.isLocal && ctx.match) amount *= ctx.match.botDamageMul;
     if (from) from.weaponDamage[weaponName] = (from.weaponDamage[weaponName] ?? 0) + amount;
     this.hp -= amount;
     this.lastDamagedBy = from;
     this.lastDamageTime = ctx.time;
+    this.emote = null;
     if (from) from.damageDealt += amount;
     // hit reaction direction in local space
     const c = Math.cos(this.bodyYaw), s = Math.sin(this.bodyYaw);
@@ -299,6 +311,21 @@ export class Actor implements BugOwner {
     return false;
   }
 
+  /** Pop a speech bubble ("!", "HA!") — rate-limited unless forced. */
+  say(text: string, color = '#2b2238', dur = 1.4, force = false) {
+    const now = this.ctx.time;
+    if (!force && now < this.sayCd) return;
+    this.speech = { text, color, t: now, dur };
+    this.sayCd = now + dur + 1.2;
+  }
+
+  startEmote(kind: EmoteKind, dur = 2.6) {
+    if (!this.alive || this.flight !== 'none') return;
+    this.emote = kind;
+    this.emoteT = dur;
+    this.intent.fire = false;
+  }
+
   /** remove from the scene for good (lobby shrinking back to the playground crew) */
   dispose(ctx: GameCtx) {
     ctx.scene.remove(this.rig.root, this.bug.root);
@@ -312,7 +339,24 @@ export class Actor implements BugOwner {
   eliminate(by: Actor | null, ctx: GameCtx, weaponName: string) {
     this.alive = false;
     this.eliminatedAt = ctx.time;
-    if (by && by !== this) by.kills++;
+    let callout = '';
+    if (by && by !== this) {
+      by.kills++;
+      by.streak = ctx.time - by.lastKillAt < 12 ? by.streak + 1 : 1;
+      by.lastKillAt = ctx.time;
+      const dist = by.motor.pos.distanceTo(this.motor.pos);
+      if (by.streak >= 3) callout = 'TRIPLE TROUBLE!';
+      else if (by.streak === 2) callout = 'DOUBLE BONK!';
+      else if (ctx.time - by.lastBlinkAt < 1.6) callout = 'BLINK BONK!';
+      else if (dist > 45) callout = `LONG SHOT! ${Math.round(dist)}m`;
+      else if (by.kills === 5) callout = 'UNSTOPPABLE!';
+      else if (by.kills === 3) callout = 'ON A ROLL!';
+      else if (this.hp <= 0 && by.hp < 20) callout = 'CLUTCH!';
+      if (!by.isLocal) {
+        // bots gloat a little
+        by.say(['HA!', 'GG', 'YES!', 'BONK!', 'EZ'][Math.floor(Math.random() * 5)], '#f2c14e', 1.5, true);
+      }
+    }
     const p = _v.copy(this.motor.pos).setY(this.motor.pos.y + 0.9);
     const L = this.rig.look;
     ctx.fx.elimination(p, [L.outfit, L.accent, L.scarf, L.pack]);
@@ -328,7 +372,7 @@ export class Actor implements BugOwner {
     this.hideGlider();
     this.flight = 'none';
     ctx.hud.killfeed(by ? by.name : 'THE GLOOM', this.name, weaponName, this.isLocal || !!by?.isLocal);
-    if (by?.isLocal) ctx.hud.playerElimination(this.name);
+    if (by?.isLocal) ctx.hud.playerElimination(this.name, callout);
     // second chance: the Blinkbug carries your spark to a Rift Nest
     if (ctx.match && weaponName !== 'THE SKY' && ctx.match.allowBugout(this)) {
       this.startBugout(p, ctx);
@@ -520,10 +564,22 @@ export class Actor implements BugOwner {
       this.glider.rotation.z = Math.sin(ctx.time * 3) * 0.06 - (it.moveX * Math.cos(this.bodyYaw) - it.moveZ * Math.sin(this.bodyYaw)) * 0.15;
     }
     if (m.flyStep(dt)) this.land(ctx);
+    else if (this.flight === 'glide') {
+      // resting on something too steep to count as ground (a boulder, a roof edge): just land
+      const moved = Math.hypot(m.pos.x - this.flyPrev.x, m.pos.y - this.flyPrev.y, m.pos.z - this.flyPrev.z);
+      this.flyStuckT = moved < dt * 0.8 ? this.flyStuckT + dt : 0;
+      if (this.flyStuckT > 0.4) {
+        this.flyStuckT = 0;
+        this.land(ctx);
+      }
+    }
+    this.flyPrev.copy(m.pos);
     if (m.pos.y < -25) this.eliminate(null, ctx, 'THE SKY');
   }
 
   private windToastShown = false;
+  private flyStuckT = 0;
+  private flyPrev = new THREE.Vector3();
 
   startDive(ctx: GameCtx) {
     if (this.flight !== 'barge') return;
@@ -588,6 +644,10 @@ export class Actor implements BugOwner {
     this.controller?.update(this, ctx, dt);
     const it = this.intent;
     const m = this.motor;
+    if (this.emote) {
+      this.emoteT -= dt;
+      if (this.emoteT <= 0 || it.fire || it.ads || Math.hypot(it.moveX, it.moveZ) > 0.2 || it.jump || this.healT >= 0) this.emote = null;
+    }
     if (this.flight !== 'none') {
       this.updateFlight(dt, ctx);
       this.bug.update(dt);
@@ -938,6 +998,7 @@ export class Actor implements BugOwner {
     this.bug.swapped(from);
     this.bugAbility(ctx, ability, from, spot, victim);
     this.blinks++;
+    this.lastBlinkAt = ctx.time;
     this.rig.onBlinkArrive();
     this.swapT = 0.3;
     ctx.fx.smear(from, spot);
@@ -1087,6 +1148,7 @@ export class Actor implements BugOwner {
       diving: this.flight === 'dive',
       gliding: this.flight === 'glide',
       onBarge: this.flight === 'barge',
+      emote: this.emote,
     });
     void clamp;
   }

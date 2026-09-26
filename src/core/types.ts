@@ -81,7 +81,7 @@ export interface HudEvents {
   toast(text: string, color?: string): void;
   slotPulse(slot: number): void;
   playerEliminated(by: string): void;
-  playerElimination(victim: string): void;
+  playerElimination(victim: string, callout?: string): void;
   bigToast(text: string, color?: string): void;
 }
 
@@ -122,4 +122,13 @@ export interface MatchHooks {
   safeCenter: THREE.Vector2;
   safeRadius: number;
   gloomOutside(p: THREE.Vector3): boolean;
+  /** pacing director: how far bots will pick fights from, and how keen they are to go hunting */
+  engageRange: number;
+  hunt: number;
+  /** a Loot Balloon landing spot everyone is converging on */
+  hotspot: THREE.Vector3 | null;
+  /** pacing: scales bot-vs-bot damage only (never damage to or from the player) */
+  botDamageMul: number;
+  /** 0..1 how fight-hungry the match wants bots to be right now */
+  aggro: number;
 }

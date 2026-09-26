@@ -15,12 +15,14 @@ export interface Settings {
   aimAssist: boolean;
   autoFire: boolean;
   showFps: boolean;
+  /** 'auto' adapts to how you've been doing */
+  botDifficulty: 'auto' | 'easy' | 'normal' | 'hard';
 }
 
 const isMobile = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 1100);
 
 export function loadSettings(): Settings {
-  const def: Settings = { quality: isMobile() ? 'medium' : 'high', autoQuality: true, sensitivity: 1, fov: 72, volume: 0.8, aimAssist: true, autoFire: false, showFps: false };
+  const def: Settings = { quality: isMobile() ? 'medium' : 'high', autoQuality: true, sensitivity: 1, fov: 72, volume: 0.8, aimAssist: true, autoFire: false, showFps: false, botDifficulty: 'auto' };
   try {
     const raw = localStorage.getItem('rr.settings');
     if (raw) return { ...def, ...JSON.parse(raw) };
@@ -120,6 +122,7 @@ export class Menus {
       <div class="row"><span>Volume</span><input type="range" min="0" max="1" step="0.05" data-k="volume"></div>
       <div class="row"><span>Aim assist (touch)</span><div class="seg" data-k="aimAssist"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Auto-fire</span><div class="seg" data-k="autoFire"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
+      <div class="row"><span>Bot difficulty</span><div class="seg" data-k="botDifficulty"><button data-v="auto">AUTO</button><button data-v="easy">EASY</button><button data-v="normal">MED</button><button data-v="hard">HARD</button></div></div>
       <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div></div>
     </div>`;
     const sync = () => {

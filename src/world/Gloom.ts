@@ -11,13 +11,13 @@ export interface GloomPhase {
   dps: number;
 }
 
-/** Tuned for ~5–7 minute matches on the island. */
+/** Tuned for ~6–8 minute matches (about 6.7 minutes of Gloom from the barge to the last circle). */
 export const GLOOM_PHASES: GloomPhase[] = [
-  { wait: 60, shrink: 40, radius: 72, dps: 1 },
-  { wait: 40, shrink: 32, radius: 44, dps: 2 },
-  { wait: 32, shrink: 26, radius: 24, dps: 4 },
-  { wait: 24, shrink: 20, radius: 10, dps: 7 },
-  { wait: 16, shrink: 18, radius: 0.5, dps: 12 },
+  { wait: 80, shrink: 45, radius: 72, dps: 1 },
+  { wait: 55, shrink: 40, radius: 44, dps: 2 },
+  { wait: 45, shrink: 32, radius: 24, dps: 4 },
+  { wait: 35, shrink: 25, radius: 10, dps: 7 },
+  { wait: 25, shrink: 22, radius: 0.5, dps: 12 },
 ];
 const START_R = 150;
 

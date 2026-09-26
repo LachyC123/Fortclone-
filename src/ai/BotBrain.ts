@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Actor, Controller } from '../entities/Actor';
 import type { GameCtx } from '../core/types';
-import { angleDelta, clamp, DEG, dirFromYawPitch, rand, wrapAngle, yawFromDir } from '../core/math';
+import { angleDelta, clamp, DEG, dirFromYawPitch, noise1, rand, wrapAngle, yawFromDir } from '../core/math';
 import { ColFlags } from '../physics/Collision';
 import { BUG, simulateBug, Blinkbug } from '../entities/Blinkbug';
 import type { Pickup, Crate } from '../loot/Loot';
@@ -87,14 +87,84 @@ export class BotController implements Controller {
   private goalTimeout = 0;
   private jumpCd = 0;
   private headshotBias: number;
+  /** 0 = Rookie .. 1 = Ace. Drives aim, reactions and trigger discipline (archetype drives style). */
+  skill = 0.5;
+  private lag = 0.2;
+  private lead = 0.7;
+  private noiseDeg = 2;
+  private reactRange: [number, number] = [0.35, 0.6];
+  private initErr = 8;
+  private trackRate = 2.2;
+  private turn = 5.5;
+  private hist = new Float32Array(48 * 4);
+  private histN = 0;
+  private histHead = 0;
+  private histFor: Actor | null = null;
+  private aimHead = false;
+  private phase1 = Math.random() * 10;
+  private phase2 = Math.random() * 10;
 
   constructor(public profile: BotProfile, private rng: () => number = Math.random) {
     this.headshotBias = profile.residual < 1.5 ? 0.35 : 0.15;
+    this.setSkill(0.5);
+  }
+
+  /** Aim/reaction model from skill; archetype nudges it (snipers steadier, chaotic twitchier). */
+  setSkill(s: number) {
+    this.skill = clamp(s, 0, 1);
+    const a = this.profile.archetype;
+    const steady = a === 'sniper' ? 0.8 : a === 'chaotic' ? 1.2 : a === 'aggressive' ? 1.05 : 1;
+    this.lag = (0.2 - 0.1 * this.skill) * (a === 'chaotic' ? 1.1 : 1);
+    this.lead = 0.5 + 0.4 * this.skill;
+    this.noiseDeg = (4.2 - 2.0 * this.skill) * steady;
+    const r0 = 0.5 - 0.25 * this.skill;
+    this.reactRange = [r0, r0 + 0.3 - 0.1 * this.skill];
+    this.initErr = (12 - 6 * this.skill) * steady;
+    this.trackRate = 1.2 + 1.8 * this.skill;
+    this.headshotBias = 0.06 + 0.22 * this.skill + (a === 'sniper' ? 0.08 : 0);
+    this.turn = 3.5 + 3 * this.skill;
+  }
+
+  /** where the target was `lag` seconds ago, plus a (skill-limited) lead from its old velocity */
+  private perceivedPos(t: Actor, time: number, out: THREE.Vector3) {
+    if (this.histFor !== t) {
+      this.histFor = t;
+      this.histN = 0;
+    }
+    const H = this.hist, cap = H.length / 4;
+    const w = this.histHead * 4;
+    H[w] = t.motor.pos.x;
+    H[w + 1] = t.motor.pos.y;
+    H[w + 2] = t.motor.pos.z;
+    H[w + 3] = time;
+    this.histHead = (this.histHead + 1) % cap;
+    this.histN = Math.min(cap, this.histN + 1);
+    const want = time - this.lag;
+    // walk back to the newest sample older than `want`
+    let idx = -1, prev = -1;
+    for (let k = 1; k <= this.histN; k++) {
+      const i = (this.histHead - k + cap) % cap;
+      if (H[i * 4 + 3] <= want) {
+        idx = i;
+        break;
+      }
+      prev = i;
+    }
+    if (idx < 0) idx = (this.histHead - this.histN + cap) % cap;
+    out.set(H[idx * 4], H[idx * 4 + 1], H[idx * 4 + 2]);
+    if (prev >= 0) {
+      const dtS = Math.max(1e-3, H[prev * 4 + 3] - H[idx * 4 + 3]);
+      const vx = (H[prev * 4] - H[idx * 4]) / dtS, vz = (H[prev * 4 + 2] - H[idx * 4 + 2]) / dtS;
+      out.x += vx * this.lag * this.lead;
+      out.z += vz * this.lag * this.lead;
+    }
+    return out;
   }
 
   /** Called by Actor when damaged */
   onDamaged(me: Actor, from: Actor | null, ctx: GameCtx) {
     if (!from || from === me) return;
+    if (me.hp < 30 && me.hp > 0) me.say(this.rng() < 0.5 ? 'EEK!' : 'OW!', '#ff8a8a', 1.2);
     this.awareness.set(from.id, 1.2);
     if (!this.target || this.target === from || !this.targetVisible) {
       this.target = from;
@@ -156,6 +226,11 @@ export class BotController implements Controller {
   private dropDelay = -1;
   private zoneSprint = false;
   private repathCd = 0;
+  private ignoreUntil = new Map<number, number>();
+  private dryT = 0;
+  private escapeT = 0;
+  private stuckCount = 0;
+  private escapeA = 0;
   /** loot we tried and failed to path to (blink-only perches) -> retry after this time */
   private unreachable = new Map<object, number>();
   private pendingPlan = false;
@@ -237,7 +312,12 @@ export class BotController implements Controller {
       }
       const dx = this.lobbyGoal.x - me.motor.pos.x, dz = this.lobbyGoal.z - me.motor.pos.z;
       const d = Math.hypot(dx, dz);
-      setMove(d > 0.8 ? dx : 0, d > 0.8 ? dz : 0, 0.6);
+      if (!me.emote && this.rng() < dt * 0.06) {
+        me.startEmote((['wave', 'dance', 'flex', 'laugh'] as const)[Math.floor(this.rng() * 4)], 2.4);
+        if (this.rng() < 0.5) me.say(['hi!', 'yo!', 'GL', ':)', 'hehe'][Math.floor(this.rng() * 5)], '#2a9d8f', 1.6, true);
+      }
+      if (me.emote) setMove(0, 0);
+      else setMove(d > 0.8 ? dx : 0, d > 0.8 ? dz : 0, 0.6);
       it.sprint = false;
       if (this.rng() < dt * 0.3 && this.jumpCd <= 0) {
         it.jump = true;
@@ -306,6 +386,7 @@ export class BotController implements Controller {
       const yawTo = yawFromDir(tp.x - eye.x, tp.z - eye.z);
       const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5;
       let aw = this.awareness.get(o.id) ?? 0;
+      const range = ctx.match ? ctx.match.engageRange * (this.profile.aggression > 0.7 ? 1.25 : this.profile.aggression < 0.4 ? 0.8 : 1) : 999;
       if (inCone && ctx.sightClear(eye, tp)) {
         // awareness builds faster when close, moving, or shooting; crouching hides you a bit
         const moving = o.motor.horizontalSpeed() > 3 ? 1.4 : 1;
@@ -317,9 +398,15 @@ export class BotController implements Controller {
             this.targetVisible = true;
             this.lastSeenPos.copy(o.motor.pos);
             this.lastSeenT = ctx.time;
-          } else if (d < bestD) {
-            bestNew = o;
-            bestD = d;
+          } else if (d < bestD && (d <= range || o.lastDamagedBy === me) && (this.ignoreUntil.get(o.id) ?? 0) < ctx.time) {
+            // pacing + personality: a calm bot sometimes lets a passer-by go (unless they're shooting at it)
+            const attacked = me.lastDamagedBy === o && ctx.time - me.lastDamageTime < 4;
+            const keen = ctx.match ? Math.min(1, ctx.match.aggro * 1.3 + (this.profile.aggression - 0.5) * 0.4 + (d < 8 ? 0.35 : 0)) : 1;
+            if (!attacked && o !== this.target && this.rng() > keen) this.ignoreUntil.set(o.id, ctx.time + 10);
+            else {
+              bestNew = o;
+              bestD = d;
+            }
           }
         }
       } else aw = Math.max(0, aw - tick * 0.5);
@@ -328,14 +415,23 @@ export class BotController implements Controller {
     // switch target if current one is lost and someone else is visible (or much closer)
     if (bestNew && (!this.target || !this.target.alive || (!this.targetVisible && ctx.time - this.lastSeenT > 1.5) || bestD < 6)) {
       if (this.target !== bestNew) {
+        if (!this.target) me.say(this.rng() < 0.8 ? '!' : '!!', '#ff6b6b', 1.1);
         this.target = bestNew;
-        this.reactT = rand(this.profile.reaction[0], this.profile.reaction[1]);
-        this.errYaw = (this.rng() - 0.5) * 2 * this.profile.aimError * DEG;
-        this.errPitch = (this.rng() - 0.5) * this.profile.aimError * DEG;
+        this.reactT = rand(this.reactRange[0], this.reactRange[1]);
+        this.errYaw = (this.rng() - 0.5) * 2 * this.initErr * DEG;
+        this.errPitch = (this.rng() - 0.5) * this.initErr * DEG;
       }
       this.targetVisible = true;
       this.lastSeenPos.copy(bestNew.motor.pos);
       this.lastSeenT = ctx.time;
+    }
+    // pacing: let go of far-off fights when the match wants calm (unless they're hurting us)
+    if (this.target && ctx.match) {
+      const td = this.target.motor.pos.distanceTo(me.motor.pos);
+      if (td > ctx.match.engageRange * 1.5 && ctx.time - me.lastDamageTime > 3) {
+        this.target = null;
+        this.targetVisible = false;
+      }
     }
     if (this.target && !this.target.alive && !this.target.bugout) {
       this.target = null;
@@ -348,6 +444,8 @@ export class BotController implements Controller {
       if (s.source === me || ctx.time - s.time > 0.6) continue;
       const d = s.pos.distanceTo(me.motor.pos);
       if (d > s.loudness) continue;
+      // pacing: a calm match means we don't go chasing every distant pop
+      if (ctx.match && d > ctx.match.engageRange * 1.3 && !(s.kind === 'impact' && d < 5)) continue;
       if (s.kind === 'gunshot' || s.kind === 'blink' || (s.kind === 'footstep' && d < s.loudness * 0.7) || s.kind === 'impact') {
         // imprecise estimate, better when closer
         const err = d * 0.15;
@@ -373,7 +471,23 @@ export class BotController implements Controller {
     const lowAmmo = w ? w.mag + me.ammo[ammoType!] < w.def.mag * 0.5 : true;
     const hasTarget = !!this.target && ctx.time - this.lastSeenT < 8;
     let next: BotState = this.state;
-    if (!me.armed) next = 'loot';
+    let canShoot = me.weapons.some((x) => x && (x.mag > 0 || me.ammo[x.def.ammo] > 0));
+    // quiet scavenging (bots only): nobody stays helpless for long, so late circles still fight
+    if (ctx.match && ctx.match.phase === 'live' && !canShoot && ctx.time - me.lastDamageTime > 10) {
+      this.dryT += tick;
+      const gun = me.weapons.find((x) => x);
+      if (gun && this.dryT > 10) {
+        me.addAmmo(gun.def.ammo, gun.def.mag);
+        this.dryT = 0;
+        canShoot = true;
+      } else if (!gun && this.dryT > 40) {
+        me.giveWeapon('poppistol', 0, 0, true);
+        me.addAmmo('light', 24);
+        this.dryT = 0;
+        canShoot = true;
+      }
+    } else this.dryT = 0;
+    if (!me.armed || !canShoot) next = hasTarget && this.targetVisible && me.hp < this.profile.retreatHp ? 'retreat' : 'loot';
     else if (hasTarget && this.targetVisible) next = me.hp < this.profile.retreatHp && this.rng() < 0.6 ? 'retreat' : 'engage';
     else if (hasTarget) next = me.hp < this.profile.retreatHp ? 'retreat' : 'chase';
     else if (lowAmmo || (this.profile.archetype === 'goblin' && this.rng() < 0.3)) next = 'loot';
@@ -393,9 +507,16 @@ export class BotController implements Controller {
       }
     }
     if (next !== this.state) {
+      if (next === 'investigate') me.say('?', '#49a8ff', 1.2);
+      else if (next === 'loot' && !canShoot && hasTarget) me.say('...', '#8a7a9a', 1.4);
       this.state = next;
       this.hasGoal = false;
       this.path = [];
+    }
+    // a little victory dance when the coast is clear
+    if (ctx.time - me.lastKillAt < 2.5 && ctx.time - me.lastKillAt > 0.8 && !this.targetVisible && !me.emote && me.healT < 0 && this.rng() < (this.profile.archetype === 'chaotic' || this.profile.archetype === 'aggressive' ? 0.25 : 0.1)) {
+      me.startEmote((['dance', 'laugh', 'flex'] as const)[Math.floor(this.rng() * 3)], 2.2);
+      me.lastKillAt = -99;
     }
     if ((this.state === 'wander' || this.state === 'loot' || this.state === 'investigate' || this.state === 'chase' || this.state === 'engage' || this.state === 'retreat') && this.zoneRun(me, ctx)) {
       if (this.state !== 'engage') {
@@ -477,6 +598,36 @@ export class BotController implements Controller {
               this.lootTarget = pick.pickup;
               this.crateTarget = pick.crate;
               this.state = 'loot';
+              this.hasGoal = false;
+              break;
+            }
+          }
+          // hunting (pacing director): go and find someone
+          const hunt = ctx.match?.hunt ?? 0;
+          const canFight = me.weapons.some((x) => x && (x.mag > 0 || me.ammo[x.def.ammo] > 0));
+          // a Loot Balloon is coming down nearby: go get it (and everyone else will too)
+          const hs = ctx.match?.hotspot;
+          if (hs && canFight && hs.distanceTo(me.motor.pos) < 85 && this.rng() < 0.55) {
+            this.heardPos.set(hs.x + rand(-3, 3), hs.y, hs.z + rand(-3, 3));
+            this.heardT = ctx.time;
+            this.state = 'investigate';
+            this.hasGoal = false;
+            break;
+          }
+          if (hunt > 0 && canFight && this.rng() < hunt) {
+            let prey: Actor | null = null, pd = 95;
+            for (const o of ctx.actors) {
+              if (o === me || !o.alive || o.parked || o.flight !== 'none') continue;
+              const dd = o.motor.pos.distanceTo(me.motor.pos);
+              if (dd < pd) {
+                pd = dd;
+                prey = o;
+              }
+            }
+            if (prey) {
+              this.heardPos.set(prey.motor.pos.x + rand(-7, 7), prey.motor.pos.y, prey.motor.pos.z + rand(-7, 7));
+              this.heardT = ctx.time;
+              this.state = 'investigate';
               this.hasGoal = false;
               break;
             }
@@ -628,12 +779,16 @@ export class BotController implements Controller {
   private pickLoot(me: Actor, ctx: GameCtx): { pickup: Pickup | null; crate: Crate | null } {
     let best: Pickup | null = null, bestCrate: Crate | null = null, bestScore = -Infinity;
     const goblin = this.profile.archetype === 'goblin';
-    const worst = me.weapons.some((x) => !x) ? -1 : Math.min(...me.weapons.map((x) => x!.score));
+    // a gun with no bullets (and none in the bag) is worth nothing
+    const loaded = (x: { mag: number; def: { ammo: AmmoType } }) => x.mag > 0 || me.ammo[x.def.ammo] > 0;
+    const worst = me.weapons.some((x) => !x) ? -1 : Math.min(...me.weapons.map((x) => (loaded(x!) ? x!.score : -50)));
+    const dry = !me.weapons.some((x) => x && loaded(x));
+    const reach = dry ? 70 : 45;
     for (const p of ctx.loot.pickups) {
       if (p.collectT >= 0 || !p.settled) continue;
       if ((this.unreachable.get(p) ?? -1) > ctx.time) continue;
       const d = p.pos.distanceTo(me.motor.pos);
-      if (d > 45) continue;
+      if (d > reach) continue;
       let v = -99;
       if (p.kind === 'weapon') {
         const act = me.previewOffer(p.defId, p.rarity);
@@ -641,11 +796,18 @@ export class BotController implements Controller {
         if (!me.armed) v = 40;
         else if (act === 'fuse') v = 26 + p.rarity * 4;
         else if (act === 'add') v = 18 + p.rarity * 3;
-        else if (sc > worst + 4) v = 8 + (sc - worst) * 0.5;
+        else if (sc > worst + 4) v = Math.min(40, 8 + (sc - worst) * 0.5);
+        // an empty gun we have no bullets for is barely worth the walk
+        if (p.mag <= 0 && me.ammo[WEAPONS[p.defId].ammo] <= 0) {
+          const t = WEAPONS[p.defId].ammo;
+          const ammoNear = ctx.loot.pickups.some((q) => q.kind === 'ammo' && q.defId === t && q.pos.distanceToSquared(p.pos) < 12 * 12);
+          if (!ammoNear) v *= 0.3;
+        }
         if (goblin && v > 0) v += 8;
       } else if (p.kind === 'ammo') {
-        const needs = me.weapons.some((w) => w && w.def.ammo === p.defId) && me.ammo[p.defId as AmmoType] < 40;
-        v = needs ? 12 : -99;
+        const gun = me.weapons.find((w) => w && w.def.ammo === p.defId);
+        const needs = !!gun && me.ammo[p.defId as AmmoType] < 40;
+        v = needs ? (gun!.mag + me.ammo[p.defId as AmmoType] === 0 ? (dry ? 36 : 22) : 12) : -99;
       } else if (p.kind === 'heal') {
         v = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3) ? (me.hp < 80 ? 14 : 7) : -99;
       } else if (p.kind === 'util') {
@@ -662,8 +824,8 @@ export class BotController implements Controller {
       if (c.opened || c.openT >= 0) continue;
       if ((this.unreachable.get(c) ?? -1) > ctx.time) continue;
       const d = c.pos.distanceTo(me.motor.pos);
-      if (d > 45) continue;
-      const score = (goblin ? 34 : 20) - d * 0.4;
+      if (d > (c.rich ? 90 : 45)) continue;
+      const score = (goblin ? 34 : 20) + (c.rich ? 25 : 0) - d * 0.4;
       if (score > bestScore) {
         bestScore = score;
         bestCrate = c;
@@ -710,6 +872,10 @@ export class BotController implements Controller {
     }
     this.pendingPlan = false;
     const path = ctx.nav.findPath(me.motor.pos, p);
+    if (!path && ctx.nav.lastFail === 'start' && me.motor.grounded) {
+      this.escapeT = 1.6;
+      this.escapeA = this.rng() * Math.PI * 2;
+    }
     this.path = path ?? [p.clone()];
     this.pathIdx = 0;
     // loot that pathing can't reach (or only gets under): forget it for a while
@@ -717,9 +883,10 @@ export class BotController implements Controller {
     if (tgt && tgt.pos.distanceToSquared(p) < 0.01) {
       const end = path?.[path.length - 1];
       const nearEnough = end && Math.hypot(end.x - p.x, end.z - p.z) < 1.8 && Math.abs(end.y - p.y) < 1.2;
-      const bad = !path || (!nearEnough && (!ctx.nav.lastPartial || me.motor.pos.distanceTo(p) < 30));
+      // only blame the loot if the loot is the problem (not us standing somewhere odd)
+      const bad = !path ? ctx.nav.lastFail === 'goal' : !nearEnough && (!ctx.nav.lastPartial || me.motor.pos.distanceTo(p) < 30);
       if (bad) {
-        this.unreachable.set(tgt, ctx.time + 25);
+        this.unreachable.set(tgt, ctx.time + 12);
         this.lootTarget = null;
         this.crateTarget = null;
         this.hasGoal = false;
@@ -732,13 +899,42 @@ export class BotController implements Controller {
 
   private steer(me: Actor, ctx: GameCtx, dt: number) {
     const it = me.intent;
+    if (me.emote) {
+      it.moveX = it.moveZ = 0;
+      it.sprint = false;
+      return;
+    }
     let mx = 0, mz = 0;
     if (this.idleT > 0) {
       this.idleT -= dt;
+    } else if (this.escapeT > 0) {
+      // stranded off the nav grid (a roof, a crate stack): hop in one direction until we drop off
+      this.escapeT -= dt;
+      mx = Math.cos(this.escapeA);
+      mz = Math.sin(this.escapeA);
+      if (me.motor.grounded && this.jumpCd <= 0) {
+        it.jump = true;
+        this.jumpCd = 0.7;
+      }
+    } else if (this.hasGoal && (!this.path.length || this.pathIdx >= this.path.length) && Math.hypot(this.goal.x - me.motor.pos.x, this.goal.z - me.motor.pos.z) > 2) {
+      // no usable path (e.g. just landed somewhere odd): head straight for it; stuck logic hops
+      const dx = this.goal.x - me.motor.pos.x, dz = this.goal.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      mx = dx / d;
+      mz = dz / d;
     } else if (this.path.length && this.pathIdx < this.path.length) {
       const wp = this.path[this.pathIdx];
-      const dx = wp.x - me.motor.pos.x, dz = wp.z - me.motor.pos.z;
-      const d = Math.hypot(dx, dz);
+      let dx = wp.x - me.motor.pos.x, dz = wp.z - me.motor.pos.z;
+      let d = Math.hypot(dx, dz);
+      // a waypoint below us (hopping off a roof or ledge): keep walking the way we were going
+      if (d < 0.7 && wp.y < me.motor.pos.y - 1.2 && me.motor.grounded) {
+        const prev = this.pathIdx > 0 ? this.path[this.pathIdx - 1] : null;
+        const hx = prev ? wp.x - prev.x : dx, hz = prev ? wp.z - prev.z : dz;
+        const hl = Math.hypot(hx, hz) || 1;
+        dx = (hx / hl) * 2;
+        dz = (hz / hl) * 2;
+        d = 2;
+      }
       if (d < 0.7) {
         this.pathIdx++;
         if (this.pathIdx >= this.path.length) {
@@ -780,16 +976,30 @@ export class BotController implements Controller {
     // stuck detection -> jump / repath
     this.stuckT += dt;
     if (this.stuckT > 0.8) {
-      const moved = me.motor.pos.distanceTo(this.lastProgressPos);
+      const moved = Math.hypot(me.motor.pos.x - this.lastProgressPos.x, me.motor.pos.z - this.lastProgressPos.z);
       if (Math.hypot(mx, mz) > 0.3 && moved < 0.35) {
-        if (this.jumpCd <= 0) {
+        // wedged somewhere for a while: pick a direction and bail out
+        if (++this.stuckCount >= 4) {
+          this.stuckCount = 0;
+          this.escapeT = 1.4;
+          this.escapeA = this.rng() * Math.PI * 2;
+          // whatever we were trying to reach here isn't reachable this way
+          const tgt = this.lootTarget ?? this.crateTarget;
+          if (tgt && tgt.pos.distanceTo(me.motor.pos) < 8) {
+            this.unreachable.set(tgt, ctx.time + 15);
+            this.lootTarget = null;
+            this.crateTarget = null;
+            this.hasGoal = false;
+            this.path = [];
+          }
+        } else if (this.jumpCd <= 0) {
           it.jump = true;
           this.jumpCd = 0.8;
         } else if (this.hasGoal) {
           this.setGoal(me, ctx, this.goal, true);
           this.strafe *= -1;
         }
-      }
+      } else if (moved > 1) this.stuckCount = 0;
       this.lastProgressPos.copy(me.motor.pos);
       this.stuckT = 0;
     }
@@ -804,18 +1014,21 @@ export class BotController implements Controller {
     const engaged = this.state === 'engage' && this.target && this.targetVisible;
     if (engaged) {
       const t = this.target!;
-      const head = this.rng() < this.headshotBias;
-      const tp = _v.copy(t.motor.pos).setY(t.motor.pos.y + (head ? t.motor.height - 0.22 : t.motor.height * 0.55));
+      // human-ish tracking: aim where they were a moment ago (+ an imperfect lead), with a
+      // wandering hand that shakes more when the target moves fast
+      const tp = t.bugout ? _v.copy(t.bug.pos) : this.perceivedPos(t, ctx.time, _v);
+      if (!t.bugout) tp.y += this.aimHead ? t.motor.height - 0.22 : t.motor.height * 0.55;
       desiredYaw = yawFromDir(tp.x - eye.x, tp.z - eye.z);
       desiredPitch = Math.atan2(tp.y - eye.y, Math.hypot(tp.x - eye.x, tp.z - eye.z));
-      // error settles while tracking; fast lateral movement makes it harder
       const lateral = Math.abs(t.motor.vel.x * Math.cos(desiredYaw) - t.motor.vel.z * Math.sin(desiredYaw));
-      const k = Math.exp(-this.profile.tracking * dt);
-      const res = this.profile.residual * DEG * (1 + lateral * 0.12);
-      this.errYaw = this.errYaw * k + (this.rng() - 0.5) * res * 0.6;
-      this.errPitch = this.errPitch * k + (this.rng() - 0.5) * res * 0.4;
-      desiredYaw += this.errYaw;
-      desiredPitch += this.errPitch;
+      const k = Math.exp(-this.trackRate * dt);
+      this.errYaw *= k;
+      this.errPitch *= k;
+      const dist = Math.hypot(tp.x - eye.x, tp.z - eye.z);
+      const shake = this.noiseDeg * DEG * (0.55 + Math.min(1.2, lateral * 0.14)) * (me.motor.horizontalSpeed() > 2 ? 1.25 : 1) * (0.6 + dist / 20);
+      const nt = ctx.time;
+      desiredYaw += this.errYaw + (noise1(nt * 2.2 + this.phase1 * 7) * 0.65 + noise1(nt * 5.3 + this.phase2 * 7) * 0.35) * 2 * shake;
+      desiredPitch += this.errPitch + (noise1(nt * 2.6 + this.phase2 * 11) * 0.65 + noise1(nt * 6.1 + this.phase1 * 11) * 0.35) * 1.2 * shake;
     } else if (this.lookAroundT > 0) {
       this.lookAroundT -= dt;
       desiredYaw = this.lookYaw + Math.sin(ctx.time * 1.5) * 1.2;
@@ -826,7 +1039,7 @@ export class BotController implements Controller {
       desiredYaw = this.lookYaw + Math.sin(ctx.time * 0.7 + me.id) * 0.6;
     }
     // turn-rate limited aim
-    const maxTurn = this.profile.turnSpeed * dt * (engaged ? 1 : 0.7);
+    const maxTurn = this.turn * dt * (engaged ? 1 : 0.7);
     const dy = clamp(angleDelta(this.aimYaw, desiredYaw), -maxTurn, maxTurn);
     this.aimYaw = wrapAngle(this.aimYaw + dy);
     this.aimPitch += clamp(desiredPitch - this.aimPitch, -maxTurn, maxTurn);
@@ -846,13 +1059,18 @@ export class BotController implements Controller {
       const onTarget = Math.abs(angleDelta(this.aimYaw, desiredYaw)) < 6 * DEG;
       const d = this.target!.motor.pos.distanceTo(me.motor.pos);
       it.ads = d > 14 && this.profile.archetype !== 'aggressive';
-      if (this.reactT <= 0 && onTarget) {
+      // don't waste ammo far outside the gun's useful range (close in instead)
+      const inRange = d <= me.weapon.def.botRange[1] * 1.3 + 4;
+      if (this.reactT <= 0 && onTarget && inRange) {
         if (this.burstT > 0) {
           this.burstT -= dt;
           it.fire = true;
-          if (this.burstT <= 0) this.pauseT = rand(this.profile.pause[0], this.profile.pause[1]) * (d > 25 ? 1.8 : 1);
+          if (this.burstT <= 0) this.pauseT = rand(this.profile.pause[0], this.profile.pause[1]) * (d > 25 ? 1.8 : 1) * (1.3 - this.skill * 0.5);
         } else if (this.pauseT > 0) this.pauseT -= dt;
-        else this.burstT = rand(this.profile.burst[0], this.profile.burst[1]);
+        else {
+          this.burstT = rand(this.profile.burst[0], this.profile.burst[1]);
+          this.aimHead = this.rng() < this.headshotBias;
+        }
       }
     }
   }

@@ -115,17 +115,25 @@ export function rollConsumable(): LootRoll {
 /** What a floor loot spot produces. */
 export function rollFloor(): LootRoll[] {
   const r = Math.random();
+  const ammo = (mult = 1): LootRoll => {
+    const t = weighted(Object.keys(AMMO_INFO) as AmmoType[], (a) => (a === 'medium' || a === 'light' ? 3 : 1));
+    return { kind: 'ammo', defId: t, rarity: 0, amount: Math.round(AMMO_INFO[t].pickup * mult) };
+  };
   if (r < 0.55) {
     const w = rollWeapon();
-    return [w, ammoFor(w.defId)];
+    return [w, ammoFor(w.defId, 2)];
   }
-  if (r < 0.85) return [rollConsumable()];
-  const t = weighted(Object.keys(AMMO_INFO) as AmmoType[], (a) => (a === 'medium' || a === 'light' ? 3 : 1));
-  return [{ kind: 'ammo', defId: t, rarity: 0, amount: AMMO_INFO[t].pickup }];
+  if (r < 0.8) return Math.random() < 0.5 ? [rollConsumable(), ammo()] : [rollConsumable()];
+  return [ammo(1.5), ammo()];
 }
 
 /** Rascal Crate contents: a better gun, its ammo, and a consumable. */
-export function rollCrate(): LootRoll[] {
+export function rollCrate(rich = false): LootRoll[] {
+  if (rich) {
+    const a = rollWeapon([0, 0, 0, 70, 30]);
+    const b = rollWeapon([0, 0, 40, 45, 15]);
+    return [a, ammoFor(a.defId, 2), b, ammoFor(b.defId, 2), rollConsumable(), rollConsumable()];
+  }
   const w = rollWeapon(CRATE_RARITY);
   return [w, ammoFor(w.defId, 1.5), rollConsumable(), Math.random() < 0.5 ? rollConsumable() : ammoFor(rollWeapon().defId)];
 }
@@ -147,6 +155,8 @@ export interface Crate {
   lidA: number;
   glow: THREE.Mesh;
   t: number;
+  /** Loot Balloon crate: guaranteed epic/mythic */
+  rich?: boolean;
 }
 
 const crateMats = {
@@ -442,7 +452,7 @@ export class LootSystem {
 
   /* ------------------------------------------------------------------ crates */
 
-  placeCrate(pos: THREE.Vector3, yaw: number) {
+  placeCrate(pos: THREE.Vector3, yaw: number): Crate {
     const { root, lid, lock, lights } = buildCrate();
     root.position.copy(pos);
     root.rotation.y = yaw;
@@ -452,7 +462,17 @@ export class LootSystem {
     glow.position.set(pos.x, pos.y + 0.03, pos.z);
     this.scene.add(glow);
     const collider = this.cw.box(pos.x, pos.y + 0.45, pos.z, 1.3, 0.9, 0.85, 'wood', yaw, 0, 0, ColFlags.BlocksMove | ColFlags.BlocksBullets | ColFlags.BlocksBug);
-    this.crates.push({ root, lid, lock, lights, pos: pos.clone(), yaw, opened: false, openT: -1, opener: null, collider, lidV: 0, lidA: 0, glow, t: Math.random() * 5 });
+    const crate: Crate = { root, lid, lock, lights, pos: pos.clone(), yaw, opened: false, openT: -1, opener: null, collider, lidV: 0, lidA: 0, glow, t: Math.random() * 5 };
+    this.crates.push(crate);
+    return crate;
+  }
+
+  /** remove a crate completely (event crates between matches) */
+  removeCrate(c: Crate) {
+    this.scene.remove(c.root, c.glow);
+    c.collider.enabled = false;
+    const i = this.crates.indexOf(c);
+    if (i >= 0) this.crates.splice(i, 1);
   }
 
   crateFor(a: Actor, maxDist = 2.3): Crate | null {
@@ -529,7 +549,7 @@ export class LootSystem {
           ctx.fx.ring(c.pos.clone().setY(c.pos.y + 0.1), 0xffd36b, 0.3, 3.2, 0.45);
           ctx.fx.lightFlash(top, 0xffd36b, 8, 0.35);
           if (c.opener?.isLocal) ctx.shake(0.2);
-          this.spawnRolls(rollCrate(), top, true);
+          this.spawnRolls(rollCrate(!!c.rich), top, true);
           ctx.emitSound({ pos: c.pos.clone(), loudness: 20, source: c.opener, kind: 'impact' });
         }
       }

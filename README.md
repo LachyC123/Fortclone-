@@ -38,7 +38,14 @@ npm run typecheck
 | Drop held gun / switch | X / 1-3 | tap a weapon slot |
 | **Throw Blinkbug** | hold **Q** to aim the arc, release to throw | hold the cyan bug button, release |
 | **Blink (swap places)** | **E** | purple blink button |
+| Emote (dance / wave / laugh / flex) | B (cycles) | :) button |
 | Pause / settings | Esc | ❚❚ |
+
+> **Milestone 5 — personality & pacing.** Bots aim like people (they track where you *were*, so strafing
+> and direction changes work), come in Rookie / Regular / Ace skill mixes that adapt to how you're doing
+> (or pick Easy/Normal/Hard in Settings), and a pacing director keeps matches to ~6–7 minutes. Rascals
+> react with speech bubbles and emotes, you get kill-streak callouts, and mid-match **Loot Balloons**
+> float down with epic loot.
 
 ## A match
 
@@ -88,6 +95,9 @@ node tools/tapplay.mjs                        # taps PLAY / pause / resume on an
 node tools/matchtest.mjs                      # a whole match: lobby, barge, drop, Gloom, summary
 node tools/bugtest.mjs [--mobile]             # MY BUGS screen, hatching, every species' trick
 node tools/matchperf.mjs                      # draw calls / triangles per match phase
+node tools/balance.mjs --br=4                 # bots-only matches: remaining-over-time curve & match length
+node tools/balance.mjs --duel                 # each bot skill vs a strafing player: accuracy, DPS, TTK
+node tools/m5shots.mjs                        # emotes, bubbles, Loot Balloon screenshots
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

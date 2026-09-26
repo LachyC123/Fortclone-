@@ -8,11 +8,11 @@ export type AmmoType = 'light' | 'medium' | 'heavy' | 'shells' | 'bolts';
 export type SoundProfile = 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun' | 'needle' | 'bow' | 'pepper';
 
 export const AMMO_INFO: Record<AmmoType, { name: string; color: number; css: string; pickup: number; max: number }> = {
-  light: { name: 'Pebbles', color: 0x7fb7e6, css: '#7fb7e6', pickup: 36, max: 240 },
-  medium: { name: 'Bottlecaps', color: 0xf2c14e, css: '#f2c14e', pickup: 30, max: 240 },
-  heavy: { name: 'Bolts', color: 0xd9774f, css: '#d9774f', pickup: 10, max: 60 },
-  shells: { name: 'Corks', color: 0xf28fad, css: '#f28fad', pickup: 10, max: 60 },
-  bolts: { name: 'Sparks', color: 0x6ff7ff, css: '#6ff7ff', pickup: 8, max: 40 },
+  light: { name: 'Pebbles', color: 0x7fb7e6, css: '#7fb7e6', pickup: 48, max: 240 },
+  medium: { name: 'Bottlecaps', color: 0xf2c14e, css: '#f2c14e', pickup: 42, max: 240 },
+  heavy: { name: 'Bolts', color: 0xd9774f, css: '#d9774f', pickup: 14, max: 60 },
+  shells: { name: 'Corks', color: 0xf28fad, css: '#f28fad', pickup: 14, max: 60 },
+  bolts: { name: 'Sparks', color: 0x6ff7ff, css: '#6ff7ff', pickup: 10, max: 40 },
 };
 
 export interface WeaponDef {

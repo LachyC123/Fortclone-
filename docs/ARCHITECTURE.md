@@ -182,3 +182,35 @@ Crowd LOD: in the lobby and on the barge, non-local rascals swap to their single
 - Scale knobs: nav grid half-size `ISLAND_R + 6` (cells outside the rim are skipped), Gloom phases
   (150 → 72 → 44 → 24 → 10 → 0.5), world chunks 40m (solid/foliage) / 56m / 72m, distance culling for
   butterflies, kickables, signs, crates and loot, fog thinned with altitude for the Sky Barge view.
+
+## 13. Bot skill, pacing and personality (Milestone 5)
+
+**Aim model** (`BotBrain.setSkill`, `perceivedPos`, `aim`): bots aim at where the target was `lag` seconds
+ago plus a partial lead from its old velocity (`lead`), so direction changes beat them like they beat
+people. A smooth random "hand wobble" (`noise1`) scales with skill, distance, target lateral speed and the
+bot's own movement; reaction time, first-shot error, tracking rate, turn speed and headshot choice (per
+burst) all come from skill. Archetype shifts style (snipers steadier, chaotic twitchier). Bots hold fire
+beyond ~1.3× their gun's useful range. Measured with `tools/balance.mjs --duel` against a strafing player:
+Rookie ~25–40% hits, Regular ~40–55%, Ace ~50–70%.
+
+**Difficulty**: `Profile.rating` (0..1, saved) moves after each match (wins/top-5 up, early exits down);
+each lobby gets ~30% Rookies (rating−0.3), ~52% Regulars (≈rating) and ~18% Aces (rating+0.3).
+Settings → Bot difficulty overrides with Easy/Normal/Hard.
+
+**Pacing director** (`Match.direct`): target curve `1 + 22·(1 − t/400)^1.4` rascals left, t = seconds since
+landing. Ahead of schedule → smaller `engageRange` (bots ignore far targets and drop far fights); behind →
+larger range and `hunt` (bots go find the nearest rascal). The first 90s are loot-first. Landings are spread
+over all six places and the wilds; guns and ammo are guaranteed on the ground everywhere. Gloom phases sum
+to ~6.7 min. `tools/balance.mjs --br` prints the curve.
+
+**Bot robustness fixes found by the harness**: one-way "hop down" nav links (roofs, ledges, caps), no-path
+straight-line fallback and escape hops, waypoint-below handling, unreachable-loot memory keyed to the real
+cause, ammo-aware loot values (empty guns worthless unless ammo is next to them; dry bots chase ammo),
+empty-gun bots loot instead of posturing, glide never gets stuck on steep rock.
+
+**Personality**: `fx/Bubbles.ts` speech bubbles ("!", "?", "HA!", "EEK!", "...") via `Actor.say`; procedural
+emotes in `RascalRig` (`dance`, `wave`, `laugh`, `flex`) via `Actor.startEmote` (cancelled by moving, firing
+or damage); bots emote in the lobby and after a clear kill; kill-streak callouts (double/triple, blink kill,
+long shot, clutch, first bonk). **Loot Balloons** (`Match.spawnBalloon`) drift into the safe zone at ~1:55
+and ~4:05 after landing with a rich crate (epic/mythic), a light beam and a minimap star; bots treat the
+landing spot as a `hotspot`.

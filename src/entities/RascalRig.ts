@@ -87,7 +87,11 @@ export interface AnimInput {
   diving?: boolean;
   gliding?: boolean;
   onBarge?: boolean;
+  /** an emote in progress */
+  emote?: EmoteKind | null;
 }
+
+export type EmoteKind = 'dance' | 'wave' | 'laugh' | 'flex';
 
 /**
  * Procedurally animated "toy" character. No skeleton assets: a hierarchy of chunky rounded parts
@@ -535,6 +539,8 @@ export class RascalRig {
   private healK = 0;
   private diveK = 0;
   private glideK = 0;
+  private emoteK = 0;
+  private emoteKind: EmoteKind = 'wave';
   /** Put a consumable in the left hand (eating/drinking animation). */
   setHeld(obj: THREE.Object3D | null) {
     if (this.held) this.handL.remove(this.held);
@@ -781,6 +787,63 @@ export class RascalRig {
       this.kneeL.rotation.x += (-0.5 - this.kneeL.rotation.x) * k;
       this.kneeR.rotation.x += (-0.3 - this.kneeR.rotation.x) * k;
       if (this.weapon) this.weapon.group.visible = false;
+    }
+
+    // --- emotes (procedural, layered over whatever the body was doing)
+    if (a.emote) this.emoteKind = a.emote;
+    this.emoteK = damp(this.emoteK, a.emote ? 1 : 0, 10, dt);
+    if (this.emoteK > 0.02) {
+      const k = this.emoteK;
+      if (this.weapon) this.weapon.group.visible = false;
+      const e = this.emoteKind;
+      if (e === 'dance') {
+        const b = Math.sin(t * 9), b2 = Math.sin(t * 4.5);
+        this.hips.position.y += Math.abs(b) * 0.08 * k;
+        this.hips.rotation.y += b2 * 0.45 * k;
+        _q.setFromEuler(new THREE.Euler(2.6 + b * 0.4, 0, -0.4 - b2 * 0.3));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(0.6 - b * 0.5, 0, 0.9 + b2 * 0.3));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (0.5 + b * 0.3 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (1.2 - this.elbowR.rotation.x) * k;
+        this.legL.rotation.x += (Math.max(0, b) * 0.9 - this.legL.rotation.x) * k;
+        this.legR.rotation.x += (Math.max(0, -b) * 0.9 - this.legR.rotation.x) * k;
+        this.kneeL.rotation.x += (-Math.max(0, b) * 1.3 - this.kneeL.rotation.x) * k;
+        this.kneeR.rotation.x += (-Math.max(0, -b) * 1.3 - this.kneeR.rotation.x) * k;
+        this.head.rotation.z += b2 * 0.25 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.45;
+      } else if (e === 'wave') {
+        const w = Math.sin(t * 11);
+        _q.setFromEuler(new THREE.Euler(2.9, 0, 0.55 + w * 0.35));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowR.rotation.x += (0.5 + w * 0.3 - this.elbowR.rotation.x) * k;
+        this.head.rotation.z += 0.18 * k;
+        this.torso.rotation.z += -0.08 * k;
+      } else if (e === 'laugh') {
+        const h = Math.sin(t * 16);
+        this.torso.rotation.x += (-0.25 + h * 0.12) * k;
+        this.head.rotation.x += (-0.35 + h * 0.1) * k;
+        _q.setFromEuler(new THREE.Euler(0.9, 0, -0.5));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(0.9, 0, 0.5));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (1.7 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (1.7 - this.elbowR.rotation.x) * k;
+        this.hips.position.y += Math.abs(h) * 0.03 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.3;
+        this.mouth.scale.set(0.8, -1.4, 1);
+      } else {
+        const p = Math.sin(t * 6);
+        _q.setFromEuler(new THREE.Euler(1.6, 0, -1.3));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(1.6, 0, 1.3));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (2.1 + p * 0.15 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (2.1 - p * 0.15 - this.elbowR.rotation.x) * k;
+        this.torso.scale.x *= 1 + Math.max(0, p) * 0.08 * k;
+        this.hips.position.y += -0.05 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.6;
+      }
     }
 
     // --- secondary motion: backpack, scarf, hat

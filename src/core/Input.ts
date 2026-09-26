@@ -23,6 +23,7 @@ export interface InputState {
   utilHeld: boolean;
   utilReleased: boolean;
   healPressed: boolean;
+  emotePressed: boolean;
   dropPressed: boolean;
 }
 
@@ -48,6 +49,7 @@ export class Input {
     utilHeld: false,
     utilReleased: false,
     healPressed: false,
+    emotePressed: false,
     dropPressed: false,
   };
   private keys = new Set<string>();
@@ -136,6 +138,9 @@ export class Input {
         case 'KeyH':
           this.s.healPressed = true;
           break;
+        case 'KeyB':
+          this.s.emotePressed = true;
+          break;
         case 'KeyX':
           this.s.dropPressed = true;
           break;
@@ -177,6 +182,7 @@ export class Input {
     s.throwReleased = false;
     s.utilReleased = false;
     s.healPressed = false;
+    s.emotePressed = false;
     s.dropPressed = false;
     s.blinkPressed = false;
     s.slotPressed = -1;

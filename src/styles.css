@@ -2546,3 +2546,80 @@ input[type='range'] {
   background: linear-gradient(90deg, var(--mustard), #ff9a5b);
   animation: playPulse 0.5s infinite;
 }
+.callout {
+  position: absolute;
+  top: calc(30% + 58px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 30px;
+  color: var(--blink);
+  -webkit-text-stroke: 3px var(--ink);
+  paint-order: stroke fill;
+  white-space: nowrap;
+  animation: calloutPop 2.2s forwards;
+}
+@keyframes calloutPop {
+  0% {
+    transform: translateX(-50%) scale(0.2) rotate(8deg);
+    opacity: 0;
+  }
+  12% {
+    transform: translateX(-50%) scale(1.25) rotate(-3deg);
+    opacity: 1;
+  }
+  22% {
+    transform: translateX(-50%) scale(1) rotate(2deg);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-50%) translateY(-10px);
+    opacity: 0;
+  }
+}
+.emotebtn {
+  position: absolute;
+  right: calc(12px + var(--safe-r));
+  top: calc(150px + var(--safe-t));
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--mustard);
+}
+.emotepick {
+  position: absolute;
+  right: calc(60px + var(--safe-r));
+  top: calc(146px + var(--safe-t));
+  display: none;
+  gap: 6px;
+  pointer-events: auto;
+}
+.emotepick.open {
+  display: flex;
+}
+.emotepick button {
+  font-size: 15px;
+  padding: 8px 10px;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 3px 0 var(--ink);
+  color: var(--ink);
+  cursor: pointer;
+}
+.hud.flying .emotebtn,
+.hud.flying .emotepick {
+  display: none;
+}
+.sumcard .diff {
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 6px;
+}

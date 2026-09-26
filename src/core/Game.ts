@@ -23,7 +23,9 @@ import { CollisionWorld, ColFlags } from '../physics/Collision';
 import { Throwables } from '../combat/Throwables';
 import { geoStats } from '../render/GeoKit';
 import { Match } from './Match';
-import { ISLAND_R } from '../world/Heightmap';
+import { Bubbles } from '../fx/Bubbles';
+import type { EmoteKind } from '../entities/RascalRig';
+import { ISLAND_R, POIS } from '../world/Heightmap';
 import { SPECIES_BY_ID, Collection, loadCollection, saveCollection, randomBugName, randomSpecies } from '../progression/Bugs';
 
 const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo', 'Beans4Brains', 'Noodle', 'Gran Turbo', 'Mr. Wiggles', 'SoggyWaffle', 'Pip', 'Honk', 'Tater Tot', 'Lady Fizz', 'Gloomzilla', 'Crumpet', 'Bop'];
@@ -67,6 +69,8 @@ export class Game implements GameCtx {
   private autoQualityT = 6;
   private lowFpsTime = 0;
   private titleOrbit = 0;
+  bubbles: Bubbles;
+  private emoteIdx = 0;
   /** the battle royale in progress (null in the playground / on the title screen) */
   match: Match | null = null;
   private matchCtl!: Match;
@@ -99,6 +103,7 @@ export class Game implements GameCtx {
     for (const d of this.world.doors) d.collider.enabled = true;
     if (location.search.includes('timing')) console.log(`[t] world ${(tw2 - tw).toFixed(0)}ms nav ${(performance.now() - tw2).toFixed(0)}ms`);
 
+    this.bubbles = new Bubbles(this.scene);
     this.input = new Input(canvas);
     this.camRig = new CameraRig(this.camera, this.cw);
     this.hud = new HUD(this.camera);
@@ -132,6 +137,7 @@ export class Game implements GameCtx {
       }
     };
     this.touch.onPause = () => this.pause();
+    this.hud.onEmote = (k) => this.playerEmote(k);
     window.addEventListener('resize', () => this.fx.onResize(window.innerHeight * this.r.renderer.getPixelRatio(), this.camera.fov));
     this.fx.onResize(window.innerHeight * this.r.renderer.getPixelRatio(), this.camera.fov);
     document.addEventListener('visibilitychange', () => {
@@ -209,9 +215,11 @@ export class Game implements GameCtx {
   }
 
   private spawnLootSpot(s: { pos: THREE.Vector3; kind: 'weapon' | 'ammo' }) {
-    const rolls = s.kind === 'weapon' ? (() => {
+    // on the big island guns are the thing everyone needs first: plenty of floor spots roll one
+    const gun = s.kind === 'weapon' || Math.random() < 0.6;
+    const rolls = gun ? (() => {
       const w = rollWeapon();
-      return [w, ammoFor(w.defId)];
+      return [w, ammoFor(w.defId, 2)];
     })() : rollFloor();
     this.loot.spawnRolls(rolls, s.pos);
   }
@@ -240,6 +248,13 @@ export class Game implements GameCtx {
       this.frame();
     };
     loop();
+  }
+
+  playerEmote(kind: EmoteKind) {
+    const p = this.player;
+    if (!p.alive || p.flight !== 'none') return;
+    p.startEmote(kind, 3);
+    audio.uiTap();
   }
 
   /** Equip a bug from the collection on your rascal. */
@@ -280,6 +295,7 @@ export class Game implements GameCtx {
     this.matchCtl.ui.setVisible(false);
     this.matchCtl.ui.hideSummary();
     this.matchCtl.gloom.reset();
+    this.matchCtl.clearBalloons();
     this.matchCtl.barge.active = false;
     this.matchCtl.barge.group.visible = false;
     // back to a small playground crew
@@ -310,6 +326,23 @@ export class Game implements GameCtx {
   resetWorldForMatch() {
     for (const p of [...this.loot.pickups]) this.loot.remove(p);
     for (const s of this.world.lootSpots) this.spawnLootSpot(s);
+    // every place (and the wild land between them) gets guns on the ground and spare ammo,
+    // so wherever you land there's something to fight with
+    const drop = (x: number, z: number, r: number, gun: boolean) => {
+      const p = this.nav.randomWalkable(Math.random, x, z, r);
+      if (!p) return;
+      p.y += 0.05;
+      if (gun) {
+        const w = rollWeapon();
+        this.loot.spawnRolls([w, ammoFor(w.defId, 2)], p);
+      } else this.loot.spawnRolls([ammoFor(pick(['tincan', 'rattle', 'poppistol', 'needler', 'broomstick'])), ammoFor(pick(['tincan', 'rattle', 'pepperbox']))], p);
+    };
+    for (const poi of POIS)
+      for (let i = 0; i < 10; i++) drop(poi.x, poi.z, poi.r, i < 5);
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, d = 45 + Math.random() * 45;
+      drop(Math.cos(a) * d, Math.sin(a) * d, 8, i < 14);
+    }
     this.loot.resetCrates();
     for (const n of this.world.nests) {
       n.used = false;
@@ -445,6 +478,11 @@ export class Game implements GameCtx {
     this.world.update(dt, this.actors, this.camera.position);
 
     this.match?.update(dt);
+    if (this.input.s.emotePressed) {
+      const kinds: EmoteKind[] = ['dance', 'wave', 'laugh', 'flex'];
+      this.playerEmote(kinds[this.emoteIdx++ % kinds.length]);
+    }
+    this.bubbles.update(this.actors, this.camera, this.time);
 
     // camera & listener
     const p = this.player;
