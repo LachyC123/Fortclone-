@@ -37,7 +37,7 @@ export const PROFILES: Record<Archetype, BotProfile> = {
   sniper: { archetype: 'sniper', reaction: [0.35, 0.55], aimError: 5, residual: 0.9, tracking: 2.8, turnSpeed: 4.5, preferredRange: 28, aggression: 0.3, blinkiness: 0.5, retreatHp: 45, burst: [0.25, 0.5], pause: [0.4, 0.8] },
 };
 
-type BotState = 'wander' | 'loot' | 'investigate' | 'engage' | 'chase' | 'retreat';
+type BotState = 'wander' | 'loot' | 'investigate' | 'engage' | 'chase' | 'retreat' | 'help';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -306,7 +306,11 @@ export class BotController implements Controller {
       setMove(0, 0);
       const tgt = m.dropTargetFor(me);
       const d = Math.hypot(tgt.x - m.barge.pos.x, tgt.z - m.barge.pos.z);
-      if (m.canDrop && this.dropDelay < 0 && (d > this.dropDist + 0.05 || d < 16)) this.dropDelay = rand(0, 1.2);
+      // squads with you in them: wait for you to jump, then leap right after
+      const lead = m.teamSize > 1 ? ctx.actors.find((o) => !!o.me && !o.parked && o.team === me.team) : null;
+      if (lead) {
+        if (m.canDrop && lead.flight !== 'barge' && this.dropDelay < 0) this.dropDelay = rand(0.15, 0.7);
+      } else if (m.canDrop && this.dropDelay < 0 && (d > this.dropDist + 0.05 || d < 16)) this.dropDelay = rand(0, 1.2);
       this.dropDist = d;
       if (this.dropDelay >= 0) {
         this.dropDelay -= dt;
@@ -398,6 +402,9 @@ export class BotController implements Controller {
     let bestD = Infinity;
     for (const o of ctx.actors) {
       if (o === me || o.parked || (!o.alive && !o.bugout)) continue;
+      if (o.team === me.team) continue;
+      // knocked rascals aren't worth chasing across the map (the pushy ones still finish them off)
+      if (o.downed && o !== this.target && o.motor.pos.distanceTo(me.motor.pos) > (this.profile.aggression > 0.7 ? 25 : 12)) continue;
       // a freshly spawned Blinkbug is shimmering (can't be hit) and often goes unnoticed
       if (o.bugout && (o.bugout.grace > 0 || (this.ignoreUntil.get(o.id) ?? 0) > ctx.time)) continue;
       const tp = o.bugout ? _v.copy(o.bug.pos) : _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
@@ -510,6 +517,9 @@ export class BotController implements Controller {
     // ---- heal up when nobody is shooting at us
     if (me.healItem && me.healT < 0 && me.hp < 72 && !this.targetVisible && ctx.time - me.lastDamageTime > 1.6) me.intent.heal = true;
 
+    // ---- squads: knocked crawling, reviving, sparks, sticking with the leader
+    if (this.squadThink(me, ctx)) return;
+
     // ---- choose state
     const w = me.weapon;
     const ammoType = w?.def.ammo as AmmoType | undefined;
@@ -608,6 +618,8 @@ export class BotController implements Controller {
         } else if (!this.hasGoal) this.wanderGoal(me, ctx);
         break;
       }
+      case 'help':
+        break;
       case 'engage':
         this.engageThink(me, ctx);
         break;
@@ -692,7 +704,7 @@ export class BotController implements Controller {
           if (hunt > 0 && canFight && this.rng() < hunt) {
             let prey: Actor | null = null, pd = 95;
             for (const o of ctx.actors) {
-              if (o === me || !o.alive || o.parked || o.flight !== 'none') continue;
+              if (o === me || !o.alive || o.parked || o.flight !== 'none' || o.team === me.team) continue;
               const dd = o.motor.pos.distanceTo(me.motor.pos);
               if (dd < pd) {
                 pd = dd;
@@ -910,6 +922,136 @@ export class BotController implements Controller {
     return bestScore > -5 ? { pickup: best, crate: bestCrate } : { pickup: null, crate: null };
   }
 
+  /* ------------------------------------------------------------------ squads */
+
+  /** the teammate I follow: a human teammate if there is one, else the lowest-numbered bot */
+  private leader(me: Actor, ctx: GameCtx): Actor | null {
+    const m = ctx.match;
+    if (!m || m.teamSize <= 1) return null;
+    let best: Actor | null = null;
+    for (const o of ctx.actors) {
+      if (o.team !== me.team || !o.alive || o.downed || o.parked) continue;
+      if (!best || (!!o.me && !best.me) || (!!o.me === !!best.me && o.id < best.id)) best = o;
+    }
+    return best === me ? null : best;
+  }
+
+  /** a teammate got shot: turn towards the shooter and join in */
+  teamAlert(me: Actor, attacker: Actor, victim: Actor, ctx: GameCtx) {
+    if (attacker.motor.pos.distanceTo(me.motor.pos) > 80) return;
+    this.awareness.set(attacker.id, Math.max(this.awareness.get(attacker.id) ?? 0, 0.9));
+    this.ignoreUntil.delete(attacker.id);
+    if (!this.targetVisible) {
+      this.heardPos.copy(attacker.motor.pos);
+      this.heardT = ctx.time;
+      this.lookYaw = yawFromDir(attacker.motor.pos.x - me.motor.pos.x, attacker.motor.pos.z - me.motor.pos.z);
+      this.lookAroundT = 0;
+    }
+    if (victim.me && this.rng() < 0.15) me.say('ON IT!', '#ffd36b', 1.2);
+  }
+
+  /** returns true when a squad duty took over this tick */
+  private squadThink(me: Actor, ctx: GameCtx): boolean {
+    const m = ctx.match;
+    if (!m || m.teamSize <= 1 || m.phase !== 'live') return false;
+    const threatNear = this.targetVisible && !!this.target && this.target.motor.pos.distanceTo(me.motor.pos) < 22;
+    // knocked: crawl towards the nearest teammate, or at least away from whoever did it
+    if (me.downed) {
+      let mate: Actor | null = null, md = 1e9;
+      for (const o of ctx.actors) {
+        if (o === me || o.team !== me.team || !o.alive || o.downed) continue;
+        const d = o.motor.pos.distanceTo(me.motor.pos);
+        if (d < md) {
+          md = d;
+          mate = o;
+        }
+      }
+      this.state = 'help';
+      if (mate && md > 1.5) this.setGoal(me, ctx, mate.motor.pos);
+      else if (this.target) {
+        _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+        this.setGoal(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 6));
+      } else this.hasGoal = false;
+      return true;
+    }
+    me.intent.revive = false;
+    if (threatNear) {
+      me.reviving = null;
+      return false;
+    }
+    // pick up a knocked teammate
+    let down: Actor | null = null, dd = 45;
+    for (const o of ctx.actors) {
+      if (o === me || o.team !== me.team || !o.downed || !o.alive) continue;
+      const d = o.motor.pos.distanceTo(me.motor.pos);
+      if (d < dd) {
+        dd = d;
+        down = o;
+      }
+    }
+    if (down) {
+      this.state = 'help';
+      if (dd < 1.8) {
+        this.hasGoal = false;
+        this.path = [];
+        me.reviving = down;
+        me.intent.revive = true;
+        if (down.reviveK < 0.05) me.say('HOLD ON!', '#9dff8a', 1.4);
+      } else this.setGoal(me, ctx, down.motor.pos);
+      return true;
+    }
+    me.reviving = null;
+    // carry a spark to a nest
+    const carrying = m.sparks.find((sp) => sp.carrier === me);
+    if (carrying) {
+      let best: { pos: THREE.Vector3 } | null = null, bd = 1e9;
+      for (const n of ctx.world.nests) {
+        if (n.used) continue;
+        const d = n.pos.distanceTo(me.motor.pos);
+        if (d < bd) {
+          bd = d;
+          best = n;
+        }
+      }
+      if (best) {
+        this.state = 'help';
+        if (bd > 1.5) this.setGoal(me, ctx, best.pos);
+        else this.hasGoal = false;
+        return true;
+      }
+      return false;
+    }
+    // grab a teammate's spark off the ground
+    let spark: { pos: THREE.Vector3 } | null = null, sd = 70;
+    for (const sp of m.sparks) {
+      if (sp.carrier || sp.owner.team !== me.team) continue;
+      const d = sp.pos.distanceTo(me.motor.pos);
+      if (d < sd) {
+        sd = d;
+        spark = sp;
+      }
+    }
+    if (spark) {
+      this.state = 'help';
+      if (sd < 2) m.trySparkPickup(me);
+      else this.setGoal(me, ctx, _v.copy(spark.pos).setY(spark.pos.y - 0.9));
+      return true;
+    }
+    // drifted too far from the leader: catch up (fights and looting nearby are fine)
+    const lead = this.leader(me, ctx);
+    if (lead && !this.targetVisible) {
+      const d = lead.motor.pos.distanceTo(me.motor.pos);
+      if (d > 26) {
+        this.state = 'help';
+        const a = me.id * 2.4;
+        this.setGoal(me, ctx, _v.copy(lead.motor.pos).add(_v2.set(Math.cos(a) * 4, 0, Math.sin(a) * 4)));
+        return true;
+      }
+    }
+    if (this.state === 'help') this.state = 'wander';
+    return false;
+  }
+
   private wanderGoal(me: Actor, ctx: GameCtx) {
     const arch = this.profile.archetype;
     let c = me.motor.pos;
@@ -924,6 +1066,12 @@ export class BotController implements Controller {
     if (m && m.phase === 'live' && m.safeRadius < 120) {
       c = _v.set(m.safeCenter.x, 0, m.safeCenter.y);
       r = Math.max(2, Math.min(r, m.safeRadius * 0.7));
+    }
+    // squads: followers wander around their leader instead
+    const lead = this.leader(me, ctx);
+    if (lead) {
+      c = _v.copy(lead.motor.pos);
+      r = 7;
     }
     const p = ctx.nav.randomWalkable(this.rng, c.x, c.z, r);
     if (p) this.setGoal(me, ctx, p);
@@ -1042,7 +1190,7 @@ export class BotController implements Controller {
     }
     it.moveX = mx;
     it.moveZ = mz;
-    it.sprint = (this.zoneSprint || this.state === 'chase' || this.state === 'retreat' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
+    it.sprint = (this.zoneSprint || this.state === 'chase' || this.state === 'retreat' || this.state === 'help' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
     const wantCrouch = this.state === 'engage' && this.crouchWant;
     if (wantCrouch !== me.motor.crouching && me.motor.grounded && !me.motor.sliding) it.crouch = true;
     // aggressive bots slide into fights

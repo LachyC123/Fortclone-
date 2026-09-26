@@ -27,6 +27,7 @@ export type BugState = 'docked' | 'flying' | 'landed' | 'returning' | 'piloted';
 
 export interface BugOwner {
   isLocal: boolean;
+  me: { sfx: { bugReady(): void } } | null;
   alive: boolean;
   dockWorld(out: THREE.Vector3): THREE.Vector3;
   facingYaw(): number;
@@ -383,7 +384,7 @@ export class Blinkbug {
       this.wasReady = true;
       this.squashV = 8;
       this.fx.sparkBurst(this.root.position, PAL.blink, 10);
-      if (this.owner.isLocal) audio.bugReady();
+      this.owner.me?.sfx.bugReady();
     }
 
     this.animate(dt);

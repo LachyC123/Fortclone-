@@ -158,11 +158,12 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
   }
 
   if (anyHit && lastVictim) {
-    if (shooter.isLocal) {
-      ctx.hud.hitmarker(anyHead, anyKill);
-      ctx.hud.damageNumber(lastVictim.headCenter(new THREE.Vector3()).setY(lastVictim.motor.pos.y + 1.9), totalDmg, anyHead);
-      audio.hitmarker(anyHead, anyKill);
-      if (anyHead && !anyKill) ctx.hitStop(0.035, 0.2);
+    const me = shooter.me;
+    if (me) {
+      me.hud.hitmarker(anyHead, anyKill);
+      me.hud.damageNumber(lastVictim.headCenter(new THREE.Vector3()).setY(lastVictim.motor.pos.y + 1.9), totalDmg, anyHead);
+      me.sfx.hitmarker(anyHead, anyKill);
+      if (anyHead && !anyKill) me.hitStop(0.035, 0.2);
     }
   }
 

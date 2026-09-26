@@ -20,9 +20,9 @@ await page.waitForFunction(() => window.__game, null, { timeout: 120000 });
 if (process.argv.some((a) => a.startsWith('--br'))) {
   const n = +(arg('br') || 3);
   for (let run = 0; run < n; run++) {
-    const r = await page.evaluate((verbose) => {
+    const r = await page.evaluate(([verbose, team]) => {
       const g = window.__game;
-      g.startMatch();
+      g.startMatch(team);
       g.pause();
       const m = g.match, p = g.player;
       const step = (sec) => { for (let i = 0; i < Math.round(sec * 30); i++) g.debugStep(1, 1 / 30); };
@@ -36,7 +36,7 @@ if (process.argv.some((a) => a.startsWith('--br'))) {
       const land = t;
       const curve = [];
       let last = -1;
-      while (m.remaining > 1 && t < 720) {
+      while ((team > 1 ? m.teamsLeft() > 1 : m.remaining > 1) && t < 720) {
         step(1);
         t += 1;
         const mark = Math.floor((t - land) / 30);
@@ -56,10 +56,11 @@ if (process.argv.some((a) => a.startsWith('--br'))) {
         }
       }
       const kills = g.actors.map((a) => a.kills).sort((a, b) => b - a).slice(0, 3).join('/');
-      const res = `landed ${land.toFixed(0)}s  match ${(t / 60).toFixed(1)}min  left=${m.remaining}  topKills=${kills}\n    ${curve.join('\n    ')}`;
+      const revives = g.actors.reduce((s2, a) => s2 + a.revives, 0);
+      const res = `landed ${land.toFixed(0)}s  match ${(t / 60).toFixed(1)}min  left=${m.remaining}${team > 1 ? ` teams=${m.teamsLeft()} revives=${revives} rebuilt=${g.actors.filter((a) => a.alive && a.reviveUsed).length}` : ''}  topKills=${kills}\n    ${curve.join('\n    ')}`;
       g.goHome();
       return res;
-    }, process.argv.includes('--verbose'));
+    }, [process.argv.includes('--verbose'), +(arg('team') || 1)]);
     console.log(`run ${run}: ${r}`);
   }
 }

@@ -14,6 +14,8 @@ export interface InputState {
   crouchPressed: boolean;
   reloadPressed: boolean;
   interactPressed: boolean;
+  /** interact is being held (reviving a teammate) */
+  interactHeld: boolean;
   throwHeld: boolean;
   throwReleased: boolean;
   blinkPressed: boolean;
@@ -40,6 +42,7 @@ export class Input {
     crouchPressed: false,
     reloadPressed: false,
     interactPressed: false,
+    interactHeld: false,
     throwHeld: false,
     throwReleased: false,
     blinkPressed: false,
@@ -102,6 +105,7 @@ export class Input {
     if (down) this.keys.add(k);
     else this.keys.delete(k);
     if (!this.enabled) return;
+    if (!down && k === 'KeyF') this.s.interactHeld = false;
     if (down) {
       switch (k) {
         case 'Space':
@@ -116,6 +120,7 @@ export class Input {
           break;
         case 'KeyF':
           this.s.interactPressed = true;
+          this.s.interactHeld = true;
           break;
         case 'KeyE':
           this.s.blinkPressed = true;

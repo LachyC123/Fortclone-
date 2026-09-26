@@ -90,6 +90,8 @@ export interface AnimInput {
   onBarge?: boolean;
   /** an emote in progress */
   emote?: EmoteKind | null;
+  /** knocked down: crawling on the ground */
+  downed?: boolean;
 }
 
 export type EmoteKind = 'dance' | 'wave' | 'laugh' | 'flex';
@@ -541,6 +543,7 @@ export class RascalRig {
   private diveK = 0;
   private glideK = 0;
   private emoteK = 0;
+  private downK = 0;
   private emoteKind: EmoteKind = 'wave';
   /** Put a consumable in the left hand (eating/drinking animation). */
   setHeld(obj: THREE.Object3D | null) {
@@ -845,6 +848,28 @@ export class RascalRig {
         this.hips.position.y += -0.05 * k;
         this.eyeL.scale.y = this.eyeR.scale.y = 0.6;
       }
+    }
+
+    // --- knocked down: belly-crawl, arms pulling forward, legs dragging, head up
+    this.downK = damp(this.downK, a.downed ? 1 : 0, 7, dt);
+    if (this.downK > 0.02) {
+      const k = this.downK;
+      if (this.weapon) this.weapon.group.visible = false;
+      const cr = Math.sin(t * 6) * clamp(speed / 1.2, 0, 1);
+      this.hips.position.y += -0.36 * k;
+      this.hips.rotation.x += -1.15 * k;
+      _q.setFromEuler(new THREE.Euler(2.7 + cr * 0.5, 0, -0.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(2.7 - cr * 0.5, 0, 0.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x += (0.6 + cr * 0.4 - this.elbowL.rotation.x) * k;
+      this.elbowR.rotation.x += (0.6 - cr * 0.4 - this.elbowR.rotation.x) * k;
+      this.legL.rotation.x += (0.35 + cr * 0.25 - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (0.35 - cr * 0.25 - this.legR.rotation.x) * k;
+      this.kneeL.rotation.x += (-0.4 - this.kneeL.rotation.x) * k;
+      this.kneeR.rotation.x += (-0.4 - this.kneeR.rotation.x) * k;
+      this.head.rotation.x += 0.75 * k;
+      this.eyeL.scale.y = this.eyeR.scale.y = 0.55;
     }
 
     // --- secondary motion: backpack, scarf, hat

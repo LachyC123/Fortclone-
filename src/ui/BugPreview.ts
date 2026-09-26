@@ -40,6 +40,7 @@ export class BugPreview {
     this.scene.add(this.pedestal);
     const owner: BugOwner = {
       isLocal: false,
+      me: null,
       alive: true,
       dockWorld: (out) => out.set(0, this.hovering, 0),
       facingYaw: () => this.yaw,

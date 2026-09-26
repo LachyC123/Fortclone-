@@ -59,6 +59,8 @@ export class Menus {
       <div class="logo">RIFT<span>RASCALS</span></div>
       <div class="tagline">DROP. BLINK. GRAB. RUN.</div>
       <div class="profile big"></div>
+      <div class="modepick"><button data-n="1">SOLO</button><button data-n="2">DUOS</button><button data-n="3">TRIOS</button><button data-n="4">SQUADS</button></div>
+      <div class="modehint"></div>
       <button class="btn play">PLAY</button>
       <button class="mybug"></button>
       <div class="homebtns">
@@ -72,7 +74,33 @@ export class Menus {
       <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!)<br>
       <kbd>G</kbd> hold/release to throw a utility · <kbd>H</kbd> heal · <kbd>X</kbd> drop gun · <kbd>1-3</kbd> weapons · <kbd>Esc</kbd> pause<br>
       Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!<br>
-      Knocked out? Your <b>Blinkbug</b> carries your spark to a <b>Rift Nest</b> — once per match. Stay out of <b>THE GLOOM</b>.</div></div>`;
+      Knocked out? Your <b>Blinkbug</b> carries your spark to a <b>Rift Nest</b> — once per match. Stay out of <b>THE GLOOM</b>.<br>
+      <b>Duos / Trios / Squads:</b> at 0 HP you're <b>knocked down</b> — a teammate holds <kbd>F</kbd> to pick you up. Fully out? Your spark drops: a teammate grabs it and rebuilds you at a <b>Rift Nest</b>.</div></div>`;
+    // solo / duos / trios / squads (your teammates are bots until you play with friends)
+    const hints = ['', 'Every rascal for themselves', 'You + 1 bot teammate · 12 teams', 'You + 2 bot teammates · 8 teams', 'You + 3 bot teammates · 6 teams'];
+    const setMode = (n: number) => {
+      this.game.teamSize = n;
+      try {
+        localStorage.setItem('rr.mode', String(n));
+      } catch {
+        /* ignore */
+      }
+      this.title.querySelectorAll<HTMLButtonElement>('.modepick button').forEach((b) => b.classList.toggle('on', Number(b.dataset.n) === n));
+      (this.title.querySelector('.modehint') as HTMLElement).textContent = hints[n];
+    };
+    let saved = 1;
+    try {
+      saved = Number(localStorage.getItem('rr.mode')) || 1;
+    } catch {
+      /* ignore */
+    }
+    setMode(Math.min(4, Math.max(1, saved)));
+    this.title.querySelector('.modepick')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button');
+      if (!b) return;
+      audio.uiTap();
+      setMode(Number(b.dataset.n));
+    });
     this.title.querySelector('.play')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();

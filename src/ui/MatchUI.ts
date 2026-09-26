@@ -12,6 +12,8 @@ export interface MatchSummary {
   won: boolean;
   placement: number;
   of: number;
+  /** placement counts teams (squads) */
+  teams?: boolean;
   kills: number;
   damage: number;
   bestWeapon: string;
@@ -57,6 +59,8 @@ export class MatchUI {
   private wipeEl = h('div', 'cloudwipe');
   private summaryEl = h('div', 'overlay summary hidden');
   private gloomTint = h('div', 'gloomtint');
+  private knockEl = h('div', 'knockban', '<div class="t big">KNOCKED DOWN</div><div class="s">Crawl to cover — a teammate can pick you up</div><div class="bar"><i></i></div>');
+  private specEl = h('div', 'specban');
   private lastSec = -1;
   onPlayAgain: (() => void) | null = null;
   onHome: (() => void) | null = null;
@@ -71,13 +75,30 @@ export class MatchUI {
       c.style.animationDelay = `${(i % 5) * 0.04}s`;
       this.wipeEl.appendChild(c);
     }
-    this.root.append(this.gloomTint, this.banner, this.sub, this.gloomEl, this.routeEl, this.jumpEl, this.bugEl, this.nestArrow, this.elimEl);
+    this.root.append(this.knockEl, this.specEl, this.gloomTint, this.banner, this.sub, this.gloomEl, this.routeEl, this.jumpEl, this.bugEl, this.nestArrow, this.elimEl);
     document.body.append(this.root, this.wipeEl, this.summaryEl);
     this.hideAllBits();
   }
 
   private hideAllBits() {
     for (const e of [this.banner, this.sub, this.gloomEl, this.jumpEl, this.routeEl, this.bugEl, this.nestArrow, this.elimEl]) e.classList.remove('show');
+  }
+
+  /** squads: you're down (bleed bar filled by knockedBleed) */
+  knocked(on: boolean) {
+    this.knockEl.classList.toggle('show', on);
+  }
+  knockedBleed(k: number, reviveK: number) {
+    const bar = this.knockEl.querySelector('i') as HTMLElement;
+    bar.style.transform = `scaleX(${Math.max(0, k)})`;
+    this.knockEl.classList.toggle('reviving', reviveK > 0);
+    (this.knockEl.querySelector('.s') as HTMLElement).textContent = reviveK > 0 ? `Getting picked up… ${Math.round(reviveK * 100)}%` : 'Crawl to cover — a teammate can pick you up';
+  }
+
+  /** squads: out, but your team can still bring you back */
+  spectating(name: string, on: boolean) {
+    this.specEl.classList.toggle('show', on);
+    if (on) this.specEl.innerHTML = `<b class="big">YOU'RE OUT${name ? ` · WATCHING ${name.toUpperCase()}` : ''}</b><small>Your spark dropped — a teammate can carry it to a Rift Nest to rebuild you</small>`;
   }
 
   setVisible(v: boolean) {
@@ -206,7 +227,7 @@ export class MatchUI {
     ];
     const lines = s.xpParts.filter(([, v]) => v > 0).map(([k, v], i) => `<div class="xpl" style="animation-delay:${0.5 + i * 0.12}s"><span>${k}</span><b>+${v}</b></div>`).join('');
     this.summaryEl.innerHTML = `<div class="sumcard panel">
-      <div class="place big ${s.won ? 'win' : ''}">${s.won ? 'VICTORY ROYALE-ISH!' : `#${s.placement}`}<small> of ${s.of}</small></div>
+      <div class="place big ${s.won ? 'win' : ''}">${s.won ? 'VICTORY ROYALE-ISH!' : `#${s.placement}`}<small> of ${s.of}${s.teams ? ' teams' : ''}</small></div>
       <div class="stats">${rows.map(([k, v, c]) => `<div class="st"><span>${k}</span><b class="big" ${c ? `style="color:${c}"` : ''}>${v}</b></div>`).join('')}</div>
       <div class="xp"><div class="lv big">LV <span class="n">${s.startLevel}</span></div><div class="xpbar"><div class="fill"></div></div><div class="gain big">+${s.xp} XP</div></div>
       <div class="xplines">${lines}</div>

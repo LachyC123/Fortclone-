@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Game } from './Game';
 import type { Actor } from '../entities/Actor';
-import { MatchHooks, MatchPhase } from './types';
+import { MatchHooks, MatchPhase, SparkInfo } from './types';
 import { SkyBarge } from '../world/SkyBarge';
 import { Gloom } from '../world/Gloom';
 import { rand, pick } from './math';
@@ -17,6 +17,16 @@ import { randomBugName, randomSpecies, cocoonForPlacement, saveCollection } from
 import { POIS, POI_BY_ID, POI } from '../world/Heightmap';
 
 export const MATCH_SIZE = 24;
+/** seconds a dropped spark waits on the ground for a teammate */
+export const SPARK_TIME = 90;
+
+export interface Spark extends SparkInfo {
+  t: number;
+  group: THREE.Group;
+  beam: THREE.Mesh;
+  /** 0..1 progress rebuilding at a nest */
+  rebuildK: number;
+}
 const LOBBY_TIME = 14;
 
 interface Profile {
@@ -83,7 +93,7 @@ export class Match implements MatchHooks {
   private startTime = 0;
   private spectate: Actor | null = null;
   profile = loadProfile();
-  private summaryShown = false;
+  summaryShown = false;
   private firstOut = false;
 
   constructor(private g: Game) {
@@ -97,6 +107,176 @@ export class Match implements MatchHooks {
   get remaining() {
     return this.g.actors.filter((a) => !a.out && !a.parked).length;
   }
+
+  /* ------------------------------------------------------------------ squads */
+
+  /** 1 = solo, 2 duos, 3 trios, 4 squads */
+  teamSize = 1;
+  /** a dropped Blinkbug spark a teammate can carry to a Rift Nest to rebuild its owner */
+  sparks: Spark[] = [];
+
+  /** teams with anyone still in the match (standing, knocked, bugging out or waiting on a spark) */
+  teamsLeft() {
+    const t = new Set<number>();
+    for (const a of this.g.actors) if (!a.out && !a.parked) t.add(a.team);
+    return t.size;
+  }
+
+  teammates(a: Actor) {
+    return this.g.actors.filter((o) => o !== a && o.team === a.team && !o.parked);
+  }
+
+  /** standing = alive, on their feet (not knocked, not a bug) */
+  private standing(team: number) {
+    return this.g.actors.some((o) => o.team === team && o.alive && !o.downed && !o.parked);
+  }
+
+  canGoDown(a: Actor) {
+    if (this.teamSize <= 1 || this.phase !== 'live') return false;
+    return this.g.actors.some((o) => o !== a && o.team === a.team && o.alive && !o.downed && !o.parked);
+  }
+
+  onDowned(a: Actor, _by: Actor | null) {
+    if (a.isLocal) this.ui.knocked(true);
+  }
+
+  /** the rules that tie a squad together, every frame */
+  private updateSquads(dt: number) {
+    if (this.teamSize <= 1) return;
+    const g = this.g;
+    // nobody left standing (and nobody mid bug-escape to come back) = the knocked are finished
+    const teams = new Set(g.actors.filter((a) => a.downed).map((a) => a.team));
+    for (const team of teams) {
+      if (this.standing(team)) continue;
+      if (g.actors.some((o) => o.team === team && o.bugout)) continue;
+      for (const o of g.actors) if (o.team === team && o.downed) {
+        o.downHp = 0;
+        o.downed = false;
+        o.eliminate(o.downBy, g, 'TEAM WIPE');
+      }
+    }
+    this.updateSparks(dt);
+  }
+
+  /* --- sparks */
+  private dropSpark(owner: Actor, at: THREE.Vector3) {
+    const g = this.g;
+    // only if a teammate could still come for it
+    if (!this.teammates(owner).some((o) => !o.out)) return;
+    const y = groundHeight(at.x, at.z);
+    const pos = new THREE.Vector3(at.x, Math.max(y, at.y - 3) + 0.9, at.z);
+    if (y < -20) return;
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.28), new THREE.MeshBasicMaterial({ color: 0x9ffcff }));
+    core.scale.set(1, 1.5, 1);
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 8), new THREE.MeshBasicMaterial({ color: 0x6ff7ff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 30, 8, 1, true), new THREE.MeshBasicMaterial({ color: 0x6ff7ff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false }));
+    beam.position.y = 15;
+    group.add(core, halo, beam);
+    group.position.copy(pos);
+    g.scene.add(group);
+    this.sparks.push({ owner, pos, carrier: null, t: SPARK_TIME, group, beam, rebuildK: 0 });
+    g.fx.blinkBurst(pos, false);
+    for (const o of g.actors) {
+      if (!o.me || o.team !== owner.team) continue;
+      if (o === owner) o.me.hud.bigToast('YOUR SPARK DROPPED — HANG ON!', '#9ffcff');
+      else o.me.hud.toast(`${owner.name}'s spark dropped — grab it and take it to a Rift Nest!`, '#9ffcff');
+    }
+  }
+
+  private removeSpark(s: Spark) {
+    this.g.scene.remove(s.group);
+    this.sparks = this.sparks.filter((x) => x !== s);
+  }
+
+  clearSparks() {
+    for (const s of [...this.sparks]) this.removeSpark(s);
+  }
+
+  /** a teammate standing on a spark picks it up (players press interact; bots just grab it) */
+  trySparkPickup(a: Actor) {
+    for (const s of this.sparks) {
+      if (s.carrier || s.owner.team !== a.team || s.owner === a) continue;
+      if (s.pos.distanceTo(a.motor.pos.clone().setY(a.motor.pos.y + 0.9)) > 2.2) continue;
+      s.carrier = a;
+      audio.pickup(3);
+      this.g.fx.pickupSparkle(s.pos, 0x9ffcff);
+      a.me?.hud.bigToast(`GOT ${s.owner.name.toUpperCase()}'S SPARK! FIND A RIFT NEST`, '#9ffcff');
+      s.owner.me?.hud.toast(`${a.name} has your spark!`, '#9ffcff');
+      return s;
+    }
+    return null;
+  }
+
+  /** the spark this rascal could pick up right now (for prompts) */
+  sparkNear(a: Actor) {
+    return this.sparks.find((s) => !s.carrier && s.owner.team === a.team && s.owner !== a && s.pos.distanceTo(a.motor.pos.clone().setY(a.motor.pos.y + 0.9)) < 2.2) ?? null;
+  }
+
+  /** a carried spark next to an unused Rift Nest */
+  nestFor(a: Actor) {
+    if (!this.sparks.some((s) => s.carrier === a)) return null;
+    return this.g.world.nests.find((n) => !n.used && Math.hypot(n.pos.x - a.motor.pos.x, n.pos.z - a.motor.pos.z) < 3.2 && Math.abs(n.pos.y - a.motor.pos.y) < 2.5) ?? null;
+  }
+
+  private updateSparks(dt: number) {
+    const g = this.g;
+    for (const s of [...this.sparks]) {
+      const c = s.carrier;
+      if (c && (!c.alive || c.downed || c.out)) {
+        // the carrier went down: it spills back onto the ground
+        s.carrier = null;
+        s.pos.copy(c.motor.pos).setY(groundHeight(c.motor.pos.x, c.motor.pos.z) + 0.9);
+        s.rebuildK = 0;
+      }
+      if (s.carrier) {
+        s.pos.copy(s.carrier.motor.pos).setY(s.carrier.motor.pos.y + 2.3 + Math.sin(this.t * 3) * 0.1);
+        s.beam.visible = false;
+        // rebuilding: stand at an unused nest holding interact (bots do it automatically)
+        const n = this.nestFor(s.carrier);
+        const holding = s.carrier.me ? s.carrier.intent.hold : true;
+        if (n && holding) {
+          s.rebuildK += dt / 3;
+          if (Math.random() < dt * 14) g.fx.bugTrail(n.pos.clone().setY(n.pos.y + 1 + Math.random()));
+          if (s.rebuildK >= 1) {
+            const owner = s.owner;
+            this.removeSpark(s);
+            owner.rebuildAt(n, g);
+            s.carrier.me?.hud.toast(`You rebuilt ${owner.name}!`, '#9ffcff');
+            continue;
+          }
+        } else s.rebuildK = Math.max(0, s.rebuildK - dt);
+      } else {
+        s.t -= dt;
+        s.beam.visible = true;
+        if (s.t <= 0 || !this.teammates(s.owner).some((o) => !o.out)) {
+          g.fx.sparkBurst(s.pos, 0x9f7bff, 16);
+          this.removeSpark(s);
+          this.teamCheck(s.owner.team);
+          continue;
+        }
+      }
+      s.group.position.copy(s.pos);
+      s.group.rotation.y += dt * 2;
+      s.group.position.y += Math.sin(this.t * 2.5 + s.owner.id) * 0.12;
+    }
+  }
+
+  /** when a team runs out of everything, place them and (if it's yours) end your match */
+  private teamCheck(team: number) {
+    const g = this.g;
+    const members = g.actors.filter((a) => a.team === team && !a.parked);
+    if (members.some((a) => !a.out)) return;
+    if (this.sparks.some((s) => s.owner.team === team)) return;
+    const place = this.teamsLeft() + 1;
+    for (const a of members) if (!a.placement || a.placement > place) a.placement = place;
+    if (team === g.player.team && !this.won) {
+      this.endT = 2.8;
+      this.ui.eliminated(this.lastKiller ?? 'the island', place);
+    }
+    this.checkWin();
+  }
+  private lastKiller: string | null = null;
 
   /* ------------------------------------------------------------------ lobby */
 
@@ -117,6 +297,10 @@ export class Match implements MatchHooks {
     this.barge.group.visible = false;
     this.dropTargets.clear();
     this.clearBalloons();
+    this.clearSparks();
+    this.lastKiller = null;
+    this.ui.knocked(false);
+    this.ui.spectating('', false);
     this.ui.hideSummary();
     g.resetWorldForMatch();
     // make sure we have a full lobby of rascals
@@ -128,6 +312,7 @@ export class Match implements MatchHooks {
       a.out = false;
       a.reviveUsed = false;
       a.kills = 0;
+      a.revives = 0;
       a.damageDealt = 0;
       a.blinks = 0;
       a.distance = 0;
@@ -135,7 +320,7 @@ export class Match implements MatchHooks {
       a.bestRarity = -1;
       a.weaponDamage = {};
       a.placement = 0;
-      if (!a.isLocal) {
+      if (!a.me) {
         a.setSpecies(randomSpecies(), randomBugName());
         // skill mix around your rating: some rookies, mostly regulars, a few aces
         const br = a.controller as { setSkill?: (s: number) => void } | null;
@@ -157,6 +342,8 @@ export class Match implements MatchHooks {
         a.bug.root.visible = false;
         a.alive = false;
       }
+      // squads: you and the next (size - 1) rascals are a team, and so on down the list
+      a.team = this.teamSize > 1 ? Math.floor(i / this.teamSize) : a.id;
     });
     const p = g.player;
     p.spawn(new THREE.Vector3(L.center.x, L.center.y + 0.05, L.center.z + 3), 0);
@@ -192,6 +379,9 @@ export class Match implements MatchHooks {
     this.clearHotDrops();
     this.pickHotDrops();
     const spots = [...Array(this.barge.spots.length).keys()].sort(() => Math.random() - 0.5);
+    this.dropOrder = [];
+    const teamTarget = new Map<number, THREE.Vector3>();
+    const teamSlot = new Map<number, number>();
     g.actors.forEach((a, i) => {
       if (a.parked) return;
       a.flight = 'barge';
@@ -201,7 +391,17 @@ export class Match implements MatchHooks {
       this.barge.riderWorld(a.bargeSpot, a.motor.pos);
       a.motor.vel.set(0, 0, 0);
       // each bot picks a landing spot: loot, crates, buildings
-      if (!a.isLocal) this.dropTargets.set(a.id, this.pickDropTarget(this.dropArea(i)));
+      if (!a.me) {
+        if (this.teamSize > 1) {
+          // a squad lands together: one spot per team, members fanned out a few metres apart
+          let t = teamTarget.get(a.team);
+          if (!t) teamTarget.set(a.team, (t = this.pickDropTarget(this.dropArea(a.team))));
+          const k = teamSlot.get(a.team) ?? 0;
+          teamSlot.set(a.team, k + 1);
+          const ang = k * 2.1;
+          this.dropTargets.set(a.id, t.clone().add(new THREE.Vector3(Math.cos(ang) * 3.5 * Math.min(1, k), 0, Math.sin(ang) * 3.5 * Math.min(1, k))));
+        } else this.dropTargets.set(a.id, this.pickDropTarget(this.dropArea(i)));
+      }
     });
     g.camRig.snapTo(g.player);
     g.camRig.pitch = -0.35;
@@ -214,6 +414,7 @@ export class Match implements MatchHooks {
   /** Spread the lobby over the island: a few more in Buttonbury, some in the wilds, the rest shared out. */
   /** every place gets a couple of rascals (big Buttonbury a few more), plus some wild landings */
   private dropOrder: (string | null)[] = [];
+  private _follow = new THREE.Vector3();
   private dropArea(i: number): POI | null {
     if (i === 0 || !this.dropOrder.length) {
       this.dropOrder = [...POIS.map((p) => p.id), 'buttonbury', null, null].sort(() => Math.random() - 0.5);
@@ -261,6 +462,13 @@ export class Match implements MatchHooks {
   }
 
   dropTargetFor(a: Actor) {
+    // bot teammates follow their human down, fanned out around wherever they're heading
+    const p = this.teamSize > 1 && !a.me ? this.g.actors.find((o) => o.me && o.team === a.team && !o.parked) : undefined;
+    if (p && p.flight !== 'barge') {
+      const ang = a.id * 2.1;
+      const ahead = p.flight === 'none' ? 0 : 6;
+      return this._follow.set(p.motor.pos.x + p.motor.vel.x * 0.1 * ahead + Math.cos(ang) * 4, p.motor.pos.y, p.motor.pos.z + p.motor.vel.z * 0.1 * ahead + Math.sin(ang) * 4);
+    }
     let t = this.dropTargets.get(a.id);
     if (!t) this.dropTargets.set(a.id, (t = this.pickDropTarget()));
     return t;
@@ -272,7 +480,7 @@ export class Match implements MatchHooks {
     if (this.phase !== 'live' && this.phase !== 'barge') return false;
     if (a.reviveUsed || this.gloom.phase >= 4) return false;
     if (!this.g.world.nests.some((n) => !n.used)) return false;
-    return a.isLocal ? true : Math.random() < 0.6;
+    return a.me ? true : Math.random() < 0.6;
   }
 
   gloomOutside(p: THREE.Vector3) {
@@ -280,27 +488,48 @@ export class Match implements MatchHooks {
   }
 
   onOut(a: Actor, by: Actor | null, weapon: string) {
-    a.placement = this.remaining + 1;
+    a.placement = this.teamSize > 1 ? 0 : this.remaining + 1;
     if (!this.firstOut && by && by !== a) {
       this.firstOut = true;
-      this.g.hud.toast(`${by.isLocal ? 'YOU' : by.name.toUpperCase()} GOT FIRST BONK!`, '#ffd36b');
+      this.g.announce.toast(`${by.name.toUpperCase()} GOT FIRST BONK!`, '#ffd36b');
     }
-    if (a.isLocal) {
-      this.spectate = by && by.alive ? by : null;
-      this.endT = 2.8;
-      this.ui.eliminated(by ? by.name : weapon === 'THE GLOOM' ? 'THE GLOOM' : 'the island', a.placement);
+    const killer = by ? by.name : weapon === 'THE GLOOM' ? 'THE GLOOM' : 'the island';
+    if (this.teamSize > 1) {
+      // squads: the spark drops where the bug gave out, for a teammate to carry to a nest
+      this.dropSpark(a, a.outPos);
+      if (a.isLocal) {
+        this.lastKiller = killer;
+        this.spectate = this.teammates(a).find((o) => o.alive) ?? (by && by.alive ? by : null);
+        this.ui.knocked(false);
+        this.ui.spectating(this.spectate ? this.spectate.name : '', true);
+      }
+      this.teamCheck(a.team);
+    } else {
+      if (a.isLocal) {
+        this.spectate = by && by.alive ? by : null;
+        this.endT = 2.8;
+        this.ui.eliminated(killer, a.placement);
+      }
+      this.checkWin();
     }
-    this.checkWin();
     void weapon;
   }
 
-  onRevive(_a: Actor) {}
+  onRevive(a: Actor) {
+    if (a.isLocal) {
+      this.ui.knocked(false);
+      this.ui.spectating('', false);
+      this.spectate = null;
+    }
+  }
 
   private checkWin() {
     if (this.won || (this.phase !== 'live' && this.phase !== 'barge')) return;
     const p = this.g.player;
-    if (!p.out && this.remaining <= 1) {
+    const mine = this.g.actors.some((a) => a.team === p.team && !a.out && !a.parked);
+    if (mine && this.teamsLeft() <= 1) {
       this.won = true;
+      for (const a of this.g.actors) if (a.team === p.team) a.placement = 1;
       p.placement = 1;
       // victory lap: slow-mo on the final bonk, fanfare, confetti cannons, the camera swings round
       // and our rascal busts a move before the summary
@@ -317,6 +546,7 @@ export class Match implements MatchHooks {
   /* ------------------------------------------------------------------ update */
 
   update(dt: number) {
+    if (this.phase === 'live') this.updateSquads(dt);
     const g = this.g;
     this.t += dt;
     this.barge.update(dt);
@@ -386,7 +616,7 @@ export class Match implements MatchHooks {
           if (!a.alive || a.parked || a.flight !== 'none') continue;
           if (this.gloom.outside(a.motor.pos)) {
             a.takeDamage(this.gloom.dps, null, false, new THREE.Vector3(0, 0, 1), g, 'THE GLOOM');
-            if (a.isLocal) g.hud.gloomHit();
+            a.me?.hud.gloomHit();
           }
         }
       }
@@ -429,6 +659,7 @@ export class Match implements MatchHooks {
     }
 
     // end of match
+    if (this.summaryShown && this.phase !== 'end' && this.teamsLeft() <= 1) this.phase = 'end';
     if (this.endT > 0) {
       this.endT -= dt;
       if (this.endT <= 0 && !this.summaryShown) this.showSummary();
@@ -504,8 +735,8 @@ export class Match implements MatchHooks {
     this.lastHot = pool.map((p) => p.id);
     g.hud.hotDrops = this.hotDrops.map((h) => h.pos);
     if (pool.length) {
-      g.hud.bigToast('HOT DROPS!', '#ff8a3d');
-      g.hud.toast(`Rare loot at ${pool.map((p) => p.name).join(' & ')} — marked on your map`, '#ffb36b');
+      g.announce.bigToast('HOT DROPS!', '#ff8a3d');
+      g.announce.toast(`Rare loot at ${pool.map((p) => p.name).join(' & ')} — marked on your map`, '#ffb36b');
     }
   }
 
@@ -520,6 +751,7 @@ export class Match implements MatchHooks {
 
   clearBalloons() {
     this.clearHotDrops();
+    this.clearSparks();
     for (const b of this.balloons) {
       this.g.scene.remove(b.group, b.beam);
       if (b.crate) this.g.loot.removeCrate(b.crate);
@@ -573,8 +805,8 @@ export class Match implements MatchHooks {
     this.balloons.push({ group, beam, land, t: 0, crate: null, gone: -1 });
     this.hotspot = land.clone();
     g.hud.balloons = this.balloons.map((b) => b.land);
-    g.hud.bigToast('LOOT BALLOON!', '#ffd36b');
-    g.hud.toast('Epic loot is drifting down — it\'s on your map!', '#ffd36b');
+    g.announce.bigToast('LOOT BALLOON!', '#ffd36b');
+    g.announce.toast('Epic loot is drifting down — it\'s on your map!', '#ffd36b');
     audio.bell(land);
   }
 
@@ -625,18 +857,33 @@ export class Match implements MatchHooks {
   /** after elimination, watch whoever got you */
   spectateTarget(): Actor | null {
     if (this.spectate && this.spectate.alive) return this.spectate;
+    // squads: keep watching your team while anyone on it is still going
+    if (this.teamSize > 1) {
+      const mate = this.teammates(this.g.player).find((o) => o.alive);
+      if (mate) {
+        this.spectate = mate;
+        this.ui.spectating(mate.name, this.g.player.out && !this.summaryShown && this.endT < 0);
+        return mate;
+      }
+    }
     const alive = this.g.actors.filter((a) => a.alive && !a.parked);
     return alive.length ? alive[0] : null;
   }
 
   private showSummary() {
     this.summaryShown = true;
-    this.phase = 'end';
+    // the island keeps going behind your summary until the match is really over
+    // (other squads, and on LAN other humans, may still be playing)
+    if (this.won || this.teamsLeft() <= 1) this.phase = 'end';
     const p = this.g.player;
     const best = Object.entries(p.weaponDamage).sort((a, b) => b[1] - a[1])[0];
-    const place = this.won ? 1 : p.placement || this.remaining;
+    const teams = this.teamSize > 1 ? Math.ceil(MATCH_SIZE / this.teamSize) : MATCH_SIZE;
+    const place = this.won ? 1 : p.placement || (this.teamSize > 1 ? this.teamsLeft() : this.remaining);
+    // placement scaled onto a 24-rascal field so XP, rating and cocoons feel the same in every mode
+    const place24 = Math.max(1, Math.round(((place - 1) / Math.max(1, teams - 1)) * (MATCH_SIZE - 1)) + 1);
     const xpParts: [string, number][] = [
-      ['Placement', Math.round((MATCH_SIZE - place + 1) * 22)],
+      ['Placement', Math.round((MATCH_SIZE - place24 + 1) * 22)],
+      ['Revives', p.revives * 40],
       ['Eliminations', p.kills * 60],
       ['Damage', Math.round(p.damageDealt * 0.4)],
       ['Blinks', p.blinks * 10],
@@ -653,8 +900,8 @@ export class Match implements MatchHooks {
     const survived = this.g.time - this.startTime;
     let dr = 0;
     if (this.won) dr += 0.07;
-    else if (place <= 5) dr += 0.03;
-    else if (place >= 16 && p.kills === 0) dr -= 0.05;
+    else if (place24 <= 5) dr += 0.03;
+    else if (place24 >= 16 && p.kills === 0) dr -= 0.05;
     if (!this.won && survived < 100) dr -= 0.03;
     dr += Math.min(0.03, p.kills * 0.006);
     prof.rating = Math.max(0.1, Math.min(0.85, prof.rating + dr));
@@ -664,7 +911,7 @@ export class Match implements MatchHooks {
     }
     saveProfile(prof);
     // every match hatches progress: a cocoon, better the higher you placed
-    const cocoon = cocoonForPlacement(place, MATCH_SIZE, p.kills);
+    const cocoon = cocoonForPlacement(place24, MATCH_SIZE, p.kills);
     this.g.collection.cocoons.push({ rarity: cocoon });
     saveCollection(this.g.collection);
     const summary: MatchSummary = {
@@ -675,7 +922,8 @@ export class Match implements MatchHooks {
       blinksLine: p.blinks,
       won: this.won,
       placement: place,
-      of: MATCH_SIZE,
+      of: teams,
+      teams: this.teamSize > 1,
       kills: p.kills,
       damage: Math.round(p.damageDealt),
       bestWeapon: best ? best[0] : '—',

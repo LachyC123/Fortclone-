@@ -13,7 +13,7 @@ import { PlayerController } from '../player/PlayerController';
 import { BotController, PROFILES, Archetype } from '../ai/BotBrain';
 import { HUD } from '../ui/HUD';
 import { TouchControls } from '../ui/Touch';
-import { GameCtx, SoundEvent } from './types';
+import { GameCtx, SoundEvent, HudEvents } from './types';
 import { audio } from '../audio/Audio';
 import { Menus, Settings, loadSettings, saveSettings } from '../ui/Menus';
 import { BUG } from '../entities/Blinkbug';
@@ -72,6 +72,8 @@ export class Game implements GameCtx {
   private lowFpsTime = 0;
   private titleOrbit = 0;
   bubbles: Bubbles;
+  /** everyone's messages (kill feed, match announcements); a LAN host also sends these to clients */
+  announce!: HudEvents;
   /** the tier the geometry was built at (detail changes need a reload) */
   bootQuality: Quality;
   birds: Birds;
@@ -121,6 +123,7 @@ export class Game implements GameCtx {
     this.input = new Input(canvas);
     this.camRig = new CameraRig(this.camera, this.cw);
     this.hud = new HUD(this.camera);
+    this.announce = this.hud;
     this.hud.setMapBase(this.world);
     this.touch = new TouchControls(this.input);
     this.menus = new Menus(this);
@@ -167,6 +170,13 @@ export class Game implements GameCtx {
     const own = this.collection.bugs.find((b) => b.species === this.collection.equipped)!;
     const p = new Actor('You', LOOKS[0], this, SPECIES_BY_ID[own.species], own.name);
     p.isLocal = true;
+    p.me = {
+      hud: this.hud,
+      sfx: audio,
+      shake: (n) => this.shake(n),
+      hitStop: (d, s) => this.hitStop(d, s),
+      slowMo: (s, d) => this.slowMo(s, d),
+    };
     this.pc = new PlayerController(this.input, this.camRig, this.scene);
     p.controller = this.pc;
     p.onRecoil = (pitch, yaw, kick) => {
@@ -323,9 +333,14 @@ export class Game implements GameCtx {
   }
 
   /** Title screen PLAY: into Launch Isle for a real match. */
-  startMatch() {
+  /** team size for the next match (1 solo, 2 duos, 3 trios, 4 squads) */
+  teamSize = 1;
+
+  startMatch(teamSize = this.teamSize) {
+    this.teamSize = teamSize;
     this.mode = 'match';
     this.match = this.matchCtl;
+    this.matchCtl.teamSize = teamSize;
     this.matchCtl.ui.setVisible(true);
     this.respawnT = -1;
     this.botRespawn.clear();
@@ -557,7 +572,7 @@ export class Game implements GameCtx {
     if (p.alive || p.bugout) {
       const w = p.weapon;
       this.camRig.update(dt, p, p.alive && p.ads && w ? w.def.adsFov : null);
-    } else if (spec && this.match!.phase !== 'end') {
+    } else if (spec && !this.match!.summaryShown) {
       // watch whoever is still fighting (usually the rascal who got you)
       this.camRig.yaw += dt * 0.25;
       this.camRig.update(dt, spec, null);
@@ -585,8 +600,11 @@ export class Game implements GameCtx {
     // HUD
     const w = p.weapon;
     const spread = w ? (p.ads ? w.def.spreadAds : w.def.spreadHip) + w.bloom + (p.motor.horizontalSpeed() > 1 ? w.def.spreadMove : 0) : 0;
+    this.hud.squadPrompt = p.alive ? this.pc.contextSquad : null;
+    this.hud.squad = this.match && this.match.teamSize > 1 && this.match.phase !== 'lobby' ? { sparks: this.match.sparks } : null;
     this.hud.update(dt, p, this.actors, p.alive ? this.pc.contextPickup : null, spread, this.fps, this.input.s.touchActive, this.world, p.alive ? this.pc.contextCrate : null);
-    this.touch.updateVisuals(p.bug, p.bug.stats.window, !!(this.pc.contextPickup || this.pc.contextCrate), p);
+    this.touch.updateVisuals(p.bug, p.bug.stats.window, !!(this.pc.contextPickup || this.pc.contextCrate || this.pc.contextSquad), p);
+    if (this.match && p.downed) this.match.ui.knockedBleed(p.downHp / 100, p.reviveK);
 
     if (this.match) {
       const gl = this.match.gloom;
@@ -596,7 +614,7 @@ export class Game implements GameCtx {
       this.hud.gloom = this.match.gloom.state !== 'idle' ? this.match.gloom : null;
       this.hud.root.classList.toggle('flying', p.flight !== 'none' || !!p.bugout);
       this.hud.root.classList.toggle('lobby', this.match.phase === 'lobby');
-      this.hud.root.classList.toggle('ended', this.match.phase === 'end');
+      this.hud.root.classList.toggle('ended', this.match.summaryShown);
     } else {
       this.hud.gloom = null;
       this.hud.root.classList.remove('flying', 'lobby', 'ended');

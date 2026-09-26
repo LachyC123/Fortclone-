@@ -7,6 +7,7 @@ import type { LootSystem } from '../loot/Loot';
 import type { NavGrid } from '../world/NavGrid';
 import type { Throwables } from '../combat/Throwables';
 import type { SkyBarge } from '../world/SkyBarge';
+import type { Audio } from '../audio/Audio';
 
 /**
  * Everything an actor can "want" in a frame. Player input and bot brains both produce this —
@@ -37,6 +38,10 @@ export interface Intent {
   heal: boolean;
   /** drop the held weapon */
   drop: boolean;
+  /** hold to pick a knocked-down teammate back up */
+  revive: boolean;
+  /** interact is being held (reviving, rebuilding at a nest) */
+  hold: boolean;
 }
 
 export function makeIntent(): Intent {
@@ -58,6 +63,8 @@ export function makeIntent(): Intent {
     throwRelease: false,
     blink: false,
     slot: -1,
+    revive: false,
+    hold: false,
     utilAim: false,
     utilRelease: false,
     heal: false,
@@ -77,7 +84,7 @@ export interface HudEvents {
   hitmarker(headshot: boolean, kill: boolean): void;
   damageNumber(pos: THREE.Vector3, amount: number, headshot: boolean): void;
   damageFrom(dirWorld: THREE.Vector3): void;
-  killfeed(killer: string, victim: string, weapon: string, localInvolved: boolean): void;
+  killfeed(killer: string, victim: string, weapon: string, localInvolved: boolean, knocked?: boolean): void;
   toast(text: string, color?: string): void;
   slotPulse(slot: number): void;
   playerEliminated(by: string): void;
@@ -85,6 +92,21 @@ export interface HudEvents {
   bigToast(text: string, color?: string): void;
   /** you got knocked out: white flash, colour drains for a beat */
   koFlash(): void;
+  /** standing in the Gloom: purple flash */
+  gloomHit(): void;
+}
+
+/**
+ * A human's personal feedback channel: their HUD, UI sounds and camera juice. The local player's
+ * goes straight to this device; on a LAN host, a remote player's is queued and sent to them.
+ * Bots have none.
+ */
+export interface Personal {
+  hud: HudEvents;
+  sfx: Audio;
+  shake(amount: number): void;
+  hitStop(dur: number, scale?: number): void;
+  slowMo(scale: number, dur: number): void;
 }
 
 export interface GameCtx {
@@ -92,6 +114,8 @@ export interface GameCtx {
   camera: THREE.PerspectiveCamera;
   cw: CollisionWorld;
   fx: FX;
+  /** messages everyone sees (kill feed, match announcements) */
+  announce: HudEvents;
   world: World;
   loot: LootSystem;
   nav: NavGrid;
@@ -115,6 +139,14 @@ export interface GameCtx {
 
 export type MatchPhase = 'lobby' | 'barge' | 'live' | 'end';
 
+export interface SparkInfo {
+  owner: Actor;
+  pos: THREE.Vector3;
+  carrier: Actor | null;
+  /** 0..1 rebuilding at a nest */
+  rebuildK: number;
+}
+
 export interface MatchHooks {
   phase: MatchPhase;
   barge: SkyBarge;
@@ -122,6 +154,16 @@ export interface MatchHooks {
   allowBugout(a: Actor): boolean;
   onOut(a: Actor, by: Actor | null, weapon: string): void;
   onRevive(a: Actor): void;
+  /** squads: 1 = solo */
+  teamSize: number;
+  /** squads: would this rascal be knocked down (a teammate is still standing) instead of eliminated? */
+  canGoDown(a: Actor): boolean;
+  onDowned(a: Actor, by: Actor | null): void;
+  /** dropped Blinkbug sparks (squads) */
+  sparks: SparkInfo[];
+  sparkNear(a: Actor): SparkInfo | null;
+  trySparkPickup(a: Actor): SparkInfo | null;
+  nestFor(a: Actor): { pos: THREE.Vector3; used: boolean } | null;
   /** where a bot wants to land */
   dropTargetFor(a: Actor): THREE.Vector3;
   /** safe zone info for bots */

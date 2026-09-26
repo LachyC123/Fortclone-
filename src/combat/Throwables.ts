@@ -221,7 +221,7 @@ export class Throwables {
                 th.stuckOffset.copy(prev).addScaledVector(d, ah.t).sub(ah.actor.motor.pos);
                 th.vel.set(0, 0, 0);
                 audio.stick(th.pos);
-                if (ah.actor.isLocal) ctx.hud.toast('STUCK! RUN!', '#ff5c8a');
+                ah.actor.me?.hud.toast('STUCK! RUN!', '#ff5c8a');
               }
             }
           }
@@ -331,7 +331,7 @@ export class Throwables {
       d.normalize();
       a.motor.impulse(_v2.copy(d).multiplyScalar(9 + 9 * k).setY(6 + 5 * k));
       a.rig.onHit(0, 0);
-      if (a.isLocal) ctx.shake(0.35);
+      a.me?.shake(0.35);
     }
     ctx.world.pushProps(p, R, 10);
     ctx.emitSound({ pos: p.clone(), loudness: 25, source: owner, kind: 'impact' });
@@ -356,9 +356,9 @@ export class Throwables {
       const dir = _v2.subVectors(c, p).normalize();
       a.motor.impulse(dir.clone().multiplyScalar(7 * k + 2).setY(5 * k + 2));
       const killed = a.takeDamage(dmg, owner, false, dir, ctx, weaponName);
-      if (owner?.isLocal && a !== owner) {
-        ctx.hud.hitmarker(false, killed);
-        ctx.hud.damageNumber(c.clone().setY(c.y + 1), dmg, false);
+      if (owner?.me && a !== owner) {
+        owner.me.hud.hitmarker(false, killed);
+        owner.me.hud.damageNumber(c.clone().setY(c.y + 1), dmg, false);
       }
     }
     for (const ch of [...this.chickens]) if (ch.pos.distanceTo(p) < R) this.popChicken(ch, ctx);
@@ -498,10 +498,10 @@ export class Throwables {
         const killed = ah.actor.takeDamage(dmg, b.owner, ah.headshot, dir, ctx, b.def.short);
         ctx.fx.hitSplat(p, ah.headshot);
         ctx.fx.sparkBurst(p, PAL.blink, 14);
-        if (b.owner.isLocal) {
-          ctx.hud.hitmarker(ah.headshot, killed);
-          ctx.hud.damageNumber(p.clone().setY(p.y + 0.8), dmg, ah.headshot);
-          audio.hitmarker(ah.headshot, killed);
+        if (b.owner.me) {
+          b.owner.me.hud.hitmarker(ah.headshot, killed);
+          b.owner.me.hud.damageNumber(p.clone().setY(p.y + 0.8), dmg, ah.headshot);
+          b.owner.me.sfx.hitmarker(ah.headshot, killed);
         }
         this.scene.remove(b.mesh);
         this.bolts.splice(i, 1);

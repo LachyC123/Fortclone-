@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CharacterMotor, MOTOR, MotorInput } from '../physics/Motor';
 import { RascalRig, RascalLook, EmoteKind } from './RascalRig';
 import { Blinkbug, BugOwner, BUG } from './Blinkbug';
-import { Intent, makeIntent, GameCtx } from '../core/types';
+import { Intent, makeIntent, GameCtx, Personal } from '../core/types';
 import { WeaponInstance, buildWeaponView, AmmoType, WEAPONS, AMMO_INFO } from '../combat/Weapons';
 import { HEALS, UTILS, HealId, UtilId, ItemStack, buildItemModel } from '../combat/Items';
 import { throwVelocity } from '../combat/Throwables';
@@ -19,6 +19,8 @@ import { detail } from '../render/Detail';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
+  /** squads: a teammate just got shot by `attacker` */
+  teamAlert?(me: Actor, attacker: Actor, victim: Actor, ctx: GameCtx): void;
 }
 
 const _v = new THREE.Vector3();
@@ -26,6 +28,9 @@ const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 
 let nextActorId = 1;
+
+/** seconds of holding interact to pick a teammate up */
+export const REVIVE_TIME = 4;
 
 /**
  * A Rascal in the match. Player and bots share this class; only the Controller differs.
@@ -38,6 +43,8 @@ export class Actor implements BugOwner {
   intent: Intent = makeIntent();
   controller: Controller | null = null;
   isLocal = false;
+  /** personal feedback (HUD / UI sounds / camera) for human players; null for bots */
+  me: Personal | null = null;
   /** test/debug: removed from play (no AI, no respawn) */
   parked = false;
 
@@ -57,6 +64,17 @@ export class Actor implements BugOwner {
   private koStarT = 0;
   private koFloor = 0;
   private lastHitDir = new THREE.Vector3();
+  /** squad: same number = same side (solo: everyone has their own) */
+  team = 0;
+  /** knocked down: crawling, can't fight, bleeding out until a teammate picks you up */
+  downed = false;
+  downHp = 0;
+  downBy: Actor | null = null;
+  private downWeapon = '';
+  /** 0..1 how far through being revived */
+  reviveK = 0;
+  /** the teammate this rascal is currently reviving */
+  reviving: Actor | null = null;
   /** fully out of the match */
   out = false;
   placement = 0;
@@ -83,6 +101,7 @@ export class Actor implements BugOwner {
 
   // stats
   kills = 0;
+  revives = 0;
   damageDealt = 0;
   blinks = 0;
   lastDamagedBy: Actor | null = null;
@@ -125,6 +144,7 @@ export class Actor implements BugOwner {
     this.rig = new RascalRig(look);
     this.bug = new Blinkbug(ctx.cw, ctx.fx, this, species);
     this.bugName = bugName;
+    this.team = this.id;
     ctx.scene.add(this.rig.root, this.bug.root);
   }
 
@@ -191,6 +211,10 @@ export class Actor implements BugOwner {
     this.rig.root.scale.setScalar(1);
     this.rig.root.rotation.set(0, yaw, 0);
     this.koT = 0;
+    this.downed = false;
+    this.downHp = 0;
+    this.reviveK = 0;
+    this.reviving = null;
     this.bug.reset();
     this.bug.root.position.copy(p);
     this.eliminatedAt = -1;
@@ -282,7 +306,7 @@ export class Actor implements BugOwner {
     this.activeSlot = slot;
     const w = this.weapon;
     this.rig.setWeapon(w ? buildWeaponView(w.def, w.rarity) : null);
-    if (w && !silent && this.isLocal) audio.equip();
+    if (w && !silent) this.me?.sfx.equip();
   }
 
   /* ----------------------------------------------------------------- damage */
@@ -296,7 +320,28 @@ export class Actor implements BugOwner {
       this.rig.onHit(0, 1);
       return false;
     }
-    if (from && !from.isLocal && !this.isLocal && ctx.match) amount *= ctx.match.botDamageMul;
+    // no friendly fire between teammates
+    if (from && from !== this && from.team === this.team) return false;
+    if (from && !from.me && !this.me && ctx.match) amount *= ctx.match.botDamageMul;
+    if (this.downed) {
+      // finishing off a knocked rascal
+      this.downHp -= amount;
+      this.lastDamagedBy = from;
+      this.lastDamageTime = ctx.time;
+      if (from) from.damageDealt += amount;
+      this.rig.onHit(0, 1);
+      if (this.me) {
+        this.me.sfx.hurt();
+        this.me.shake(0.25);
+      } else audio.hurt(this.motor.pos);
+      this.onDamaged(from, ctx);
+      if (this.downHp <= 0) {
+        this.downed = false;
+        this.eliminate(from ?? this.downBy, ctx, weaponName);
+        return true;
+      }
+      return false;
+    }
     if (from) from.weaponDamage[weaponName] = (from.weaponDamage[weaponName] ?? 0) + amount;
     this.hp -= amount;
     this.lastDamagedBy = from;
@@ -309,18 +354,109 @@ export class Actor implements BugOwner {
     const lx = dir.x * c - dir.z * s;
     const lz = dir.x * s + dir.z * c;
     this.rig.onHit(lx, lz);
-    if (this.isLocal) {
-      ctx.hud.damageFrom(_v.copy(dir).negate());
-      ctx.shake(headshot ? 0.45 : 0.28);
-      audio.hurt();
+    if (this.me) {
+      this.me.hud.damageFrom(_v.copy(dir).negate());
+      this.me.shake(headshot ? 0.45 : 0.28);
+      this.me.sfx.hurt();
     } else audio.hurt(this.motor.pos);
     this.onDamaged(from, ctx);
+    this.alertTeam(from, ctx);
     if (this.hp <= 0) {
       this.hp = 0;
-      this.eliminate(from, ctx, weaponName);
+      if (ctx.match?.canGoDown(this)) this.goDown(from, ctx, weaponName);
+      else this.eliminate(from, ctx, weaponName);
       return true;
     }
     return false;
+  }
+
+  /* ----------------------------------------------------------------- knocked down (squads) */
+  private goDown(by: Actor | null, ctx: GameCtx, weaponName: string) {
+    this.downed = true;
+    this.downHp = 100;
+    this.downBy = by;
+    this.downWeapon = weaponName;
+    this.reviveK = 0;
+    this.reviving = null;
+    this.emote = null;
+    this.healT = -1;
+    this.throwAiming = false;
+    this.utilAiming = false;
+    this.ads = false;
+    const p = _v.copy(this.motor.pos).setY(this.motor.pos.y + 1.2);
+    ctx.fx.koStars(p);
+    ctx.fx.hitSplat(p, true);
+    audio.koWhoosh(p);
+    ctx.announce.killfeed(by ? by.name : 'THE GLOOM', this.name, weaponName, this.isLocal || !!by?.isLocal, true);
+    by?.me?.hud.playerElimination(this.name, 'KNOCKED!');
+    by?.me?.hitStop(0.06, 0.05);
+    if (this.me) {
+      this.me.hud.koFlash();
+      this.me.hud.bigToast('KNOCKED! CRAWL TO COVER', '#ff8a8a');
+      this.me.shake(0.4);
+    } else this.say('HELP!', '#ff8a8a', 1.6, true);
+    ctx.match?.onDowned(this, by);
+  }
+
+  /** back on your feet with a little health */
+  revive(ctx: GameCtx, by: Actor | null) {
+    this.downed = false;
+    this.downHp = 0;
+    this.reviveK = 0;
+    this.hp = 30;
+    this.downBy = null;
+    const p = _v.copy(this.motor.pos).setY(this.motor.pos.y + 1);
+    ctx.fx.blinkBurst(this.motor.pos, true);
+    ctx.fx.healPuff(p);
+    audio.fuse();
+    if (by) {
+      by.revives++;
+      if (!by.me) by.say('UP YOU GET!', '#9dff8a', 1.4, true);
+    }
+    this.me?.hud.bigToast('BACK ON YOUR FEET!', '#9dff8a');
+    by?.me?.hud.toast(`You picked up ${this.name}`, '#9dff8a');
+  }
+
+  /** bleed-out, crawl limits, and being picked up */
+  private updateDowned(dt: number, ctx: GameCtx) {
+    const it = this.intent;
+    // no fighting while down: just crawl
+    it.fire = it.ads = it.jump = it.sprint = it.reload = it.blink = false;
+    it.throwAim = it.throwRelease = it.utilAim = it.utilRelease = it.heal = it.drop = it.revive = false;
+    it.crouch = false;
+    it.slot = -1;
+    this.motor.crouching = true;
+    const helped = this.reviveK > 0 && ctx.time - this.reviveTouch < 0.15;
+    if (!helped) {
+      this.reviveK = Math.max(0, this.reviveK - dt * 0.6);
+      this.downHp -= dt * (100 / 36); // ~36s to bleed out
+    }
+    if (Math.random() < dt * 2) ctx.fx.koStars(_v.copy(this.motor.pos).setY(this.motor.pos.y + 1.1));
+    if (this.downHp <= 0) {
+      this.downed = false;
+      this.eliminate(this.downBy, ctx, this.downWeapon || 'BLEEDING');
+    }
+  }
+  private reviveTouch = -99;
+
+  /** reviver side: hold interact next to a knocked teammate */
+  private updateReviving(dt: number, ctx: GameCtx) {
+    const it = this.intent;
+    const t = this.reviving;
+    if (!it.revive || !t || !t.downed || !t.alive || t.team !== this.team || t.motor.pos.distanceTo(this.motor.pos) > 2.4) {
+      this.reviving = null;
+      return;
+    }
+    // you have to stand still and put the gun down to help
+    it.moveX = it.moveZ = 0;
+    it.fire = it.ads = it.sprint = false;
+    t.reviveK += dt / REVIVE_TIME;
+    t.reviveTouch = ctx.time;
+    if (Math.random() < dt * 10) ctx.fx.healPuff(_v.copy(t.motor.pos).setY(t.motor.pos.y + 0.6));
+    if (t.reviveK >= 1) {
+      t.revive(ctx, this);
+      this.reviving = null;
+    }
   }
 
   /** Pop a speech bubble ("!", "HA!") — rate-limited unless forced. */
@@ -348,8 +484,16 @@ export class Actor implements BugOwner {
   /** hook for controllers (bots react to being shot) */
   onDamaged(_from: Actor | null, _ctx: GameCtx) {}
 
+  /** squads: shout to the team about who is shooting us */
+  private alertTeam(from: Actor | null, ctx: GameCtx) {
+    if (!from || from.team === this.team || !ctx.match || ctx.match.teamSize <= 1) return;
+    for (const o of ctx.actors) if (o !== this && o.team === this.team && o.alive && !o.downed) o.controller?.teamAlert?.(o, from, this, ctx);
+  }
+
   eliminate(by: Actor | null, ctx: GameCtx, weaponName: string) {
     this.alive = false;
+    this.downed = false;
+    this.reviving = null;
     this.eliminatedAt = ctx.time;
     let callout = '';
     if (by && by !== this) {
@@ -364,18 +508,19 @@ export class Actor implements BugOwner {
       else if (by.kills === 5) callout = 'UNSTOPPABLE!';
       else if (by.kills === 3) callout = 'ON A ROLL!';
       else if (this.hp <= 0 && by.hp < 20) callout = 'CLUTCH!';
-      if (!by.isLocal) {
+      if (!by.me) {
         // bots gloat a little
         by.say(['HA!', 'GG', 'YES!', 'BONK!', 'EZ'][Math.floor(Math.random() * 5)], '#f2c14e', 1.5, true);
       }
     }
     const p = _v.copy(this.motor.pos).setY(this.motor.pos.y + 0.9);
-    ctx.shake(by?.isLocal || this.isLocal ? 0.5 : 0);
-    if (by?.isLocal) ctx.hitStop(0.09, 0.03);
-    if (this.isLocal && weaponName !== 'THE SKY') {
-      ctx.slowMo(0.3, 1.1);
-      audio.koSting();
-      ctx.hud.koFlash();
+    by?.me?.shake(0.5);
+    if (by !== this) this.me?.shake(0.5);
+    by?.me?.hitStop(0.09, 0.03);
+    if (this.me && weaponName !== 'THE SKY') {
+      this.me.slowMo(0.3, 1.1);
+      this.me.sfx.koSting();
+      this.me.hud.koFlash();
     }
     if (weaponName === 'THE SKY' || !this.rig.root.visible) this.koPoof(ctx, !!by?.isLocal);
     else {
@@ -399,8 +544,8 @@ export class Actor implements BugOwner {
     this.rig.setHeld(null);
     this.hideGlider();
     this.flight = 'none';
-    ctx.hud.killfeed(by ? by.name : 'THE GLOOM', this.name, weaponName, this.isLocal || !!by?.isLocal);
-    if (by?.isLocal) ctx.hud.playerElimination(this.name, callout);
+    ctx.announce.killfeed(by ? by.name : 'THE GLOOM', this.name, weaponName, this.isLocal || !!by?.isLocal);
+    by?.me?.hud.playerElimination(this.name, callout);
     // second chance: the Blinkbug carries your spark to a Rift Nest
     if (ctx.match && weaponName !== 'THE SKY' && ctx.match.allowBugout(this)) {
       this.startBugout(p, ctx);
@@ -458,11 +603,15 @@ export class Actor implements BugOwner {
     this.rig.root.visible = false;
   }
 
+  /** where this rascal's spark gave out (the bug if it was flying, else the body) */
+  outPos = new THREE.Vector3();
+
   private goOut(by: Actor | null, ctx: GameCtx, weaponName: string) {
+    this.outPos.copy(this.bugout ? this.bug.pos : this.motor.pos);
     this.out = true;
     this.bugout = null;
     if (ctx.match) ctx.match.onOut(this, by, weaponName);
-    else if (this.isLocal) ctx.hud.playerEliminated(by ? by.name : 'the island');
+    else this.me?.hud.playerEliminated(by ? by.name : 'the island');
   }
 
   /* ----------------------------------------------------------------- bug-revive */
@@ -473,9 +622,9 @@ export class Actor implements BugOwner {
     this.bug.startPilot(from);
     ctx.fx.blinkBurst(from, false);
     audio.chirp(from, 0.7, 0.6);
-    if (this.isLocal) {
-      ctx.hud.bigToast('BUGOUT! FLY TO A RIFT NEST', '#6ff7ff');
-      audio.blink(from, true);
+    if (this.me) {
+      this.me.hud.bigToast('BUGOUT! FLY TO A RIFT NEST', '#6ff7ff');
+      this.me.sfx.blink(from, true);
     }
   }
 
@@ -494,7 +643,7 @@ export class Actor implements BugOwner {
     // swatted!
     ctx.fx.elimination(this.bug.pos.clone(), [PAL.blink, 0xffffff]);
     this.bug.vanish();
-    ctx.hud.killfeed(from ? from.name : 'THE GLOOM', `${this.name}'s Blinkbug`, weaponName, this.isLocal || !!from?.isLocal);
+    ctx.announce.killfeed(from ? from.name : 'THE GLOOM', `${this.name}'s Blinkbug`, weaponName, this.isLocal || !!from?.isLocal);
     this.goOut(from, ctx, weaponName);
     return true;
   }
@@ -530,7 +679,7 @@ export class Actor implements BugOwner {
     for (const n of ctx.world.nests) {
       if (n.used) continue;
       if (Math.hypot(n.pos.x - bug.pos.x, n.pos.z - bug.pos.z) < 2.4 && Math.abs(n.pos.y + 1 - bug.pos.y) < 3) {
-        this.reviveAt(n, ctx);
+        this.rebuildAt(n, ctx);
         return;
       }
     }
@@ -540,13 +689,14 @@ export class Actor implements BugOwner {
       ctx.fx.sparkBurst(bug.pos, 0x9f7bff, 20);
       audio.pop(bug.pos);
       this.bug.vanish();
-      ctx.hud.killfeed('THE GLOOM', `${this.name}'s spark`, 'TIME', this.isLocal);
+      ctx.announce.killfeed('THE GLOOM', `${this.name}'s spark`, 'TIME', this.isLocal);
       this.goOut(null, ctx, 'TIME');
     }
     bug.update(dt);
   }
 
-  private reviveAt(n: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }, ctx: GameCtx) {
+  /** rebuilt at a Rift Nest: by your own Blinkbug, or by a teammate carrying your spark */
+  rebuildAt(n: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }, ctx: GameCtx) {
     n.used = true;
     n.fx.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
@@ -557,6 +707,7 @@ export class Actor implements BugOwner {
     this.bugout = null;
     this.alive = true;
     this.out = false;
+    this.placement = 0;
     const p = n.pos.clone().setY(n.pos.y + 0.1);
     this.spawn(p, this.bodyYaw);
     this.hp = 40;
@@ -569,10 +720,10 @@ export class Actor implements BugOwner {
     ctx.fx.ring(p.clone().setY(p.y + 0.2), 0x9ffcff, 0.3, 5, 0.6);
     audio.blink(p, this.isLocal);
     audio.fuse();
-    ctx.hud.killfeed(this.name, 'a Rift Nest', 'REBUILT', this.isLocal);
-    if (this.isLocal) {
-      ctx.hud.bigToast('BACK IN THE FIGHT!', '#9ffcff');
-      ctx.shake(0.3);
+    ctx.announce.killfeed(this.name, 'a Rift Nest', 'REBUILT', this.isLocal);
+    if (this.me) {
+      this.me.hud.bigToast('BACK IN THE FIGHT!', '#9ffcff');
+      this.me.shake(0.3);
     }
     ctx.match?.onRevive(this);
   }
@@ -629,9 +780,9 @@ export class Actor implements BugOwner {
       // hold altitude until clear of the cliff wall
       if (hd > cliff + 0.5 && m.pos.y < 36) m.vel.y = Math.max(m.vel.y, m.pos.y < 30 ? 3 : 0);
       if (Math.random() < dt * 20) ctx.fx.soft.emit(_v.copy(m.pos).setY(m.pos.y + Math.random() * 2), { count: 1, color: 0xffffff, speed: [4, 8], dir: _v2.set(ix, 0.2, iz), spread: 0.3, life: 0.5, size: 0.2, sizeEnd: 0.6, alpha: 0.5 });
-      if (this.isLocal && !this.windToastShown) {
+      if (this.me && !this.windToastShown) {
         this.windToastShown = true;
-        ctx.hud.toast('Whoosh! The wind blows you back to the island', '#9fe8ff');
+        this.me.hud.toast('Whoosh! The wind blows you back to the island', '#9fe8ff');
       }
     }
     const hs = Math.hypot(m.vel.x, m.vel.z);
@@ -676,9 +827,9 @@ export class Actor implements BugOwner {
     this.motor.grounded = false;
     this.rig.onJump();
     audio.throwWhoosh(this.motor.pos);
-    if (this.isLocal) {
-      audio.jump(this.motor.pos);
-      ctx.shake(0.15);
+    if (this.me) {
+      this.me.sfx.jump(this.motor.pos);
+      this.me.shake(0.15);
     }
     ctx.fx.dust(this.motor.pos, 4, 0xffffff);
   }
@@ -693,7 +844,7 @@ export class Actor implements BugOwner {
     audio.slide(this.motor.pos);
     audio.pop(this.motor.pos);
     ctx.fx.glow.emit(_v.copy(this.motor.pos).setY(this.motor.pos.y + 2.6), { count: 12, color: [0xffffff, this.rig.look.scarf], speed: [2, 5], spread: 1, life: 0.4, size: 0.14, shape: PShape.Star, drag: 3 });
-    if (this.isLocal) ctx.shake(0.2);
+    this.me?.shake(0.2);
   }
 
   private hideGlider() {
@@ -731,6 +882,9 @@ export class Actor implements BugOwner {
     if (!this.alive) return;
     this.controller?.update(this, ctx, dt);
     const it = this.intent;
+    if (this.downed) this.updateDowned(dt, ctx);
+    else if (this.reviving) this.updateReviving(dt, ctx);
+    if (!this.alive) return;
     const m = this.motor;
     if (this.emote) {
       this.emoteT -= dt;
@@ -774,7 +928,7 @@ export class Actor implements BugOwner {
       sprint: it.sprint && !this.ads && this.sprintBlock <= 0 && !this.throwAiming,
       jump: it.jump,
       crouch: it.crouch,
-      speedMul: this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
+      speedMul: this.downed ? 0.5 : this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
     };
     const wasSliding = m.sliding;
     m.update(dt, mi);
@@ -844,7 +998,7 @@ export class Actor implements BugOwner {
         ctx.fx.blinkBurst(m.pos, false);
         m.teleport(p);
         ctx.fx.blinkBurst(p, true);
-        if (this.isLocal) ctx.hud.toast('Back onto the island you go!', '#9fe8ff');
+        this.me?.hud.toast('Back onto the island you go!', '#9fe8ff');
       }
     }
 
@@ -862,9 +1016,9 @@ export class Actor implements BugOwner {
       const prev = w.reloadT / w.reloadTime;
       w.reloadT += dt;
       const k = w.reloadT / w.reloadTime;
-      if (this.isLocal) {
-        if (prev < 0.3 && k >= 0.3) audio.reload(1);
-        if (prev < 0.75 && k >= 0.75) audio.reload(2);
+      if (this.me) {
+        if (prev < 0.3 && k >= 0.3) this.me.sfx.reload(1);
+        if (prev < 0.75 && k >= 0.75) this.me.sfx.reload(2);
       }
       if (k >= 1) {
         const need = w.def.mag - w.mag;
@@ -879,7 +1033,7 @@ export class Actor implements BugOwner {
     const wantReload = (it.reload || (w.mag === 0 && it.fire)) && w.mag < w.def.mag && this.ammo[w.def.ammo] > 0;
     if (wantReload && !this.motor.sliding) {
       w.reloadT = 0;
-      if (this.isLocal) audio.reload(0);
+      this.me?.sfx.reload(0);
       this.fireHeld = it.fire;
       return;
     }
@@ -896,7 +1050,7 @@ export class Actor implements BugOwner {
     if (trigger && w.cooldown <= 0) {
       if (w.mag <= 0) {
         w.burstLeft = 0;
-        if (!this.fireHeld && this.isLocal) audio.dryFire();
+        if (!this.fireHeld) this.me?.sfx.dryFire();
       } else {
         this.healT = -1;
         w.mag--;
@@ -931,7 +1085,7 @@ export class Actor implements BugOwner {
     const hs = this.healItem;
     if (it.heal && this.healT < 0 && hs && hs.count > 0) {
       if (this.hp >= this.maxHp) {
-        if (this.isLocal) ctx.hud.toast('Already full!', '#9dff8a');
+        this.me?.hud.toast('Already full!', '#9dff8a');
       } else {
         this.healT = 0;
         const w = this.weapon;
@@ -948,7 +1102,7 @@ export class Actor implements BugOwner {
         const prev = this.healT;
         this.healT += dt;
         const kind = hs.id === 'fizzle' ? 'drink' : 'eat';
-        if (Math.floor(prev / 0.45) !== Math.floor(this.healT / 0.45) && this.isLocal) audio.healUse(kind, false);
+        if (Math.floor(prev / 0.45) !== Math.floor(this.healT / 0.45)) this.me?.sfx.healUse(kind, false);
         if (Math.random() < dt * 14) ctx.fx.healPuff(_v.copy(m.pos).setY(m.pos.y + 1.2));
         if (this.healT >= def.useTime) {
           this.heal(def.amount);
@@ -959,9 +1113,9 @@ export class Actor implements BugOwner {
           this.rig.setExpression('happy', 0.8);
           ctx.fx.glow.emit(_v.copy(m.pos).setY(m.pos.y + 1), { count: 24, color: [0x9dff8a, 0xffffff, 0xff9ad5], speed: [1, 4], spread: 1, up: 2, life: [0.4, 0.8], size: [0.12, 0.22], shape: PShape.Star, drag: 2 });
           ctx.fx.ring(_v.copy(m.pos).setY(m.pos.y + 0.05), 0x9dff8a, 0.2, 2.2, 0.4);
-          if (this.isLocal) {
-            audio.healUse(kind, true);
-            ctx.hud.toast(`+${def.amount} ${def.boost ? '& ZOOMIES!' : 'HEALTH'}`, '#9dff8a');
+          if (this.me) {
+            this.me.sfx.healUse(kind, true);
+            this.me.hud.toast(`+${def.amount} ${def.boost ? '& ZOOMIES!' : 'HEALTH'}`, '#9dff8a');
           }
           if (hs.count <= 0) this.healItem = null;
         }
@@ -991,7 +1145,7 @@ export class Actor implements BugOwner {
       p.lockUntil = performance.now() + 900;
       this.weapons[this.activeSlot] = null;
       this.equip(this.activeSlot, true);
-      if (this.isLocal) ctx.hud.toast(`Dropped ${w.def.name}`, RARITY[w.rarity].css);
+      this.me?.hud.toast(`Dropped ${w.def.name}`, RARITY[w.rarity].css);
     }
   }
 
@@ -1014,9 +1168,9 @@ export class Actor implements BugOwner {
     }
     if (it.blink) {
       if (bug.canBlink) this.doBlink(ctx);
-      else if (bug.state === 'docked' && this.isLocal) {
-        audio.blinkFail();
-        ctx.hud.toast(bug.cooldown > 0 ? 'Blinkbug is napping…' : 'Throw your Blinkbug first!', '#9fe8ff');
+      else if (bug.state === 'docked' && this.me) {
+        this.me.sfx.blinkFail();
+        this.me.hud.toast(bug.cooldown > 0 ? 'Blinkbug is napping…' : 'Throw your Blinkbug first!', '#9fe8ff');
       }
     }
     bug.update(dt);
@@ -1056,9 +1210,9 @@ export class Actor implements BugOwner {
   private doBlink(ctx: GameCtx) {
     const spot = this.findBlinkSpot(new THREE.Vector3());
     if (!spot) {
-      if (this.isLocal) {
-        audio.blinkFail();
-        ctx.hud.toast('No room to blink there!', '#ff9a9a');
+      if (this.me) {
+        this.me.sfx.blinkFail();
+        this.me.hud.toast('No room to blink there!', '#ff9a9a');
       }
       this.bug.recall();
       return;
@@ -1114,14 +1268,14 @@ export class Actor implements BugOwner {
         if (this.hp < this.maxHp) {
           this.heal(12);
           ctx.fx.glow.emit(_v.copy(spot).setY(spot.y + 1), { count: 14, color: [0x7ee06a, 0xffffff], speed: [1, 3], up: 2, spread: 1, life: [0.5, 0.9], size: 0.14, shape: PShape.Star });
-          if (this.isLocal) ctx.hud.toast('+12 patched up!', '#7ee06a');
+          this.me?.hud.toast('+12 patched up!', '#7ee06a');
         }
         break;
       case 'boom': {
         ctx.fx.ring(_v.copy(spot).setY(spot.y + 0.3), tint, 0.3, 5, 0.4);
         ctx.fx.dust(spot, 10, 0xffe0c0);
         audio.explosion(spot);
-        ctx.shake(this.isLocal ? 0.35 : 0);
+        this.me?.shake(0.35);
         for (const o of ctx.actors) {
           if (o === this || !o.alive || o.parked) continue;
           const d = o.motor.pos.distanceTo(spot);
@@ -1144,8 +1298,8 @@ export class Actor implements BugOwner {
           ctx.fx.blinkBurst(from, true);
           ctx.fx.smear(spot, from);
           audio.chirp(from, 0.6, 0.6);
-          if (this.isLocal) ctx.hud.toast(`SNATCHED ${victim.name.toUpperCase()}!`, '#ff6bb5');
-          if (victim.isLocal) ctx.hud.bigToast('SNATCHED!', '#ff6bb5');
+          this.me?.hud.toast(`SNATCHED ${victim.name.toUpperCase()}!`, '#ff6bb5');
+          victim.me?.hud.bigToast('SNATCHED!', '#ff6bb5');
         }
         break;
     }
@@ -1176,7 +1330,7 @@ export class Actor implements BugOwner {
         if (n > 0) {
           ctx.fx.ring(_v.copy(this.bug.pos).setY(this.bug.pos.y - 0.1), this.bug.tint, 0.2, 14, 0.8);
           audio.chirp(this.bug.pos, 1.6, 0.3);
-          if (this.isLocal) ctx.hud.toast(`${this.bugName} senses ${n} rascal${n > 1 ? 's' : ''}!`, '#ffe27a');
+          this.me?.hud.toast(`${this.bugName} senses ${n} rascal${n > 1 ? 's' : ''}!`, '#ffe27a');
         }
       }
     }
@@ -1238,6 +1392,7 @@ export class Actor implements BugOwner {
       gliding: this.flight === 'glide',
       onBarge: this.flight === 'barge',
       emote: this.emote,
+      downed: this.downed,
     });
     void clamp;
   }

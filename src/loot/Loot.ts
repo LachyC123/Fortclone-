@@ -402,26 +402,26 @@ export class LootSystem {
         const c = RARITY[w.rarity].color;
         ctx.fx.fuseBurst(_v.copy(a.motor.pos).setY(a.motor.pos.y + 1.1), c);
         a.rig.setExpression('wide', 0.8);
-        if (a.isLocal) {
-          audio.fuse();
-          ctx.hud.bigToast(`FUSED! ${RARITY[w.rarity].name.toUpperCase()} ${w.def.name.toUpperCase()}`, RARITY[w.rarity].css);
-          ctx.shake(0.25);
+        if (a.me) {
+          a.me.sfx.fuse();
+          a.me.hud.bigToast(`FUSED! ${RARITY[w.rarity].name.toUpperCase()} ${w.def.name.toUpperCase()}`, RARITY[w.rarity].css);
+          a.me.shake(0.25);
         }
-      } else if (a.isLocal) {
-        audio.pickup(p.rarity);
-        ctx.hud.toast(`${RARITY[p.rarity].name.toUpperCase()} ${WEAPONS[p.defId].name.toUpperCase()}`, RARITY[p.rarity].css);
+      } else if (a.me) {
+        a.me.sfx.pickup(p.rarity);
+        a.me.hud.toast(`${RARITY[p.rarity].name.toUpperCase()} ${WEAPONS[p.defId].name.toUpperCase()}`, RARITY[p.rarity].css);
       }
-      if (a.isLocal) {
-        ctx.hud.slotPulse(res.slot);
-        audio.equip();
+      if (a.me) {
+        a.me.hud.slotPulse(res.slot);
+        a.me.sfx.equip();
       }
       p.amount = 0;
     } else if (p.kind === 'ammo') {
       const got = a.addAmmo(p.defId as AmmoType, p.amount);
       p.amount -= got;
-      if (a.isLocal && got > 0) {
-        audio.ammoPickup();
-        ctx.hud.toast(`+${got} ${AMMO_INFO[p.defId as AmmoType].name.toUpperCase()}`, AMMO_INFO[p.defId as AmmoType].css);
+      if (a.me && got > 0) {
+        a.me.sfx.ammoPickup();
+        a.me.hud.toast(`+${got} ${AMMO_INFO[p.defId as AmmoType].name.toUpperCase()}`, AMMO_INFO[p.defId as AmmoType].css);
       }
       if (got === 0) return;
     } else {
@@ -438,11 +438,11 @@ export class LootSystem {
       const left = a.addItem(kind, p.defId, p.amount);
       if (left === p.amount) return;
       p.amount = left;
-      if (a.isLocal) {
-        audio.pickup(p.rarity);
+      if (a.me) {
+        a.me.sfx.pickup(p.rarity);
         const name = kind === 'heal' ? HEALS[p.defId as HealId].name : UTILS[p.defId as UtilId].name;
-        ctx.hud.toast(name.toUpperCase(), RARITY[p.rarity].css);
-        ctx.hud.slotPulse(kind === 'heal' ? 4 : 3);
+        a.me.hud.toast(name.toUpperCase(), RARITY[p.rarity].css);
+        a.me.hud.slotPulse(kind === 'heal' ? 4 : 3);
       }
     }
     if (p.amount > 0) return; // partially taken; leave the rest on the floor
@@ -549,7 +549,7 @@ export class LootSystem {
           ctx.fx.soft.emit(top, { count: 30, color: [PAL.mustard, PAL.pink, PAL.turquoise, 0xffffff], speed: [3, 7], spread: 1, up: 4, gravity: 9, life: [1, 1.8], size: [0.08, 0.12], shape: PShape.Confetti, spin: 12 });
           ctx.fx.ring(c.pos.clone().setY(c.pos.y + 0.1), 0xffd36b, 0.3, 3.2, 0.45);
           ctx.fx.lightFlash(top, 0xffd36b, 8, 0.35);
-          if (c.opener?.isLocal) ctx.shake(0.2);
+          c.opener?.me?.shake(0.2);
           this.spawnRolls(rollCrate(!!c.rich), top, true);
           ctx.emitSound({ pos: c.pos.clone(), loudness: 20, source: c.opener, kind: 'impact' });
         }

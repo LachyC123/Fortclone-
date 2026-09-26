@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HudEvents } from '../core/types';
+import { HudEvents, SparkInfo } from '../core/types';
 import { ICONS } from './icons';
 import { RARITY } from '../render/Palette';
 import type { Actor } from '../entities/Actor';
@@ -32,6 +32,7 @@ interface DmgNum {
 }
 
 const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
 
 /**
  * DOM HUD styled like chunky hand-made toy packaging. Everything animates: hitmarkers pop,
@@ -150,7 +151,7 @@ export class HUD implements HudEvents {
     this.mapCanvas.width = this.mapCanvas.height = 160;
     this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="nm"></div><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
     this.locator.innerHTML = `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" stroke="rgba(43,34,56,0.5)" stroke-width="5" fill="rgba(43,34,56,0.35)"/><circle class="arc" cx="22" cy="22" r="19" stroke="#6ff7ff" stroke-width="5" fill="none" stroke-dasharray="119.4" stroke-linecap="round"/></svg><div class="ic">${ICONS.bug}</div>`;
-    r.append(this.koEl, this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
+    r.append(this.koEl, this.tagLayer, this.teamEl, this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
     this.emotePick.innerHTML = [['dance', 'DANCE'], ['wave', 'WAVE'], ['laugh', 'LOL'], ['flex', 'FLEX']].map(([k, l]) => `<button class="big" data-k="${k}">${l}</button>`).join('');
     this.emoteBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -272,7 +273,7 @@ export class HUD implements HudEvents {
     setTimeout(() => i.remove(), 1000);
   }
 
-  killfeed(killer: string, victim: string, weapon: string, local: boolean) {
+  killfeed(killer: string, victim: string, weapon: string, local: boolean, knocked = false) {
     const verbs = ['bonked', 'blasted', 'popped', 'sent packing', 'confetti\'d', 'tickled out'];
     const verb = killer === 'THE SKY' || weapon === 'THE SKY' ? '' : verbs[Math.floor(Math.random() * verbs.length)];
     const e = h('div', `kf${local ? ' local' : ''}`);
@@ -281,6 +282,7 @@ export class HUD implements HudEvents {
     else if (weapon === 'TIME') e.innerHTML = `<b>${pos(victim.replace(/'s spark$/, ''))}</b> spark fizzled out`;
     else if (weapon === 'REBUILT') e.innerHTML = `<b>${killer}</b> was <span class="w">REBUILT</span> at a Rift Nest!`;
     else if (weapon === 'THE GLOOM') e.innerHTML = `<b>${victim}</b> was swallowed by <span class="w gloom">THE GLOOM</span>`;
+    else if (knocked) e.innerHTML = `<b>${killer}</b> knocked down <b>${victim}</b> <span class="w">${weapon}</span>`;
     else e.innerHTML = `<b>${killer}</b> ${verb} <b>${victim.replace(/^You's /, 'Your ')}</b> with <span class="w">${weapon}</span>`;
     this.killfeedEl.prepend(e);
     while (this.killfeedEl.children.length > 5) this.killfeedEl.lastElementChild!.remove();
@@ -358,6 +360,7 @@ export class HUD implements HudEvents {
   /* --------------------------------------------------------------------- per frame */
 
   update(dt: number, p: Actor, others: Actor[], pickup: Pickup | null, spreadDeg: number, fps: number, touch: boolean, world: World, crate: Crate | null = null) {
+    this.updateSquad(p, others);
     // health
     const hp = Math.max(0, p.hp);
     const k = hp / p.maxHp;
@@ -556,11 +559,87 @@ export class HUD implements HudEvents {
     setStyle(this.bugWidget, 'display', touch ? 'none' : 'flex');
   }
 
+  /** squads info (null in solo / playground) */
+  squad: { sparks: SparkInfo[] } | null = null;
+  private teamEl = h('div', 'teampanel');
+  private teamSig = '';
+  private tagEls = new Map<Actor | SparkInfo, HTMLDivElement>();
+  private tagLayer = h('div', 'tags');
+
+  /** the team list under the minimap + floating name tags on teammates, knocked mates and sparks */
+  private updateSquad(p: Actor, others: Actor[]) {
+    const sq = this.squad;
+    this.teamEl.style.display = sq ? '' : 'none';
+    this.tagLayer.style.display = sq ? '' : 'none';
+    if (!sq) return;
+    const mates = others.filter((o) => o.team === p.team && !o.parked).sort((a, b) => (a === p ? -1 : b === p ? 1 : a.id - b.id));
+    const sig = mates.map((o) => o.id).join(',');
+    if (sig !== this.teamSig) {
+      this.teamSig = sig;
+      this.teamEl.innerHTML = mates.map((o) => `<div class="mate${o === p ? ' me' : ''}" data-id="${o.id}"><span class="nm">${o === p ? 'YOU' : o.name}</span><span class="st"></span><div class="hb"><i></i></div></div>`).join('');
+    }
+    for (const o of mates) {
+      const row = this.teamEl.querySelector(`[data-id="${o.id}"]`) as HTMLElement | null;
+      if (!row) continue;
+      const spark = sq.sparks.find((s) => s.owner === o);
+      const state = o.out ? (spark ? (spark.carrier ? 'CARRIED' : 'SPARK') : 'OUT') : o.bugout ? 'BUGOUT' : o.downed ? 'KNOCKED' : '';
+      setText(row.querySelector('.st') as HTMLElement, state);
+      row.className = `mate${o === p ? ' me' : ''}${state ? ' ' + state.toLowerCase() : ''}`;
+      const k = o.downed ? o.downHp / 100 : o.alive ? o.hp / o.maxHp : 0;
+      setStyle(row.querySelector('i') as HTMLElement, 'transform', `scaleX(${Math.max(0, Math.min(1, k)).toFixed(3)})`);
+    }
+    // floating tags
+    const cam = this.camera;
+    const W = window.innerWidth, H = window.innerHeight;
+    const live = new Set<Actor | SparkInfo>();
+    const tag = (key: Actor | SparkInfo, pos: THREE.Vector3, html: string, cls: string) => {
+      _v.copy(pos).project(cam);
+      if (_v.z > 1 || Math.abs(_v.x) > 1.1 || Math.abs(_v.y) > 1.1) return;
+      live.add(key);
+      let el = this.tagEls.get(key);
+      if (!el) {
+        el = h('div', 'tag') as HTMLDivElement;
+        this.tagLayer.appendChild(el);
+        this.tagEls.set(key, el);
+      }
+      el.className = `tag ${cls}`;
+      setHtml(el, html);
+      setStyle(el, 'transform', `translate(${((_v.x * 0.5 + 0.5) * W).toFixed(0)}px, ${((-_v.y * 0.5 + 0.5) * H).toFixed(0)}px)`);
+    };
+    for (const o of mates) {
+      if (o === p || o.out) continue;
+      const pos = o.bugout ? o.bug.pos : o.motor.pos;
+      const d = pos.distanceTo(p.motor.pos);
+      const at = _v2.copy(pos).setY(pos.y + (o.bugout ? 0.6 : o.downed ? 1.2 : 2.35));
+      if (o.downed) tag(o, at, `<b>${o.name}</b><small>KNOCKED · ${Math.round(d)}m</small>`, 'down');
+      else tag(o, at, `<b>${o.name}</b>${d > 12 ? `<small>${Math.round(d)}m</small>` : ''}`, o.bugout ? 'bug' : 'mate');
+    }
+    for (const s of sq.sparks) {
+      if (s.owner.team !== p.team || s.carrier === p) continue;
+      tag(s, _v2.copy(s.pos).setY(s.pos.y + 0.8), `<b>${s.owner.name}'S SPARK</b><small>${Math.round(s.pos.distanceTo(p.motor.pos))}m</small>`, 'spark');
+    }
+    for (const [k, el] of this.tagEls) {
+      if (live.has(k)) continue;
+      el.remove();
+      this.tagEls.delete(k);
+    }
+  }
+
+  /** squads prompt set by the game each frame (revive / spark / rebuild) */
+  squadPrompt: { kind: 'revive' | 'spark' | 'rebuild'; name: string; k: number } | null = null;
+
   private updatePrompt(p: Actor, pickup: Pickup | null, crate: Crate | null) {
     const rs = (r: number) => `color:${RARITY[r].css};-webkit-text-stroke:1px #2b2238`;
     let html = '';
     let cardKey = '';
-    if (pickup && pickup.kind === 'weapon') {
+    const sq = this.squadPrompt;
+    if (sq) {
+      const pct = sq.k > 0 ? ` <b class="pct">${Math.round(sq.k * 100)}%</b>` : '';
+      const col = 'color:#9ffcff;-webkit-text-stroke:1px #2b2238';
+      if (sq.kind === 'revive') html = `<span class="k">HOLD F</span><span>REVIVE</span><span class="rar big" style="color:#9dff8a;-webkit-text-stroke:1px #2b2238">${sq.name.toUpperCase()}</span>${pct}`;
+      else if (sq.kind === 'spark') html = `<span class="k">F</span><span>GRAB</span><span class="rar big" style="${col}">${sq.name.toUpperCase()}'S SPARK</span>`;
+      else html = `<span class="k">HOLD F</span><span>REBUILD</span><span class="rar big" style="${col}">${sq.name.toUpperCase()}</span>${pct}`;
+    } else if (pickup && pickup.kind === 'weapon') {
       const def = WEAPONS[pickup.defId];
       const act = p.previewOffer(pickup.defId, pickup.rarity);
       const verb = act === 'fuse' ? 'FUSE' : act === 'swap' ? 'SWAP' : 'PICK UP';
@@ -739,8 +818,38 @@ export class HUD implements HudEvents {
       g.fill();
       g.stroke();
     }
+    // squads: teammates always show (triangle in team colour), sparks as cyan diamonds
+    if (this.squad) {
+      for (const o of others) {
+        if (o === p || o.team !== p.team || o.parked || o.out) continue;
+        const pos = o.bugout ? o.bug.pos : o.motor.pos;
+        const u = U(pos.x), v = V(pos.z);
+        g.save();
+        g.translate(u, v);
+        g.fillStyle = o.downed ? '#ff6b6b' : o.bugout ? '#6ff7ff' : '#9dff8a';
+        g.strokeStyle = '#2b2238';
+        g.lineWidth = 2;
+        g.beginPath();
+        g.arc(0, 0, 5, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+        g.restore();
+      }
+      for (const sp of this.squad.sparks) {
+        if (sp.owner.team !== p.team || sp.carrier) continue;
+        g.save();
+        g.translate(U(sp.pos.x), V(sp.pos.z));
+        g.rotate(Math.PI / 4);
+        g.fillStyle = '#9ffcff';
+        g.strokeStyle = '#2b2238';
+        g.lineWidth = 2;
+        g.fillRect(-4, -4, 8, 8);
+        g.strokeRect(-4, -4, 8, 8);
+        g.restore();
+      }
+    }
     for (const o of others) {
-      if (!o.alive || o === p) continue;
+      if (!o.alive || o === p || (this.squad && o.team === p.team)) continue;
       if (o.pingT > 0 && o.pingedBy === p) {
         g.fillStyle = '#ffe27a';
         g.strokeStyle = '#2b2238';

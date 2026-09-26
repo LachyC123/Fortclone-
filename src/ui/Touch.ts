@@ -256,6 +256,7 @@ export class TouchControls {
         break;
       case 'interact':
         if (down) s.interactPressed = true;
+        s.interactHeld = down;
         break;
       case 'blink':
         if (down) s.blinkPressed = true;
