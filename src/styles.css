@@ -1508,3 +1508,56 @@ input[type='range'] {
   background: #ff5c8a;
   box-shadow: 0 0 6px #ff5c8a;
 }
+
+/* ---------- touch HUD: one clean top row (slots) + stats tucked under the minimap */
+.touch-on .slots {
+  top: calc(8px + var(--safe-t));
+  transform: translateX(50%) scale(0.8);
+}
+.touch-on .topbar {
+  left: calc(10px + var(--safe-l));
+  top: calc(146px + var(--safe-t));
+  transform: none;
+  gap: 5px;
+}
+.touch-on .topbar .pill {
+  font-size: 15px;
+  padding: 2px 8px 2px 5px;
+  border-width: 2px;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.touch-on .topbar .pill svg {
+  width: 16px;
+  height: 16px;
+}
+.touch-on .zone-label {
+  top: calc(178px + var(--safe-t));
+}
+.touch-on .touch .pausebtn,
+.touch .pausebtn {
+  top: calc(8px + var(--safe-t));
+}
+.touch-on .lootcard {
+  top: calc(200px + var(--safe-t));
+}
+@media (max-height: 500px) {
+  .touch-on .topbar {
+    top: calc(114px + var(--safe-t));
+  }
+  .touch-on .zone-label {
+    top: calc(142px + var(--safe-t));
+  }
+  .touch-on .lootcard {
+    top: calc(146px + var(--safe-t));
+  }
+}
+.touch-on .lootcard .st {
+  margin: 0;
+  font-size: 9px;
+}
+.touch-on .lootcard .sb {
+  height: 6px;
+}
+.touch-on .lootcard .hd {
+  gap: 6px;
+}
