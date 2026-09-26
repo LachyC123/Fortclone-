@@ -110,13 +110,15 @@ export class MatchUI {
     this.gloomEl.classList.add('show');
   }
 
-  bargeStatus(progress: number, onBarge: boolean, canDrop: boolean) {
-    (this.routeEl.firstElementChild as HTMLElement).style.width = `${Math.min(100, (progress / 0.93) * 100)}%`;
+  /** k: 0..1 through the jump window (0 before the island, 1 = everyone gets tipped off) */
+  bargeStatus(k: number, onBarge: boolean, canDrop: boolean, lastCall = false) {
+    (this.routeEl.firstElementChild as HTMLElement).style.width = `${Math.min(100, k * 100)}%`;
+    this.routeEl.classList.toggle('last', lastCall);
     this.routeEl.classList.toggle('show', onBarge);
     this.jumpEl.classList.toggle('show', onBarge);
     this.jumpEl.classList.toggle('ready', canDrop);
     const touch = document.body.classList.contains('touch-on');
-    this.jumpEl.innerHTML = canDrop ? `JUMP! <kbd>${touch ? 'tap ⤒' : 'SPACE'}</kbd>` : 'HOLD ON TIGHT…';
+    this.jumpEl.innerHTML = canDrop ? `${lastCall ? 'LAST CALL — ' : ''}JUMP! <kbd>${touch ? 'tap ⤒' : 'SPACE'}</kbd>` : 'NEARLY THERE… HOLD ON!';
   }
 
   live() {

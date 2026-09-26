@@ -2541,3 +2541,8 @@ input[type='range'] {
 .hud.ended {
   opacity: 0;
 }
+
+.route.last i {
+  background: linear-gradient(90deg, var(--mustard), #ff9a5b);
+  animation: playPulse 0.5s infinite;
+}

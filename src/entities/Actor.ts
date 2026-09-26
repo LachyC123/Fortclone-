@@ -14,6 +14,7 @@ import { PAL, RarityIndex } from '../render/Palette';
 import { ColFlags } from '../physics/Collision';
 import { PShape } from '../fx/Particles';
 import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
+import { islandRadius } from '../world/Terrain';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -476,6 +477,32 @@ export class Actor implements BugOwner {
     }
     if (diving) m.vel.y = Math.max(-34, m.vel.y - 26 * dt);
     else m.vel.y += (-5.2 - m.vel.y) * Math.min(1, dt * 3);
+    // off the edge of the island? a friendly updraft carries you back over it
+    const hd = Math.hypot(m.pos.x, m.pos.z);
+    const cliff = islandRadius(Math.atan2(m.pos.z, m.pos.x));
+    const edge = cliff - 4;
+    if (hd > edge && hd > 1) {
+      const ix = -m.pos.x / hd, iz = -m.pos.z / hd;
+      let inward = m.vel.x * ix + m.vel.z * iz;
+      if (hd > cliff && inward < 0) {
+        // past the cliff: no drifting further out, whatever the stick says
+        m.vel.x -= ix * inward;
+        m.vel.z -= iz * inward;
+        inward = 0;
+      }
+      const want = Math.min(16, 6 + (hd - edge) * 0.8);
+      if (inward < want) {
+        m.vel.x += ix * (want - inward) * Math.min(1, dt * 4);
+        m.vel.z += iz * (want - inward) * Math.min(1, dt * 4);
+      }
+      // hold altitude until clear of the cliff wall
+      if (hd > cliff + 0.5 && m.pos.y < 36) m.vel.y = Math.max(m.vel.y, m.pos.y < 30 ? 3 : 0);
+      if (Math.random() < dt * 20) ctx.fx.soft.emit(_v.copy(m.pos).setY(m.pos.y + Math.random() * 2), { count: 1, color: 0xffffff, speed: [4, 8], dir: _v2.set(ix, 0.2, iz), spread: 0.3, life: 0.5, size: 0.2, sizeEnd: 0.6, alpha: 0.5 });
+      if (this.isLocal && !this.windToastShown) {
+        this.windToastShown = true;
+        ctx.hud.toast('Whoosh! The wind blows you back to the island', '#9fe8ff');
+      }
+    }
     const hs = Math.hypot(m.vel.x, m.vel.z);
     if (hs > 1) this.bodyYaw = dampAngle(this.bodyYaw, yawFromDir(m.vel.x, m.vel.z), 5, dt);
     else this.bodyYaw = dampAngle(this.bodyYaw, it.aimYaw, 5, dt);
@@ -496,8 +523,11 @@ export class Actor implements BugOwner {
     if (m.pos.y < -25) this.eliminate(null, ctx, 'THE SKY');
   }
 
+  private windToastShown = false;
+
   startDive(ctx: GameCtx) {
     if (this.flight !== 'barge') return;
+    this.windToastShown = false;
     this.flight = 'dive';
     this.motor.vel.set(this.motor.vel.x * 0.35, 2, this.motor.vel.z * 0.35);
     this.motor.grounded = false;
@@ -655,6 +685,19 @@ export class Actor implements BugOwner {
 
     // --- fell off the world
     if (m.pos.y < -25 && this.alive) this.eliminate(null, ctx, 'THE SKY');
+    // safety net: never stranded outside the island (Launch Isle, far out, is its own place)
+    const hd = Math.hypot(m.pos.x, m.pos.z);
+    if (m.grounded && hd > 1 && hd < 110) {
+      const ang = Math.atan2(m.pos.z, m.pos.x);
+      const R = islandRadius(ang);
+      if (hd > R + 1.5) {
+        const p = new THREE.Vector3(Math.cos(ang) * (R - 3), 3, Math.sin(ang) * (R - 3));
+        ctx.fx.blinkBurst(m.pos, false);
+        m.teleport(p);
+        ctx.fx.blinkBurst(p, true);
+        if (this.isLocal) ctx.hud.toast('Back onto the island you go!', '#9fe8ff');
+      }
+    }
 
     this.syncRig(dt, ctx.time);
   }

@@ -50,6 +50,10 @@ export class Match implements MatchHooks {
   gloom: Gloom;
   ui: MatchUI;
   canDrop = false;
+  /** route progress where the barge is over the island: jump window [enterAt, exitAt] */
+  private enterAt = 0.2;
+  private exitAt = 0.8;
+  private lastCallSaid = false;
   safeCenter = new THREE.Vector2();
   safeRadius = 60;
   private t = 0;
@@ -140,6 +144,17 @@ export class Match implements MatchHooks {
     this.ui.wipe();
     this.barge.planRoute(ISLAND_R);
     this.barge.update(0);
+    // work out when the barge is actually above the island so nobody drops into the sea
+    const S = this.barge.start, E = this.barge.end;
+    let enter = -1, exit = -1;
+    for (let t = 0; t <= 1; t += 0.005) {
+      const d = Math.hypot(S.x + (E.x - S.x) * t, S.z + (E.z - S.z) * t);
+      if (enter < 0 && d < ISLAND_R + 4) enter = t;
+      if (enter >= 0 && d < ISLAND_R - 8) exit = t;
+    }
+    this.enterAt = enter < 0 ? 0.3 : enter;
+    this.exitAt = exit < 0 ? 0.7 : exit;
+    this.lastCallSaid = false;
     const spots = [...Array(this.barge.spots.length).keys()].sort(() => Math.random() - 0.5);
     g.actors.forEach((a, i) => {
       if (a.parked) return;
@@ -162,7 +177,7 @@ export class Match implements MatchHooks {
 
   private pickDropTarget() {
     const w = this.g.world;
-    const pool = [...w.lootSpots.map((s) => s.pos), ...w.crateSpots.filter((c) => c.pos.y < 3).map((c) => c.pos)];
+    const pool = [...w.lootSpots.map((s) => s.pos), ...w.crateSpots.filter((c) => c.pos.y < 3).map((c) => c.pos)].filter((p) => Math.hypot(p.x, p.z) < ISLAND_R - 7);
     const p = pick(pool).clone();
     p.x += rand(-4, 4);
     p.z += rand(-4, 4);
@@ -251,10 +266,19 @@ export class Match implements MatchHooks {
     }
 
     if (this.phase === 'barge') {
-      this.canDrop = this.barge.progress > 0.1;
+      const pr = this.barge.progress;
+      this.canDrop = pr > this.enterAt;
       const riders = g.actors.filter((a) => a.flight === 'barge');
-      if (this.barge.progress > 0.93) for (const a of riders) a.startDive(g);
-      this.ui.bargeStatus(this.barge.progress, g.player.flight === 'barge', this.canDrop);
+      const lastCall = pr > this.exitAt - (this.exitAt - this.enterAt) * 0.2;
+      if (lastCall && !this.lastCallSaid && g.player.flight === 'barge') {
+        this.lastCallSaid = true;
+        g.hud.bigToast('LAST CALL! JUMP!', '#ff9a5b');
+        audio.bell(this.barge.pos);
+      }
+      // everyone still aboard gets tipped off while there's island below
+      if (pr > this.exitAt) for (const a of riders) a.startDive(g);
+      const k = pr < this.enterAt ? 0 : (pr - this.enterAt) / Math.max(0.01, this.exitAt - this.enterAt);
+      this.ui.bargeStatus(k, g.player.flight === 'barge', this.canDrop, lastCall);
       if (!riders.length) {
         this.phase = 'live';
         this.ui.live();
