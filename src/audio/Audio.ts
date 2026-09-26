@@ -259,7 +259,8 @@ export class Audio {
   /* ----------------------------------------------------------- weapons */
 
   gunshot(pos: THREE.Vector3 | undefined, profile: 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun' | 'needle' | 'bow' | 'pepper', isLocal: boolean) {
-    const out = this.out(pos, isLocal ? 0.75 : 0.95, 120);
+    // your own shots play flat (not panned); the position is still passed so LAN hosts can share it
+    const out = this.out(isLocal ? undefined : pos, isLocal ? 0.75 : 0.95, 120);
     if (!out) return;
     const t = this.ctx!.currentTime;
     const p = rand(0.93, 1.07);

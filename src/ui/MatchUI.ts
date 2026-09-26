@@ -64,6 +64,9 @@ export class MatchUI {
   private lastSec = -1;
   onPlayAgain: (() => void) | null = null;
   onHome: (() => void) | null = null;
+  /** LAN client: only the host can restart, so 'play again' becomes a waiting note */
+  netClient = false;
+  netRoom = false;
 
   constructor() {
     this.gloomEl.innerHTML = `<span class="ic">${ICONS.skull}</span><span class="l"></span><span class="t"></span>`;
@@ -233,7 +236,7 @@ export class MatchUI {
       <div class="xplines">${lines}</div>
       <div class="diff">Bots: <b>${s.difficulty}</b> · change in Settings</div>
       <div class="cocoonwin" style="--rc:${s.cocoonColor}"><span class="coc"></span><span><b class="big">+1 ${s.cocoon.toUpperCase()} COCOON</b><br><small>${s.bugName} can't wait to meet a new friend · hatch it in MY BUGS</small></span></div>
-      <div class="btns"><button class="btn again">PLAY AGAIN</button><button class="btn secondary home">HOME</button></div>
+      <div class="btns">${this.netClient ? '<div class="wait">The host can start the next match</div>' : '<button class="btn again">PLAY AGAIN</button>'}<button class="btn secondary home">${this.netClient || this.netRoom ? 'LEAVE ROOM' : 'HOME'}</button></div>
     </div>`;
     this.summaryEl.classList.remove('hidden');
     const fill = this.summaryEl.querySelector('.xpbar .fill') as HTMLElement;
@@ -260,7 +263,7 @@ export class MatchUI {
       requestAnimationFrame(step);
     };
     setTimeout(step, 700);
-    this.summaryEl.querySelector('.again')!.addEventListener('click', () => {
+    this.summaryEl.querySelector('.again')?.addEventListener('click', () => {
       audio.uiTap();
       this.onPlayAgain?.();
     });

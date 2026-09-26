@@ -142,12 +142,15 @@ export class Gloom {
     return THREE.MathUtils.clamp((d - (this.radius - 6)) / 6, 0, 1.5);
   }
 
+  /** LAN client: the host drives the circle; this device only draws it */
+  netMode = false;
+
   update(dt: number, camPos: THREE.Vector3) {
     this.t += dt;
     if (this.state === 'idle') return;
     const ph = GLOOM_PHASES[this.phase];
     this.phaseT += dt;
-    if (ph) {
+    if (ph && !this.netMode) {
       if (this.state === 'waiting' && this.phaseT >= ph.wait) {
         this.state = 'shrinking';
         this.phaseT = 0;

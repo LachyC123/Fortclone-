@@ -66,6 +66,25 @@ npm run typecheck
 > Every match the barge route decides which peninsulas are in reach, and two **Hot Drops** (orange beams,
 > flame markers on the map) get a rich crate and rare guns.
 
+## Play with friends (LAN)
+
+Everyone on the **same Wi-Fi**. One computer runs the room server; phones, tablets and computers just open a web page.
+
+1. On one computer (with Node 18+), in this folder: `npm install` once, then **`npm run lan`**.
+2. It prints an address like `http://192.168.1.20:8787`. Open that address on **every** device that wants to play,
+   including the computer running it (you can also use `http://localhost:8787` there).
+3. One player taps **WITH FRIENDS → MAKE A ROOM** and reads out the 4-letter code. Everyone else taps
+   **WITH FRIENDS**, types the code and taps **JOIN**.
+4. The host picks **SOLO / DUOS / TRIOS / SQUADS**. Same team number = teammates; different numbers = rivals
+   (e.g. you and your brother on TEAM 1 and TEAM 2, each with bot teammates). Bots fill the island up to 24.
+5. The host taps **START MATCH**. After the match the host can **PLAY AGAIN** for everyone.
+
+In squads a knocked teammate can be picked back up (hold **F** / the revive button for 4s). Anyone who's fully
+out drops a **spark** that a teammate can carry to a Rift Nest to rebuild them. In solos your Blinkbug bugout works
+as usual. The host's device runs the match, so the fastest device should host. If the page can't find the
+server, check everyone is on the same Wi-Fi and the computer's firewall allows port 8787 (`PORT=9000 npm run lan`
+to use another port).
+
 ## A match
 
 1. **Launch Isle** (~14s): rascals pop in; shoot and blink all you like, nobody can get hurt.
@@ -122,6 +141,8 @@ node tools/thirdparty.mjs                     # third-partying a bot fight (no s
 node tools/placeshots.mjs [--only=tickerton]   # the peninsula places from the air and the ground
 node tools/densitymap.mjs                     # ASCII map of buildings / cover / open ground + counts
 node tools/tierprobe.mjs [low medium high]    # per-quality boot time, triangles and draw calls
+node tools/squadtest.mjs                      # duos: knock, revive, sparks, nest rebuild, team wipe
+node tools/lantest.mjs                        # LAN: two browsers, room, join, move, fire, knock/revive, results, replay
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

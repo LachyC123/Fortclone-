@@ -5,7 +5,9 @@ import { FX } from '../fx/FX';
 import { World } from '../world/World';
 import { LootSystem, rollWeapon, ammoFor, rollFloor } from '../loot/Loot';
 import { NavGrid } from '../world/NavGrid';
-import { Actor } from '../entities/Actor';
+import { Actor, Controller } from '../entities/Actor';
+import type { HostSession } from '../net/Host';
+import type { ClientSession } from '../net/Client';
 import { LOOKS } from '../entities/RascalRig';
 import { Input } from './Input';
 import { CameraRig } from '../camera/CameraRig';
@@ -80,8 +82,8 @@ export class Game implements GameCtx {
   private emoteIdx = 0;
   /** the battle royale in progress (null in the playground / on the title screen) */
   match: Match | null = null;
-  private matchCtl!: Match;
-  mode: 'none' | 'playground' | 'match' = 'none';
+  matchCtl!: Match;
+  mode: 'none' | 'playground' | 'match' | 'net' = 'none';
   /** your Blinkbug collection (saved locally) */
   collection: Collection = loadCollection();
   /** test hook: fixed camera for visual review */
@@ -216,6 +218,136 @@ export class Game implements GameCtx {
     return a;
   }
 
+  /* ------------------------------------------------------------------ LAN */
+
+  /** a LAN session: this device hosts the match, or is a client of someone else's */
+  net: HostSession | ClientSession | null = null;
+
+  /** LAN client: the match runs on the host — clear the local world state and just present */
+  enterNetClient() {
+    this.mode = 'net';
+    this.match = null;
+    this.matchCtl.ui.setVisible(true);
+    this.matchCtl.ui.hideSummary();
+    this.matchCtl.ui.knocked(false);
+    this.matchCtl.ui.spectating('', false);
+    this.matchCtl.gloom.reset();
+    this.matchCtl.clearBalloons();
+    this.matchCtl.resetForNet();
+    this.pc.remote = true;
+    for (const p of [...this.loot.pickups]) this.loot.remove(p);
+    this.loot.resetCrates();
+    for (const c of this.loot.crates) c.netOnly = true;
+    this.respawnT = -1;
+    this.play();
+  }
+
+  /** LAN client: drop every local rascal (the host's roster replaces them) */
+  clearActorsForNet() {
+    for (const a of this.actors) a.dispose(this);
+    this.actors.length = 0;
+  }
+
+  /** LAN client: this puppet is you */
+  adoptLocalPlayer(a: Actor) {
+    a.isLocal = true;
+    a.me = { hud: this.hud, sfx: audio, shake: (n) => this.shake(n), hitStop: (d, s) => this.hitStop(d, s), slowMo: (s, d) => this.slowMo(s, d) };
+    this.player = a;
+    this.localActor = a;
+    this.camRig.snapTo(a);
+  }
+
+  /** a LAN client's frame: input -> host, snapshots -> puppets, then the usual presentation */
+  private clientFrame(dt: number) {
+    const net = this.net as ClientSession;
+    net.frame(dt);
+    this.loot.update(dt, this);
+    this.world.update(dt, this.actors, this.camera.position);
+    if (this.input.s.emotePressed) {
+      const kinds: EmoteKind[] = ['dance', 'wave', 'laugh', 'flex'];
+      this.playerEmote(kinds[this.emoteIdx++ % kinds.length]);
+    }
+    this.bubbles.update(this.actors, this.camera, this.time);
+    this.birds.update(dt, this.time, this.camera.position, this.actors, this.sounds);
+    const p = this.player;
+    const spec = p.out ? net.spectate() : null;
+    if (p.alive || p.bugout) {
+      const w = p.weapon;
+      this.camRig.update(dt, p, p.alive && p.ads && w ? w.def.adsFov : null);
+    } else if (spec) {
+      this.camRig.yaw += dt * 0.25;
+      this.camRig.update(dt, spec, null);
+    } else {
+      this.camera.position.y += dt * 1.5;
+      this.camera.lookAt(p.motor.pos);
+    }
+    _right.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    audio.indoor = this.world.zoneAt(p.motor.pos)?.indoor ? 1 : 0;
+    audio.setListener(this.camera.position, _right);
+    audio.setWind(Math.max(0, (p.motor.horizontalSpeed() - 7) / 8) + (p.flight === 'dive' ? 1 : 0));
+    const fog = this.scene.fog as THREE.Fog;
+    const fk = Math.min(1, Math.max(0, (this.camera.position.y - 18) / 40));
+    const dd = Math.min(230, this.world.drawDist * 1.05);
+    fog.near = dd * 0.26 + fk * 150;
+    fog.far = dd + fk * 260;
+    this.fx.update(dt, this.camera);
+    this.r.followShadows(p.motor.pos);
+    const w = p.weapon;
+    const spread = w ? (p.ads ? w.def.spreadAds : w.def.spreadHip) + w.bloom + (p.motor.horizontalSpeed() > 1 ? w.def.spreadMove : 0) : 0;
+    this.hud.squadPrompt = p.alive ? this.pc.contextSquad : null;
+    this.hud.squad = net.teamSize > 1 && net.m?.ph !== 'lobby' ? { sparks: net.sparks } : null;
+    this.hud.update(dt, p, this.actors, p.alive ? this.pc.contextPickup : null, spread, this.fps, this.input.s.touchActive, this.world, p.alive ? this.pc.contextCrate : null);
+    this.touch.updateVisuals(p.bug, p.bug.stats.window, !!(this.pc.contextPickup || this.pc.contextCrate || this.pc.contextSquad), p);
+    this.hud.root.classList.toggle('flying', p.flight !== 'none' || !!p.bugout);
+    this.hud.root.classList.toggle('lobby', net.m?.ph === 'lobby');
+    this.hud.root.classList.toggle('ended', this.matchCtl.summaryShown);
+    if (this.sounds.length) this.sounds = this.sounds.filter((s) => this.time - s.time < 1);
+  }
+
+  /** leave any LAN session (back to single player) */
+  leaveNet() {
+    const n = this.net;
+    this.net = null;
+    n?.close();
+    this.pc.remote = false;
+    this.matchCtl.teamPlan = null;
+  }
+
+  speciesById(id: string) {
+    return SPECIES_BY_ID[id] ?? SPECIES_BY_ID.zippit;
+  }
+
+  /** LAN host: a rascal for a friend on another device, driven by their input packets */
+  createRemote(name: string, ctl: Controller) {
+    const look = LOOKS[1 + Math.floor(Math.random() * (LOOKS.length - 1))];
+    const a = new Actor(name.slice(0, 16) || 'Rascal', look, this, randomSpecies(), randomBugName());
+    a.controller = ctl;
+    // right after the host so they're active in the lobby straight away; a bot makes room
+    this.actors.splice(1, 0, a);
+    const MAX = 24;
+    while (this.actors.length > MAX) {
+      const bot = [...this.actors].reverse().find((x) => !x.me && x !== this.player && !(x.controller && !(x.controller instanceof BotController)));
+      if (!bot) break;
+      this.removeActor(bot);
+    }
+    return a;
+  }
+
+  removeActor(a: Actor) {
+    a.dispose(this);
+    const i = this.actors.indexOf(a);
+    if (i >= 0) this.actors.splice(i, 1);
+  }
+
+  /** a friend dropped out mid-match: a bot takes over their rascal */
+  botify(a: Actor) {
+    a.me = null;
+    a.onRecoil = a.onBlinked = a.onLanded = null;
+    const brain = new BotController(PROFILES.cautious);
+    a.controller = brain;
+    a.onDamaged = (from, ctx) => brain.onDamaged(a, from, ctx);
+  }
+
   private spawnBot(a: Actor) {
     const sp = pick(this.world.botSpawns);
     a.spawn(sp.clone().add(new THREE.Vector3(rand(-2, 2), 0, rand(-2, 2))), rand(-3, 3));
@@ -311,6 +443,7 @@ export class Game implements GameCtx {
   }
 
   playerEmote(kind: EmoteKind) {
+    if (this.net?.role === 'client') (this.net as ClientSession).sendEmote(kind);
     const p = this.player;
     if (!p.alive || p.flight !== 'none') return;
     p.startEmote(kind, 3);
@@ -530,7 +663,8 @@ export class Game implements GameCtx {
       this.input.endFrame();
       return;
     }
-    this.simulate(dt * this.timeScale(dt));
+    if (this.net?.role === 'client') this.clientFrame(dt * this.timeScale(dt));
+    else this.simulate(dt * this.timeScale(dt));
     if (this.debugCam) {
       this.camera.position.copy(this.debugCam.pos);
       this.camera.lookAt(this.debugCam.target);
@@ -620,6 +754,7 @@ export class Game implements GameCtx {
       this.hud.root.classList.remove('flying', 'lobby', 'ended');
     }
     if (this.sounds.length) this.sounds = this.sounds.filter((s) => this.time - s.time < 1);
+    if (this.net?.role === 'host') this.net.tick(dt);
     if (this.mode === 'match') return;
 
     // playground flow: respawns & loot refresh

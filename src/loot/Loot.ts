@@ -158,7 +158,12 @@ export interface Crate {
   t: number;
   /** Loot Balloon crate: guaranteed epic/mythic */
   rich?: boolean;
+  /** stable id (LAN: host and clients agree on it) */
+  id: number;
+  /** LAN client: open it for show only — the host sends the loot that pops out */
+  netOnly?: boolean;
 }
+let nextCrateId = 1;
 
 const crateMats = {
   body: toyMaterial(0x6a4a8a, { rough: 0.6 }),
@@ -289,7 +294,7 @@ export class LootSystem {
     return RARITY[p.rarity].color;
   }
 
-  spawn(kind: LootKind, defId: string, rarity: RarityIndex, amount: number, pos: THREE.Vector3, vel?: THREE.Vector3, mag?: number): Pickup {
+  spawn(kind: LootKind, defId: string, rarity: RarityIndex, amount: number, pos: THREE.Vector3, vel?: THREE.Vector3, mag?: number, id?: number): Pickup {
     const root = new THREE.Group();
     const model = this.buildModel(kind, defId, rarity);
     root.add(model);
@@ -309,7 +314,7 @@ export class LootSystem {
     root.position.copy(pos);
     this.scene.add(root);
     const p: Pickup = {
-      id: nextPickupId++, kind, defId, rarity, amount, pos: pos.clone(), vel: vel ? vel.clone() : new THREE.Vector3(), settled: !vel, root, model, glow, beam,
+      id: id ?? nextPickupId++, kind, defId, rarity, amount, pos: pos.clone(), vel: vel ? vel.clone() : new THREE.Vector3(), settled: !vel, root, model, glow, beam,
       t: Math.random() * 10, collectT: -1, collector: null, lockUntil: 0, mag: mag ?? (kind === 'weapon' ? WEAPONS[defId].mag : 0),
     };
     this.pickups.push(p);
@@ -453,7 +458,7 @@ export class LootSystem {
 
   /* ------------------------------------------------------------------ crates */
 
-  placeCrate(pos: THREE.Vector3, yaw: number): Crate {
+  placeCrate(pos: THREE.Vector3, yaw: number, id?: number): Crate {
     const { root, lid, lock, lights } = buildCrate();
     root.position.copy(pos);
     root.rotation.y = yaw;
@@ -463,7 +468,7 @@ export class LootSystem {
     glow.position.set(pos.x, pos.y + 0.03, pos.z);
     this.scene.add(glow);
     const collider = this.cw.box(pos.x, pos.y + 0.45, pos.z, 1.3, 0.9, 0.85, 'wood', yaw, 0, 0, ColFlags.BlocksMove | ColFlags.BlocksBullets | ColFlags.BlocksBug);
-    const crate: Crate = { root, lid, lock, lights, pos: pos.clone(), yaw, opened: false, openT: -1, opener: null, collider, lidV: 0, lidA: 0, glow, t: Math.random() * 5 };
+    const crate: Crate = { id: id ?? nextCrateId++, root, lid, lock, lights, pos: pos.clone(), yaw, opened: false, openT: -1, opener: null, collider, lidV: 0, lidA: 0, glow, t: Math.random() * 5 };
     this.crates.push(crate);
     return crate;
   }
@@ -550,7 +555,7 @@ export class LootSystem {
           ctx.fx.ring(c.pos.clone().setY(c.pos.y + 0.1), 0xffd36b, 0.3, 3.2, 0.45);
           ctx.fx.lightFlash(top, 0xffd36b, 8, 0.35);
           c.opener?.me?.shake(0.2);
-          this.spawnRolls(rollCrate(!!c.rich), top, true);
+          if (!c.netOnly) this.spawnRolls(rollCrate(!!c.rich), top, true);
           ctx.emitSound({ pos: c.pos.clone(), loudness: 20, source: c.opener, kind: 'impact' });
         }
       }

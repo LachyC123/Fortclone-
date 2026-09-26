@@ -112,6 +112,26 @@ export class Match implements MatchHooks {
 
   /** 1 = solo, 2 duos, 3 trios, 4 squads */
   teamSize = 1;
+  /** LAN host: put friends on the teams they picked (runs after the default assignment) */
+  teamPlan: ((actors: Actor[]) => void) | null = null;
+
+  /* --- small read-outs the LAN host sends to clients */
+  lobbyLeft() {
+    return this.phase === 'lobby' ? Math.max(0, LOBBY_TIME - this.t) : 0;
+  }
+  joinedCount() {
+    return this.joined;
+  }
+  bargeK() {
+    const pr = this.barge.progress;
+    return pr < this.enterAt ? 0 : (pr - this.enterAt) / Math.max(0.01, this.exitAt - this.enterAt);
+  }
+  lastCallNow() {
+    return this.phase === 'barge' && this.barge.progress > this.exitAt - (this.exitAt - this.enterAt) * 0.2;
+  }
+  balloonMarks() {
+    return this.balloons.filter((b) => !b.crate || !b.crate.opened).map((b) => [Math.round(b.group.position.x), Math.round(b.group.position.y), Math.round(b.group.position.z), Math.round(b.land.x), Math.round(b.land.y), Math.round(b.land.z)]);
+  }
   /** a dropped Blinkbug spark a teammate can carry to a Rift Nest to rebuild its owner */
   sparks: Spark[] = [];
 
@@ -308,7 +328,7 @@ export class Match implements MatchHooks {
     const L = g.world.lobby;
     this.joined = 1;
     g.actors.forEach((a, i) => {
-      a.parked = i > 0; // bots "join" over the first few seconds
+      a.parked = i > 0 && !a.me; // bots "join" over the first few seconds (people are there already)
       a.out = false;
       a.reviveUsed = false;
       a.kills = 0;
@@ -345,6 +365,7 @@ export class Match implements MatchHooks {
       // squads: you and the next (size - 1) rascals are a team, and so on down the list
       a.team = this.teamSize > 1 ? Math.floor(i / this.teamSize) : a.id;
     });
+    this.teamPlan?.(g.actors);
     const p = g.player;
     p.spawn(new THREE.Vector3(L.center.x, L.center.y + 0.05, L.center.z + 3), 0);
     g.camRig.snapTo(p);
@@ -868,6 +889,23 @@ export class Match implements MatchHooks {
     }
     const alive = this.g.actors.filter((a) => a.alive && !a.parked);
     return alive.length ? alive[0] : null;
+  }
+
+  /** LAN client: forget the last match's result flags */
+  resetForNet() {
+    this.summaryShown = false;
+    this.won = false;
+    this.endT = -1;
+    this.celebrateT = 0;
+    this.phase = 'lobby';
+  }
+
+  /** LAN client: the host says how it went; show the same summary (XP and cocoons land on this device) */
+  showSummaryNet(won: boolean, place: number) {
+    if (this.summaryShown) return;
+    this.won = won;
+    this.g.player.placement = won ? 1 : place;
+    this.showSummary();
   }
 
   private showSummary() {

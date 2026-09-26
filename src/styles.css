@@ -2712,3 +2712,53 @@ body.ko #game { filter: saturate(0.2) contrast(1.08) brightness(1.05); transitio
 .tag.spark::before { content: '◆'; display: block; font-size: 16px; color: #9ffcff; }
 .prompt .pct { color: #9dff8a; margin-left: 6px; }
 @media (max-width: 700px) { .teampanel .mate { width: 118px; font-size: 11px; } .teampanel { top: calc(150px + var(--safe-t)); } }
+
+/* ---------- PLAY WITH FRIENDS (LAN rooms) */
+.home .friends { margin-top: 8px; font-size: 15px; }
+.home .friends small { font-size: 11px; opacity: 0.75; }
+.lanpanel { max-width: 520px; width: calc(100% - 32px); }
+.lanmsg, .wait { text-align: center; padding: 18px; font-size: 18px; }
+.lanhelp { font-size: 14px; line-height: 1.5; }
+.lanhelp code { background: rgba(43,34,56,0.1); padding: 1px 6px; border-radius: 6px; font-weight: 700; }
+.lanhelp ol { padding-left: 20px; }
+.lanentry { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.lanentry label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; }
+.lanentry input, .joinrow input { font: inherit; font-size: 18px; padding: 8px 12px; border: 3px solid var(--ink); border-radius: 12px; background: #fff; color: var(--ink); }
+.joinrow { display: flex; gap: 8px; }
+.joinrow input { flex: 1; text-transform: uppercase; letter-spacing: 4px; text-align: center; }
+.lanentry .or { text-align: center; font-size: 13px; opacity: 0.7; }
+.lanroom { display: flex; flex-direction: column; gap: 10px; }
+.lanroom .code { text-align: center; font-size: 26px; }
+.lanroom .code b { letter-spacing: 6px; color: var(--pink); -webkit-text-stroke: 1.5px var(--ink); paint-order: stroke fill; }
+.lanroom .hint { font-size: 13px; text-align: center; opacity: 0.85; }
+.lanroom .modes { display: flex; gap: 6px; justify-content: center; }
+.lanroom .modes button { font: inherit; font-weight: 700; padding: 6px 10px; border-radius: 10px; border: 3px solid var(--ink); background: #fff6e6; color: var(--ink); cursor: pointer; }
+.lanroom .modes button.on { background: var(--mustard); }
+.lanroom .modes button:disabled { cursor: default; opacity: 0.85; }
+.lanroom .members { display: flex; flex-direction: column; gap: 6px; }
+.lanroom .mem { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 12px; background: rgba(43,34,56,0.08); font-weight: 700; }
+.lanroom .mem.me { background: rgba(242,193,78,0.35); }
+.lanroom .mem small { font-size: 10px; background: var(--ink); color: #fff; padding: 1px 6px; border-radius: 6px; margin-left: 4px; }
+.lanroom .team { display: flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 10px; background: var(--tc); border: 2px solid var(--ink); font-size: 13px; }
+.lanroom .team button { font: inherit; border: none; background: transparent; cursor: pointer; padding: 0 4px; font-size: 14px; }
+.lanflash { min-height: 18px; text-align: center; color: #d9443a; font-weight: 700; font-size: 13px; opacity: 0; }
+.lanflash.on { animation: fadeUp 2.6s ease-out; }
+.summary .btns .wait { font-size: 14px; padding: 10px; }
+.home .playrow { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 14px; }
+.home .playrow .play { margin: 0; }
+.home .friends { margin: 0; font-size: 16px; display: flex; flex-direction: column; line-height: 1.05; padding: 8px 16px; }
+.home .friends small { font-size: 10px; opacity: 0.75; font-family: 'Fredoka', sans-serif; }
+.overlay .home { max-height: 100%; overflow-y: auto; }
+@media (max-height: 500px) {
+  .home .logo { font-size: 40px; }
+  .home .tagline { display: none; }
+  .home .profile { margin-top: 2px; }
+  .modepick { margin: 4px 0 0; }
+  .modepick button { font-size: 13px; padding: 4px 10px; }
+  .modehint { font-size: 11px; min-height: 12px; margin-bottom: 0; }
+  .home .playrow { margin-top: 6px; }
+  .home .play { font-size: 28px; padding: 6px 40px; }
+  .home .mybug { margin-top: 6px; font-size: 13px; }
+  .homebtns { margin-top: 6px; }
+  .homebtns .btn { font-size: 15px; padding: 5px 14px; }
+}

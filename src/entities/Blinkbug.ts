@@ -341,6 +341,28 @@ export class Blinkbug {
     this.panic = 0;
   }
 
+  /** LAN client: take the state and position the host reports, then just animate */
+  netApply(state: BugState, x: number, y: number, z: number, dt: number, visible: boolean) {
+    this.t += dt;
+    const was = this.state;
+    this.state = state;
+    if (state !== 'docked') {
+      if (was === 'docked' || this.pos.distanceToSquared(_p.set(x, y, z)) > 25) this.pos.set(x, y, z);
+      else {
+        const k = Math.min(1, dt * 18);
+        this.pos.x += (x - this.pos.x) * k;
+        this.pos.y += (y - this.pos.y) * k;
+        this.pos.z += (z - this.pos.z) * k;
+      }
+    }
+    this.root.visible = visible;
+    this.netQuiet = true;
+    this.animate(dt);
+    this.netQuiet = false;
+  }
+  /** suppress little local sparkles while a client is posing a puppet (the host sends its own) */
+  private netQuiet = false;
+
   update(dt: number) {
     this.t += dt;
     if (!this.owner.alive && this.state !== 'piloted') return;
@@ -491,7 +513,7 @@ export class Blinkbug {
       // beacon pulse speeds up as the window closes
       const urgency = 1 - this.window / this.stats.window;
       glow = 0.8 + Math.sin(t * (6 + urgency * 14)) * 0.4;
-      if (Math.random() < dt * 6) this.fx.glow.emit(_p.copy(this.pos).setY(this.pos.y + 0.1), { count: 1, color: PAL.blink, speed: 0.3, up: 1.2, life: 0.6, size: 0.08, shape: PShape.Sparkle });
+      if (!this.netQuiet && Math.random() < dt * 6) this.fx.glow.emit(_p.copy(this.pos).setY(this.pos.y + 0.1), { count: 1, color: PAL.blink, speed: 0.3, up: 1.2, life: 0.6, size: 0.08, shape: PShape.Sparkle });
     } else {
       this.root.position.copy(this.pos);
       flap = Math.sin(t * 70) * 1;

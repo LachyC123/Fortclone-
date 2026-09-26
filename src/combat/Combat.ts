@@ -93,7 +93,7 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
     w.bloom = clamp(w.bloom + def.bloomPerShot, 0, def.bloomMax);
     shooter.onFired(def.recoilPitch, def.recoilYaw * (Math.random() - 0.5) * 2, def.camKick);
     ctx.fx.muzzle(_muzzle, aimD, def.tracer, false);
-    audio.gunshot(shooter.isLocal ? undefined : _muzzle, def.sound, shooter.isLocal);
+    audio.gunshot(_muzzle, def.sound, shooter.isLocal);
     ctx.emitSound({ pos: _muzzle.clone(), loudness: 35, source: shooter, kind: 'gunshot' });
     return;
   }
@@ -181,6 +181,6 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
   ctx.fx.muzzle(_muzzle, aimD, def.tracer, def.pellets > 1 || !!def.knockback);
   // big guns shove you back a little too
   if (def.knockback && def.knockback > 5 && !shooter.motor.grounded) shooter.motor.impulse(_a.copy(aimD).multiplyScalar(-def.knockback * 0.4));
-  audio.gunshot(shooter.isLocal ? undefined : _muzzle, def.sound, shooter.isLocal);
+  audio.gunshot(_muzzle, def.sound, shooter.isLocal);
   ctx.emitSound({ pos: _muzzle.clone(), loudness: 70, source: shooter, kind: 'gunshot' });
 }

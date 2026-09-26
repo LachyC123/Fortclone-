@@ -3,6 +3,7 @@ import { QUALITY_PRESETS, type Quality } from '../render/Renderer';
 import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
 import { CollectionScreen } from './Collection';
+import { LanScreen } from './LanScreen';
 import { SPECIES_BY_ID } from '../progression/Bugs';
 import { RARITY } from '../render/Palette';
 
@@ -53,6 +54,7 @@ export class Menus {
   private pauseEl = h('div', 'overlay hidden');
   private elimEl = h('div', 'overlay hidden');
   collection!: CollectionScreen;
+  lan!: LanScreen;
 
   constructor(private game: Game) {
     this.title.innerHTML = `<div class="title home">
@@ -61,7 +63,7 @@ export class Menus {
       <div class="profile big"></div>
       <div class="modepick"><button data-n="1">SOLO</button><button data-n="2">DUOS</button><button data-n="3">TRIOS</button><button data-n="4">SQUADS</button></div>
       <div class="modehint"></div>
-      <button class="btn play">PLAY</button>
+      <div class="playrow"><button class="btn play">PLAY</button><button class="btn secondary friends">WITH FRIENDS<small>same Wi-Fi</small></button></div>
       <button class="mybug"></button>
       <div class="homebtns">
         <button class="btn secondary bugsbtn">MY BUGS<span class="badge"></span></button>
@@ -110,6 +112,14 @@ export class Menus {
       audio.unlock();
       audio.uiTap();
       this.game.startPlayground();
+    });
+    this.lan = new LanScreen(this.game);
+    this.lan.onClose = () => this.title.classList.remove('hidden');
+    this.title.querySelector('.friends')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.lan.open();
     });
     this.collection = new CollectionScreen(this.game);
     this.collection.onClose = () => {

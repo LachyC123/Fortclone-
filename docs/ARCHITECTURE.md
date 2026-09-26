@@ -295,3 +295,35 @@ but only hands out places within 72m of the barge route (`routeDist`); glide rea
 **Hot Drops** (`Match.pickHotDrops`): at barge time two reachable places (not last match's) get a rich crate,
 three rare-to-mythic guns with ammo, an orange sky beam and a pulsing flame on the minimap; ~28% of bots
 aim for them. Cleared with the balloons.
+
+## 16. Squads (`core/Match.ts`, `entities/Actor.ts`)
+
+`Actor.team` groups players (solo: everyone their own team). With teammates alive, lethal damage **knocks**
+instead (`canGoDown`): the rascal crawls, bleeds out over ~36s, and a teammate holds interact for `REVIVE_TIME`
+(4s) to get them up with 30 HP. Fully out rascals drop a **spark** (90s on the ground); a teammate carries it
+to an unused Rift Nest and holds for 3s to rebuild them. A team is out when nobody is standing, downed or
+carried as a spark (`teamsLeft()`); the match ends at one team. Per-player feedback goes through
+`Actor.me: Personal` (HUD, sfx, shake, hit-stop, slow-mo), while `ctx.announce` is for everyone.
+
+## 17. LAN rooms (`server/lan.mjs`, `net/*`, `ui/LanScreen.ts`)
+
+**Server**: `server/lan.mjs` is a zero-dependency Node script serving `dist/` over HTTP with a tiny WebSocket
+relay on `/ws`. It holds rooms (`create`/`join`/`team`/`name`/`mode`/`start`), max 8 people; after START it only
+forwards: host messages with `to` go to one client, other host messages to all, and every client message goes
+to the host with `from` stamped on. `npm run lan` builds and runs it and prints the Wi-Fi addresses.
+
+**Host-authoritative**: the host's browser runs the normal simulation (`HostSession`). Each remote player is
+an ordinary `Actor` driven by a `RemoteController` fed from 30Hz input packets (axes/aim held, button edges
+accumulated so a tap is never lost). The host sends:
+- a 20Hz snapshot: per actor a compact `NetActorState` (position, yaw, pitch, hp, bitflags, weapon, bug);
+- the fx/audio/loot/crate calls made during the tick, recorded by `net/Codec.tap` wrapping those methods;
+- per remote player, a private packet: their inventory, ammo, bug cooldowns, stats and a queue of their
+  `Personal` events (hitmarkers, toasts, camera shake…), plus their result when they win or their team is out.
+
+**Clients** (`ClientSession`) never simulate the world: they render everyone 100ms in the past (interpolating
+between snapshots), replay recorded events at their snapshot time, and predict only their own movement
+(corrected softly toward the host). Loot and crates mirror by id. The gloom, the barge and the match clock come
+from the snapshot. The summary's PLAY AGAIN is host-only, and it restarts everyone.
+
+`tools/lantest.mjs` runs the real server with two browsers and checks join, teams, movement, firing, effects,
+knock/revive, results and replay.

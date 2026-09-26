@@ -10,6 +10,7 @@ import { ColFlags } from '../physics/Collision';
 import type { Pickup, Crate } from '../loot/Loot';
 import { UTILS, ITEM_COLOR } from '../combat/Items';
 import { simulateThrow, throwVelocity, THROW } from '../combat/Throwables';
+import { interactContext, SquadContext } from './Interact';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -31,7 +32,9 @@ export class PlayerController implements Controller {
   contextPickup: Pickup | null = null;
   contextCrate: Crate | null = null;
   /** squads: revive / grab a spark / rebuild at a nest (wins over loot prompts) */
-  contextSquad: { kind: 'revive' | 'spark' | 'rebuild'; name: string; k: number } | null = null;
+  contextSquad: SquadContext = null;
+  /** LAN client: produce intent & prompts only; the host performs the actions */
+  remote = false;
   settings: PlayerSettings = { aimAssist: true, autoFire: false };
   autoFireActive = false;
   private autoFireT = 0;
@@ -111,36 +114,11 @@ export class PlayerController implements Controller {
     it.aimYaw = cam.yaw;
     it.aimPitch = cam.pitch;
 
-    // squads first: pick up a knocked teammate, grab a spark, rebuild at a nest
-    this.contextSquad = null;
-    it.revive = false;
-    it.hold = s.interactHeld;
-    const m = ctx.match;
-    if (m && m.teamSize > 1 && !a.downed) {
-      const mate = ctx.actors.find((o) => o !== a && o.team === a.team && o.downed && o.alive && o.motor.pos.distanceTo(a.motor.pos) < 2.2);
-      if (mate) {
-        this.contextSquad = { kind: 'revive', name: mate.name, k: mate.reviveK };
-        it.revive = s.interactHeld;
-        a.reviving = s.interactHeld ? mate : null;
-      } else {
-        const sp = m.sparkNear(a);
-        if (sp) {
-          this.contextSquad = { kind: 'spark', name: sp.owner.name, k: 0 };
-          if (s.interactPressed) m.trySparkPickup(a);
-        } else if (m.nestFor(a)) {
-          const mine = m.sparks.find((x) => x.carrier === a)!;
-          this.contextSquad = { kind: 'rebuild', name: mine.owner.name, k: mine.rebuildK };
-        }
-      }
-    }
-
-    // contextual interaction: floor loot first, then Rascal Crates
-    this.contextPickup = this.contextSquad || a.downed ? null : ctx.loot.bestFor(a);
-    this.contextCrate = this.contextPickup || this.contextSquad || a.downed ? null : ctx.loot.crateFor(a);
-    if (s.interactPressed && !this.contextSquad) {
-      if (this.contextPickup) ctx.loot.collect(a, this.contextPickup, ctx);
-      else if (this.contextCrate) ctx.loot.openCrate(this.contextCrate, a);
-    }
+    // interact: revive / spark / rebuild / loot / crates (a LAN client only shows prompts — the host acts)
+    const ic = interactContext(a, ctx, s.interactPressed, s.interactHeld, !this.remote);
+    this.contextSquad = ic.squad;
+    this.contextPickup = ic.pickup;
+    this.contextCrate = ic.crate;
 
     this.updateArc(a, ctx);
   }

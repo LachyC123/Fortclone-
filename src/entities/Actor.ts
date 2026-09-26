@@ -29,6 +29,27 @@ const _v3 = new THREE.Vector3();
 
 let nextActorId = 1;
 
+/** one rascal as the LAN host sends it (see net/Host.ts) */
+export interface NetActorState {
+  id: number;
+  x: number; y: number; z: number;
+  vx: number; vy: number; vz: number;
+  yaw: number;
+  pitch: number;
+  /** bit flags: 1 alive, 2 downed, 4 bugout, 8 crouch, 16 slide, 32 sprint, 64 grounded, 128 ads,
+   * 256 mantle, 512 healing, 1024 stealth, 2048 out, 4096 body visible, bits 13-14 flight */
+  f: number;
+  hp: number;
+  dh: number;
+  rk: number;
+  w: string;
+  em: string;
+  bs: number;
+  bx: number; by: number; bz: number;
+  bt?: number;
+  bh?: number;
+}
+
 /** seconds of holding interact to pick a teammate up */
 export const REVIVE_TIME = 4;
 
@@ -57,13 +78,13 @@ export class Actor implements BugOwner {
   bugout: { t: number; hp: number; vel: THREE.Vector3; grace: number } | null = null;
   reviveUsed = false;
   /** KO tumble: the rascal is launched spinning before popping into confetti */
-  private koT = 0;
+  koT = 0;
   private koVel = new THREE.Vector3();
   private koPos = new THREE.Vector3();
   private koSpin = new THREE.Vector3();
   private koStarT = 0;
   private koFloor = 0;
-  private lastHitDir = new THREE.Vector3();
+  lastHitDir = new THREE.Vector3();
   /** squad: same number = same side (solo: everyone has their own) */
   team = 0;
   /** knocked down: crawling, can't fight, bleeding out until a teammate picks you up */
@@ -556,6 +577,136 @@ export class Actor implements BugOwner {
   }
 
   private koKiller = false;
+  private koQuiet = false;
+
+  /* ----------------------------------------------------------------- LAN client puppets */
+
+  /** client: the host says this rascal was knocked out — play the tumble (its FX arrive from the host) */
+  netKO(dirX: number, dirZ: number) {
+    this.koT = 0.62;
+    this.koQuiet = true;
+    this.koPos.copy(this.motor.pos);
+    this.koFloor = this.motor.pos.y;
+    const l = Math.hypot(dirX, dirZ) || 1;
+    this.koVel.set((dirX / l) * 4.5, 7.5, (dirZ / l) * 4.5);
+    this.koSpin.set((dirZ / l) * 12, (Math.random() - 0.5) * 10, (-dirX / l) * 12);
+  }
+
+  /** client: run the KO tumble only */
+  netTick(dt: number, ctx: GameCtx) {
+    if (this.koT > 0) this.updateKO(dt, ctx);
+  }
+
+  /**
+   * client: move your own rascal from local input straight away (the host still decides where
+   * you really are; `netApply` nudges you back toward it).
+   */
+  predict(dt: number, ctx: GameCtx) {
+    const it = this.intent;
+    const m = this.motor;
+    if (this.flight !== 'none' || !this.alive || this.bugout || this.koT > 0) return false;
+    if (this.downed) {
+      it.jump = it.sprint = false;
+      it.crouch = false;
+      m.crouching = true;
+    }
+    const moveLen = Math.hypot(it.moveX, it.moveZ);
+    const combatFacing = this.armed || it.fire || this.ads || it.throwAim || it.utilAim;
+    let targetYaw = this.bodyYaw;
+    if (combatFacing) targetYaw = it.aimYaw;
+    else if (moveLen > 0.1) targetYaw = yawFromDir(it.moveX, it.moveZ);
+    if (m.sliding && m.horizontalSpeed() > 0.5) targetYaw = yawFromDir(m.vel.x, m.vel.z);
+    this.bodyYaw = dampAngle(this.bodyYaw, targetYaw, combatFacing ? 22 : 12, dt);
+    this.turnRate = damp(this.turnRate, angleDelta(this.prevYaw, this.bodyYaw) / Math.max(dt, 1e-4), 10, dt);
+    this.prevYaw = this.bodyYaw;
+    if (it.fire && this.armed) this.sprintBlock = 0.35;
+    this.sprintBlock -= dt;
+    m.update(dt, {
+      wishX: it.moveX,
+      wishZ: it.moveZ,
+      sprint: it.sprint && !this.ads && this.sprintBlock <= 0 && !it.throwAim,
+      jump: it.jump,
+      crouch: it.crouch,
+      speedMul: this.downed ? 0.5 : this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
+    });
+    if (m.events.jumped) this.rig.onJump();
+    if (m.events.landed > 3) {
+      this.rig.onLand(m.events.landed);
+      this.onLanded?.(m.events.landed);
+    }
+    return true;
+  }
+
+  private netWeaponKey = '';
+  /** client: pose from the host's state (predicted = your own rascal while it's moving under your control) */
+  netApply(s: NetActorState, dt: number, time: number, predicted: boolean) {
+    const m = this.motor;
+    const f = s.f;
+    const wasAlive = this.alive;
+    this.alive = !!(f & 1);
+    this.downed = !!(f & 2);
+    const bug = !!(f & 4);
+    this.out = !!(f & 2048);
+    this.hp = s.hp;
+    this.downHp = s.dh;
+    this.reviveK = s.rk;
+    const flights = ['none', 'barge', 'dive', 'glide'] as const;
+    this.flight = flights[(f >> 13) & 3];
+    if (!predicted) {
+      m.pos.set(s.x, s.y, s.z);
+      m.vel.set(s.vx, s.vy, s.vz);
+      this.bodyYaw = s.yaw;
+      m.crouching = !!(f & 8);
+      m.sliding = !!(f & 16);
+      m.sprinting = !!(f & 32);
+      m.grounded = !!(f & 64);
+      this.turnRate = damp(this.turnRate, angleDelta(this.prevYaw, this.bodyYaw) / Math.max(dt, 1e-4), 10, dt);
+      this.prevYaw = this.bodyYaw;
+    } else {
+      // gently pull the prediction toward the truth; snap if we've really diverged
+      const err = Math.hypot(s.x - m.pos.x, s.y - m.pos.y, s.z - m.pos.z);
+      if (err > 3.5) m.teleport(new THREE.Vector3(s.x, s.y, s.z));
+      else if (err > 0.25) {
+        const k = Math.min(1, dt * (err > 1.2 ? 8 : 3));
+        m.pos.x += (s.x - m.pos.x) * k;
+        m.pos.y += (s.y - m.pos.y) * k * 0.5;
+        m.pos.z += (s.z - m.pos.z) * k;
+      }
+    }
+    this.intent.aimPitch = s.pitch;
+    this.ads = !!(f & 128);
+    this.healT = f & 512 ? Math.max(0, this.healT) : -1;
+    this.emote = (s.em || null) as EmoteKind | null;
+    this.stealthT = f & 1024 ? 1 : 0;
+    this.rig.setGhost(f & 1024 ? (this.isLocal ? 0.45 : 0.15) : 1);
+    // held weapon
+    if (s.w !== this.netWeaponKey) {
+      this.netWeaponKey = s.w;
+      if (!this.isLocal) {
+        const [id, r] = s.w.split(':');
+        this.weapons = [id && WEAPONS[id] ? new WeaponInstance(WEAPONS[id], Number(r) as RarityIndex) : null, null, null];
+        this.activeSlot = 0;
+        const w = this.weapons[0];
+        this.rig.setWeapon(w ? buildWeaponView(w.def, w.rarity) : null);
+      }
+    }
+    // glider
+    if (this.flight === 'glide') {
+      if (!this.glider) this.glider = buildGlider(this.rig.look.scarf, this.rig.look.accent);
+      if (!this.glider.parent) this.rig.root.add(this.glider);
+      this.glider.visible = true;
+      this.glider.scale.setScalar(1);
+    } else this.hideGlider();
+    // body visibility: gone while a bug, after the KO poof, or out
+    if (this.koT <= 0) this.rig.root.visible = !!(f & 4096) && !bug && this.alive;
+    if (wasAlive && !this.alive && !bug && this.koT <= 0) this.rig.root.visible = false;
+    // the Blinkbug
+    const states = ['docked', 'flying', 'landed', 'returning', 'piloted'] as const;
+    this.bugout = bug ? { t: s.bt ?? 0, hp: s.bh ?? 30, vel: new THREE.Vector3(), grace: 0 } : null;
+    this.bug.netApply(states[s.bs] ?? 'docked', s.bx, s.by, s.bz, dt, this.alive || bug);
+    if (bug) m.pos.set(s.bx, s.by - 0.9, s.bz);
+    if (this.alive && this.koT <= 0) this.syncRig(dt, time);
+  }
 
   private updateKO(dt: number, ctx: GameCtx) {
     this.koT -= dt;
@@ -577,7 +728,7 @@ export class Actor implements BugOwner {
     const sc = k < 0.12 ? 1 + (0.12 - k) * 3 : 1 + Math.sin(k * 30) * 0.06;
     r.scale.set(sc, sc * (k < 0.12 ? 0.9 : 1), sc);
     this.koStarT -= dt;
-    if (this.koStarT <= 0) {
+    if (this.koStarT <= 0 && !this.koQuiet) {
       this.koStarT = 0.09;
       ctx.fx.koStars(_v.copy(this.koPos).setY(this.koPos.y + 1.4));
     }
@@ -585,7 +736,9 @@ export class Actor implements BugOwner {
       this.koT = 0;
       this.motor.pos.x = this.koPos.x;
       this.motor.pos.z = this.koPos.z;
-      this.koPoof(ctx, this.koKiller);
+      if (this.koQuiet) this.rig.root.visible = false;
+      else this.koPoof(ctx, this.koKiller);
+      this.koQuiet = false;
       r.rotation.set(0, this.bodyYaw, 0);
       r.scale.setScalar(1);
     }
