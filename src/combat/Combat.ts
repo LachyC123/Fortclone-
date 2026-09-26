@@ -3,6 +3,7 @@ import { ColFlags, RayHit, raySphere, rayCapsule } from '../physics/Collision';
 import type { Actor } from '../entities/Actor';
 import type { GameCtx } from '../core/types';
 import { DEG, clamp, inverseLerp, lerp } from '../core/math';
+import { RARITY_SPREAD } from './Weapons';
 import { audio } from '../audio/Audio';
 
 const _dir = new THREE.Vector3();
@@ -58,13 +59,36 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
   const moving = shooter.motor.horizontalSpeed() > 1 || !shooter.motor.grounded;
   const base = shooter.ads ? def.spreadAds : def.spreadHip;
   const spreadDeg = base + (moving ? def.spreadMove * (shooter.ads ? 0.4 : 1) : 0) + w.bloom + (shooter.motor.crouching ? -0.3 : 0);
-  const spread = Math.max(0, spreadDeg) * DEG;
+  const spread = Math.max(0, spreadDeg) * DEG * RARITY_SPREAD[w.rarity];
   shooter.muzzleWorld(_muzzle);
 
   const aimO = shooter.intent.aimOrigin;
   const aimD = shooter.intent.aimDir;
   _right.crossVectors(aimD, _up.set(0, 1, 0)).normalize();
   _up.crossVectors(_right, aimD).normalize();
+
+  // ---- projectile weapons (Sparkbow): aim through the crosshair, then launch a real bolt
+  if (def.projectile) {
+    _dir.copy(aimD);
+    if (spread > 0) {
+      const r = Math.sqrt(Math.random()) * Math.tan(spread);
+      const a = Math.random() * Math.PI * 2;
+      _dir.addScaledVector(_right, Math.cos(a) * r).addScaledVector(_up, Math.sin(a) * r).normalize();
+    }
+    const wh = ctx.cw.raycast(aimO, _dir, def.range, ColFlags.BlocksBullets, _hit);
+    const target = _to.copy(aimO).addScaledVector(_dir, wh ? wh.t : def.range);
+    const bd = _b.subVectors(target, _muzzle).normalize();
+    // compensate a touch for gravity so the crosshair is honest at mid range
+    bd.y += Math.min(0.08, (def.projectile.gravity * (wh ? wh.t : 60)) / (2 * def.projectile.speed * def.projectile.speed));
+    bd.normalize();
+    ctx.throwables.fireBolt(shooter, def, w.damage, _muzzle.clone(), bd);
+    w.bloom = clamp(w.bloom + def.bloomPerShot, 0, def.bloomMax);
+    shooter.onFired(def.recoilPitch, def.recoilYaw * (Math.random() - 0.5) * 2, def.camKick);
+    ctx.fx.muzzle(_muzzle, aimD, def.tracer, false);
+    audio.gunshot(shooter.isLocal ? undefined : _muzzle, def.sound, shooter.isLocal);
+    ctx.emitSound({ pos: _muzzle.clone(), loudness: 35, source: shooter, kind: 'gunshot' });
+    return;
+  }
 
   let anyHit = false, anyHead = false, anyKill = false, totalDmg = 0;
   let lastVictim: Actor | null = null;
@@ -78,8 +102,10 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
     // 1) what's under the crosshair?
     const wh = ctx.cw.raycast(aimO, _dir, def.range, ColFlags.BlocksBullets, _hit);
     const worldT = wh ? wh.t : def.range;
-    const ah = raycastActors(ctx, aimO, _dir, worldT, shooter);
-    const endT = ah ? ah.t : worldT;
+    let ah = raycastActors(ctx, aimO, _dir, worldT, shooter);
+    const chT = ctx.throwables.shootChickens(aimO, _dir, ah ? ah.t : worldT, ctx);
+    if (chT >= 0) ah = null;
+    const endT = ah ? ah.t : chT >= 0 ? chT : worldT;
     const target = _to.copy(aimO).addScaledVector(_dir, endT);
 
     // 2) re-trace from the muzzle toward that point
@@ -101,6 +127,10 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
       let dmg = w.damage * fall * (ah.headshot ? def.headMult : 1);
       dmg = Math.round(dmg);
       const killed = ah.actor.takeDamage(dmg, shooter, ah.headshot, md, ctx, def.short);
+      if (def.knockback) {
+        const kb = (def.knockback / def.pellets) * fall;
+        ah.actor.motor.impulse(_a.copy(md).setY(0).normalize().multiplyScalar(kb).setY(kb * 0.35));
+      }
       ctx.fx.hitSplat(target, ah.headshot);
       anyHit = true;
       anyHead = anyHead || ah.headshot;
@@ -130,7 +160,9 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
   // bloom & recoil
   w.bloom = clamp(w.bloom + def.bloomPerShot, 0, def.bloomMax);
   shooter.onFired(def.recoilPitch * (shooter.ads ? 0.6 : 1), def.recoilYaw * (Math.random() - 0.5) * 2, def.camKick);
-  ctx.fx.muzzle(_muzzle, aimD, 0xffd27a, def.pellets > 1);
+  ctx.fx.muzzle(_muzzle, aimD, def.tracer, def.pellets > 1 || !!def.knockback);
+  // big guns shove you back a little too
+  if (def.knockback && def.knockback > 5 && !shooter.motor.grounded) shooter.motor.impulse(_a.copy(aimD).multiplyScalar(-def.knockback * 0.4));
   audio.gunshot(shooter.isLocal ? undefined : _muzzle, def.sound, shooter.isLocal);
   ctx.emitSound({ pos: _muzzle.clone(), loudness: 70, source: shooter, kind: 'gunshot' });
 }

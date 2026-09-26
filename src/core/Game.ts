@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Renderer, Quality, QUALITY_PRESETS } from '../render/Renderer';
 import { FX } from '../fx/FX';
 import { World } from '../world/World';
-import { LootSystem } from '../loot/Loot';
+import { LootSystem, rollWeapon, ammoFor, rollFloor } from '../loot/Loot';
 import { NavGrid } from '../world/NavGrid';
 import { Actor } from '../entities/Actor';
 import { LOOKS } from '../entities/RascalRig';
@@ -18,7 +18,9 @@ import { Menus, Settings, loadSettings, saveSettings } from '../ui/Menus';
 import { BUG } from '../entities/Blinkbug';
 import { PAL, RarityIndex } from '../render/Palette';
 import { pick, rand } from './math';
-import { CollisionWorld } from '../physics/Collision';
+import { WEAPONS, AMMO_INFO, AmmoType } from '../combat/Weapons';
+import { CollisionWorld, ColFlags } from '../physics/Collision';
+import { Throwables } from '../combat/Throwables';
 import { geoStats } from '../render/GeoKit';
 
 const BOT_NAMES = ['MuffinKing', 'CrankyPete', 'PickleWizard', 'Socks', 'BigDave', 'Nibbles', 'Toast McGee', 'Captain Crumb', 'Wobbles', 'Dame Pudding', 'Sir Bonk', 'Lil Gravy', 'Doodlebug', 'Mrs. Kettle', 'Parsnip', 'Grumbo'];
@@ -42,6 +44,7 @@ export class Game implements GameCtx {
   time = 0;
   sounds: SoundEvent[] = [];
   localActor: Actor | null = null;
+  throwables: Throwables;
   input: Input;
   camRig: CameraRig;
   player!: Actor;
@@ -57,6 +60,7 @@ export class Game implements GameCtx {
   private fps = 60;
   private respawnT = -1;
   private lootTimer = 20;
+  private crateCycle = 0;
   private botRespawn = new Map<Actor, number>();
   private autoQualityT = 6;
   private lowFpsTime = 0;
@@ -77,8 +81,12 @@ export class Game implements GameCtx {
     this.fx = new FX(this.scene, this.cw, QUALITY_PRESETS[this.settings.quality].particles);
     (this.world as unknown as { fx: FX }).fx = this.fx;
     this.loot = new LootSystem(this.scene, this.cw);
+    this.throwables = new Throwables(this.scene);
     this.nav = new NavGrid(this.cw, 48);
+    // doors swing open for anyone who approaches, so bake the nav mesh with them open
+    for (const d of this.world.doors) d.collider.enabled = false;
     this.nav.bake();
+    for (const d of this.world.doors) d.collider.enabled = true;
 
     this.input = new Input(canvas);
     this.camRig = new CameraRig(this.camera, this.cw);
@@ -89,14 +97,27 @@ export class Game implements GameCtx {
     this.applySettings();
 
     this.createPlayer();
-    this.createBot();
-    for (const s of this.world.lootSpots) this.loot.spawn(s.kind, s.kind === 'weapon' ? 'tincan' : 'medium', s.rarity, s.kind === 'ammo' ? 30 : 1, s.pos);
+    // playground: a few rascals so fights break out without you
+    this.createBot('aggressive');
+    this.createBot('cautious');
+    this.createBot('chaotic');
+    for (const s of this.world.lootSpots) this.spawnLootSpot(s);
+    for (const c of this.world.crateSpots) this.loot.placeCrate(c.pos, c.yaw);
 
     this.hud.onPlayerEliminated = (by) => {
       this.respawnT = 3.5;
       this.menus.showEliminated(by);
     };
     this.hud.onSlotTap = (i) => (this.input.s.slotPressed = i);
+    this.hud.onItemTap = (kind, down) => {
+      if (kind === 'heal') {
+        if (down) this.input.s.healPressed = true;
+      } else if (down) this.input.s.utilHeld = true;
+      else if (this.input.s.utilHeld) {
+        this.input.s.utilHeld = false;
+        this.input.s.utilReleased = true;
+      }
+    };
     this.touch.onPause = () => this.pause();
     window.addEventListener('resize', () => this.fx.onResize(window.innerHeight * this.r.renderer.getPixelRatio(), this.camera.fov));
     this.fx.onResize(window.innerHeight * this.r.renderer.getPixelRatio(), this.camera.fov);
@@ -155,8 +176,15 @@ export class Game implements GameCtx {
     const sp = pick(this.world.botSpawns);
     a.spawn(sp.clone().add(new THREE.Vector3(rand(-2, 2), 0, rand(-2, 2))), rand(-3, 3));
     a.weapons = [null, null, null];
-    a.ammo.medium = 45;
-    a.giveWeapon('tincan', (Math.random() < 0.3 ? 1 : 0) as RarityIndex, 0, true);
+    for (const t of Object.keys(a.ammo) as AmmoType[]) a.ammo[t] = 0;
+    a.util = null;
+    a.healItem = null;
+    // playground bots arrive with a random kit so every fight feels different
+    const w = rollWeapon();
+    a.giveWeapon(w.defId, w.rarity, 0, true);
+    a.addAmmo(WEAPONS[w.defId].ammo, AMMO_INFO[WEAPONS[w.defId].ammo].pickup * 3);
+    if (Math.random() < 0.6) a.addItem('heal', Math.random() < 0.7 ? 'fizzle' : 'jamjar', 2);
+    if (Math.random() < 0.6) a.addItem('util', pick(['fizzbomb', 'stickypop', 'chicken', 'gust', 'bouncejam']), 2);
     if (a.controller instanceof BotController) {
       a.controller.state = 'wander';
       a.controller.target = null;
@@ -166,10 +194,22 @@ export class Game implements GameCtx {
     this.fx.sparkBurst(a.motor.pos, PAL.mustard, 10);
   }
 
+  private spawnLootSpot(s: { pos: THREE.Vector3; kind: 'weapon' | 'ammo' }) {
+    const rolls = s.kind === 'weapon' ? (() => {
+      const w = rollWeapon();
+      return [w, ammoFor(w.defId)];
+    })() : rollFloor();
+    this.loot.spawnRolls(rolls, s.pos);
+  }
+
   /* ------------------------------------------------------------------ GameCtx */
 
   emitSound(e: Omit<SoundEvent, 'time'>) {
     this.sounds.push({ ...e, time: this.time });
+  }
+
+  sightClear(a: THREE.Vector3, b: THREE.Vector3) {
+    return this.cw.lineClear(a, b, ColFlags.BlocksSight) && !this.throwables.smokeBlocks(a, b);
   }
 
   shake(amount: number) {
@@ -241,7 +281,7 @@ export class Game implements GameCtx {
     this.menus.hideAll();
     this.respawnT = -1;
     // make sure there's a gun to grab near spawn
-    if (!this.loot.pickups.some((pk) => pk.kind === 'weapon' && pk.pos.distanceTo(sp.pos) < 10)) this.loot.spawn('weapon', 'tincan', 0, 1, new THREE.Vector3(0, 0.05, 22.5));
+    if (!this.loot.pickups.some((pk) => pk.kind === 'weapon' && pk.pos.distanceTo(sp.pos) < 10)) this.spawnLootSpot(this.world.lootSpots[0]);
   }
 
   /* ------------------------------------------------------------------ frame */
@@ -306,6 +346,7 @@ export class Game implements GameCtx {
     // --- simulation
     for (const a of this.actors) a.update(dt, this);
     this.loot.update(dt, this);
+    this.throwables.update(dt, this);
     this.world.update(dt, this.actors, this.camera.position);
 
     // camera & listener
@@ -330,8 +371,8 @@ export class Game implements GameCtx {
     // HUD
     const w = p.weapon;
     const spread = w ? (p.ads ? w.def.spreadAds : w.def.spreadHip) + w.bloom + (p.motor.horizontalSpeed() > 1 ? w.def.spreadMove : 0) : 0;
-    this.hud.update(dt, p, this.actors, this.pc.contextPickup, spread, this.fps, this.input.s.touchActive, this.world);
-    this.touch.updateVisuals(p.bug, BUG.window, !!this.pc.contextPickup);
+    this.hud.update(dt, p, this.actors, this.pc.contextPickup, spread, this.fps, this.input.s.touchActive, this.world, this.pc.contextCrate);
+    this.touch.updateVisuals(p.bug, BUG.window, !!(this.pc.contextPickup || this.pc.contextCrate), p);
 
     // playground flow: respawns & loot refresh
     if (this.respawnT > 0) {
@@ -350,8 +391,11 @@ export class Game implements GameCtx {
     if (this.lootTimer <= 0) {
       this.lootTimer = 25;
       for (const s of this.world.lootSpots) {
-        if (!this.loot.pickups.some((pk) => pk.pos.distanceTo(s.pos) < 1.5)) this.loot.spawn(s.kind, s.kind === 'weapon' ? 'tincan' : 'medium', s.rarity, s.kind === 'ammo' ? 30 : 1, s.pos);
+        if (!this.loot.pickups.some((pk) => pk.pos.distanceTo(s.pos) < 1.5)) this.spawnLootSpot(s);
       }
+      // playground only: crates refill every other cycle
+      this.crateCycle = (this.crateCycle + 1) % 2;
+      if (this.crateCycle === 0) this.loot.resetCrates();
     }
     // forget old sounds
     if (this.sounds.length) this.sounds = this.sounds.filter((s) => this.time - s.time < 1);

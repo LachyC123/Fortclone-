@@ -258,7 +258,7 @@ export class Audio {
 
   /* ----------------------------------------------------------- weapons */
 
-  gunshot(pos: THREE.Vector3 | undefined, profile: 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun', isLocal: boolean) {
+  gunshot(pos: THREE.Vector3 | undefined, profile: 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun' | 'needle' | 'bow' | 'pepper', isLocal: boolean) {
     const out = this.out(pos, isLocal ? 0.75 : 0.95, 120);
     if (!out) return;
     const t = this.ctx!.currentTime;
@@ -277,9 +277,35 @@ export class Audio {
         this.tone(out, 'sine', 900 * p, 300, t, 0.05, 0.25);
         break;
       case 'heavy':
+        // THUMP: deep kick, boomy tail, metallic ring
+        this.tone(out, 'sine', 70 * p, 26, t, 0.5, 1);
+        this.tone(out, 'square', 140 * p, 40, t, 0.12, 0.4);
+        this.noise(out, t, 0.45, 1, 'lowpass', 2600, 150, 0.7);
+        this.tone(out, 'triangle', 900 * p, 600, t + 0.02, 0.3, 0.12);
+        break;
       case 'shotgun':
-        this.tone(out, 'sine', 80 * p, 30, t, 0.35, 1);
-        this.noise(out, t, 0.3, 1, 'lowpass', 3500, 200, 0.7);
+        this.tone(out, 'sine', 85 * p, 30, t, 0.35, 1);
+        this.noise(out, t, 0.32, 1, 'lowpass', 4500, 250, 0.7);
+        this.noise(out, t, 0.06, 0.6, 'highpass', 3000, 1500, 0.8);
+        // broom bristle swish
+        this.noise(out, t + 0.05, 0.18, 0.25, 'bandpass', 5000, 2500, 2, 0.03);
+        break;
+      case 'needle':
+        this.tone(out, 'sawtooth', 2400 * p, 900, t, 0.08, 0.25);
+        this.tone(out, 'sine', 120 * p, 50, t, 0.2, 0.7);
+        this.noise(out, t, 0.14, 0.6, 'bandpass', 6000, 2000, 1.5);
+        this.tone(out, 'sine', 3200 * p, 3000, t + 0.03, 0.25, 0.1);
+        break;
+      case 'bow':
+        this.tone(out, 'triangle', 220 * p, 90, t, 0.12, 0.5); // string twang
+        this.tone(out, 'triangle', 330 * p, 140, t, 0.1, 0.3);
+        this.noise(out, t, 0.2, 0.3, 'bandpass', 1500, 4000, 2, 0.02);
+        this.tone(out, 'sine', 1800 * p, 3600, t + 0.02, 0.18, 0.15); // spark hum
+        break;
+      case 'pepper':
+        this.tone(out, 'square', 420 * p, 150, t, 0.05, 0.3);
+        this.noise(out, t, 0.07, 0.6, 'lowpass', 5000, 900, 0.9);
+        this.tone(out, 'sine', 1200 * p, 500, t, 0.04, 0.2);
         break;
       case 'smg':
         this.tone(out, 'square', 300 * p, 120, t, 0.05, 0.25);
@@ -501,6 +527,149 @@ export class Audio {
     const t = this.ctx!.currentTime;
     this.tone(out, 'sine', 900, 200, t, 0.08, 0.5);
     this.noise(out, t, 0.05, 0.3, 'highpass', 3000, 2000, 1);
+  }
+
+  /* ----------------------------------------------------------- utilities */
+
+  throwWhoosh(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.4, 30);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.2, 0.35, 'bandpass', 600, 2400, 1.5, 0.03);
+  }
+
+  stick(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.5, 30);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.12, 0.5, 'lowpass', 900, 300, 2, 0.005);
+    this.tone(out, 'sine', 300, 120, t, 0.1, 0.4);
+  }
+
+  beep(pos: THREE.Vector3, urgency: number) {
+    const out = this.out(pos, 0.45, 35);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'square', 1500 + urgency * 900, 1500 + urgency * 900, t, 0.05, 0.18);
+  }
+
+  fizz(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.8, 50);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sine', 600, 120, t, 0.12, 0.5);
+    this.noise(out, t, 1.6, 0.5, 'highpass', 4000, 1500, 0.8, 0.05);
+    for (let i = 0; i < 8; i++) this.tone(out, 'sine', rand(1200, 3000), rand(2000, 4000), t + 0.1 + i * 0.08, 0.05, 0.12);
+  }
+
+  splat(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.6, 35);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.2, 0.6, 'lowpass', 1200, 200, 2);
+    this.tone(out, 'sine', 180, 400, t, 0.2, 0.4);
+  }
+
+  boing(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.7, 40);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    const o = this.ctx!.createOscillator();
+    const g = this.ctx!.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.25);
+    const lfo = this.ctx!.createOscillator();
+    lfo.frequency.value = 22;
+    const lg = this.ctx!.createGain();
+    lg.gain.value = 40;
+    lfo.connect(lg).connect(o.frequency);
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    o.connect(g).connect(out);
+    o.start(t);
+    lfo.start(t);
+    o.stop(t + 0.5);
+    lfo.stop(t + 0.5);
+  }
+
+  cluck(pos: THREE.Vector3, pitch = 1) {
+    const out = this.out(pos, 0.45, 45);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    const n = Math.random() < 0.3 ? 3 : 1;
+    for (let i = 0; i < n; i++) {
+      this.tone(out, 'sawtooth', 700 * pitch, 450 * pitch, t + i * 0.09, 0.07, 0.18);
+      this.noise(out, t + i * 0.09, 0.05, 0.2, 'bandpass', 1500, 1000, 3);
+    }
+  }
+
+  gust(pos: THREE.Vector3) {
+    const out = this.out(pos, 1, 60);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.7, 0.9, 'bandpass', 300, 2500, 1, 0.02);
+    this.tone(out, 'sine', 90, 40, t, 0.3, 0.6);
+    this.tone(out, 'sine', 900, 400, t, 0.1, 0.3); // cork pop
+  }
+
+  explosion(pos: THREE.Vector3) {
+    const out = this.out(pos, 1.2, 140);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sine', 90, 25, t, 0.8, 1);
+    this.noise(out, t, 0.9, 1, 'lowpass', 3000, 100, 0.6, 0.004);
+    this.noise(out, t, 0.15, 0.6, 'highpass', 2500, 1200, 0.8);
+    for (let i = 0; i < 5; i++) this.tone(out, 'triangle', rand(700, 2000), rand(1500, 3000), t + 0.08 + i * 0.05, 0.08, 0.15); // confetti pops
+  }
+
+  /* ----------------------------------------------------------- healing */
+
+  healUse(kind: 'eat' | 'drink', done: boolean) {
+    const out = this.out(undefined, 0.4);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    if (done) {
+      [784, 988, 1175, 1568].forEach((f, i) => this.tone(out, 'sine', f, f, t + i * 0.06, 0.2, 0.25));
+      return;
+    }
+    if (kind === 'drink') {
+      this.noise(out, t, 0.12, 0.3, 'bandpass', 700, 400, 4, 0.02);
+      this.tone(out, 'sine', 300, 500, t, 0.08, 0.2);
+    } else {
+      this.noise(out, t, 0.08, 0.45, 'bandpass', 2500, 1200, 1.5); // crunch
+      this.noise(out, t + 0.09, 0.06, 0.3, 'bandpass', 2000, 900, 1.5);
+    }
+  }
+
+  /* ----------------------------------------------------------- crates / fuse */
+
+  crateShake(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.6, 35);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    for (let i = 0; i < 4; i++) this.tone(out, 'square', rand(200, 280), 150, t + i * 0.07, 0.05, 0.2);
+    this.tone(out, 'sine', 400, 900, t, 0.35, 0.2, 0.2);
+  }
+
+  crateOpen(pos: THREE.Vector3) {
+    const out = this.out(pos, 1, 60);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sine', 120, 60, t, 0.3, 0.8);
+    this.noise(out, t, 0.25, 0.7, 'lowpass', 3000, 400, 0.8);
+    [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(out, 'triangle', f, f, t + 0.1 + i * 0.06, 0.3, 0.25));
+    for (let i = 0; i < 6; i++) this.tone(out, 'sine', rand(2500, 5000), rand(3000, 6000), t + 0.3 + i * 0.04, 0.08, 0.1);
+  }
+
+  fuse() {
+    const out = this.out(undefined, 0.8);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sine', 200, 1600, t, 0.35, 0.4, 0.2);
+    this.noise(out, t, 0.35, 0.4, 'bandpass', 500, 5000, 2, 0.3);
+    [1047, 1319, 1568, 2093].forEach((f, i) => this.tone(out, 'triangle', f, f, t + 0.35 + i * 0.07, 0.35, 0.3));
+    this.tone(out, 'sine', 80, 40, t + 0.35, 0.4, 0.8);
   }
 
   thud(pos: THREE.Vector3, vol = 0.4) {

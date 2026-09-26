@@ -3,8 +3,9 @@ import { HudEvents } from '../core/types';
 import { ICONS } from './icons';
 import { RARITY } from '../render/Palette';
 import type { Actor } from '../entities/Actor';
-import type { Pickup } from '../loot/Loot';
-import { WEAPONS } from '../combat/Weapons';
+import type { Pickup, Crate } from '../loot/Loot';
+import { WEAPONS, weaponStats } from '../combat/Weapons';
+import { HEALS, UTILS, HealId, UtilId, ITEM_COLOR } from '../combat/Items';
 import { BUG } from '../entities/Blinkbug';
 import type { World } from '../world/World';
 import { ISLAND_R } from '../world/Terrain';
@@ -45,6 +46,12 @@ export class HUD implements HudEvents {
   private ammoEl = h('div', 'ammo big');
   private reloadBar = h('div', 'reloadbar', '<i></i>');
   private promptEl = h('div', 'prompt panel');
+  private lootCard = h('div', 'lootcard panel');
+  private lootCardKey = '';
+  private utilSlot!: HTMLDivElement;
+  private healSlot!: HTMLDivElement;
+  private itemSig = '';
+  onItemTap: ((kind: 'util' | 'heal', down: boolean) => void) | null = null;
   private toastsEl = h('div', 'toasts big');
   private killfeedEl = h('div', 'killfeed');
   private aliveEl = h('div', 'pill panel alive big');
@@ -83,8 +90,20 @@ export class HUD implements HudEvents {
         this.onSlotTap?.(i);
       });
     }
-    this.slotsEl.appendChild(h('div', 'slot small', ICONS.utility));
-    this.slotsEl.appendChild(h('div', 'slot small', ICONS.heal));
+    this.utilSlot = h('div', 'slot item empty', `<span class="key big">G</span><span class="ic">${ICONS.utility}</span><span class="cnt big"></span>`) as HTMLDivElement;
+    this.healSlot = h('div', 'slot item empty', `<span class="key big">H</span><span class="ic">${ICONS.heal}</span><span class="cnt big"></span>`) as HTMLDivElement;
+    this.slotEls.push(this.utilSlot, this.healSlot);
+    this.slotsEl.append(this.utilSlot, this.healSlot);
+    this.utilSlot.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.onItemTap?.('util', true);
+    });
+    this.utilSlot.addEventListener('pointerup', () => this.onItemTap?.('util', false));
+    this.healSlot.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.onItemTap?.('heal', true);
+    });
+    this.root.appendChild(this.lootCard);
     const top = h('div', 'topbar');
     this.aliveEl.innerHTML = `${ICONS.people}<span>2</span>`;
     this.elimsEl.innerHTML = `${ICONS.skull}<span>0</span>`;
@@ -222,7 +241,7 @@ export class HUD implements HudEvents {
 
   /* --------------------------------------------------------------------- per frame */
 
-  update(dt: number, p: Actor, others: Actor[], pickup: Pickup | null, spreadDeg: number, fps: number, touch: boolean, world: World) {
+  update(dt: number, p: Actor, others: Actor[], pickup: Pickup | null, spreadDeg: number, fps: number, touch: boolean, world: World, crate: Crate | null = null) {
     // health
     const hp = Math.max(0, p.hp);
     const k = hp / p.maxHp;
@@ -245,8 +264,29 @@ export class HUD implements HudEvents {
         s.classList.toggle('empty', !w);
         s.classList.toggle('active', i === p.activeSlot && !!w);
         (s.querySelector('.rar') as HTMLDivElement).style.background = w ? RARITY[w.rarity].css : 'transparent';
+        const icon = w ? (ICONS as Record<string, string>)[w.def.id] ?? ICONS.tincan : ICONS.tincan;
+        const old = s.querySelector('svg');
+        if (old) old.outerHTML = icon;
+        s.style.setProperty('--rc', w ? RARITY[w.rarity].css : 'transparent');
+        s.classList.toggle('rarity', !!w);
       });
     }
+    // item slots (utility / healing) with stack counts
+    const isig = `${p.util?.id ?? ''}${p.util?.count ?? 0}|${p.healItem?.id ?? ''}${p.healItem?.count ?? 0}`;
+    if (isig !== this.itemSig) {
+      this.itemSig = isig;
+      for (const [el, st, fallback] of [
+        [this.utilSlot, p.util, ICONS.utility],
+        [this.healSlot, p.healItem, ICONS.heal],
+      ] as [HTMLDivElement, { id: string; count: number } | null, string][]) {
+        el.classList.toggle('empty', !st);
+        (el.querySelector('.ic') as HTMLElement).innerHTML = st ? (ICONS as Record<string, string>)[st.id] : fallback;
+        (el.querySelector('.cnt') as HTMLElement).textContent = st && st.count > 1 ? `x${st.count}` : '';
+        el.style.setProperty('--rc', st ? '#' + ITEM_COLOR[st.id as HealId].toString(16).padStart(6, '0') : 'transparent');
+      }
+    }
+    this.utilSlot.classList.toggle('aiming', p.utilAiming);
+    this.healSlot.classList.toggle('using', p.healT >= 0);
     const w = p.weapon;
     if (w) {
       const reserve = p.ammo[w.def.ammo];
@@ -254,9 +294,15 @@ export class HUD implements HudEvents {
       this.ammoEl.classList.toggle('empty', w.mag === 0);
       this.ammoEl.style.display = 'block';
     } else this.ammoEl.style.display = 'none';
-    if (w && w.reloading) {
+    const bar = this.reloadBar.firstElementChild as HTMLElement;
+    if (p.healT >= 0 && p.healItem) {
       this.reloadBar.style.opacity = '1';
-      (this.reloadBar.firstElementChild as HTMLElement).style.transform = `scaleX(${clamp(w.reloadT / w.reloadTime, 0, 1)})`;
+      this.reloadBar.classList.add('heal');
+      bar.style.transform = `scaleX(${clamp(p.healT / HEALS[p.healItem.id].useTime, 0, 1)})`;
+    } else if (w && w.reloading) {
+      this.reloadBar.style.opacity = '1';
+      this.reloadBar.classList.remove('heal');
+      bar.style.transform = `scaleX(${clamp(w.reloadT / w.reloadTime, 0, 1)})`;
     } else this.reloadBar.style.opacity = '0';
 
     // crosshair spread + enemy tint
@@ -269,14 +315,8 @@ export class HUD implements HudEvents {
     this.crosshair.classList.toggle('unarmed', !w);
     this.crosshair.style.opacity = p.throwAiming ? '0.3' : '1';
 
-    // context prompt
-    if (pickup) {
-      const def = WEAPONS[pickup.defId];
-      const cur = p.weapon;
-      const better = !cur || pickup.rarity > cur.rarity;
-      this.promptEl.innerHTML = `<span class="k">F</span><span>PICK UP</span><span class="rar big" style="color:${RARITY[pickup.rarity].css};-webkit-text-stroke:1px #2b2238">${RARITY[pickup.rarity].name.toUpperCase()} ${def.name.toUpperCase()}</span>${better && cur ? '<span class="up">▲</span>' : ''}`;
-      this.promptEl.classList.add('show');
-    } else this.promptEl.classList.remove('show');
+    // context prompt + loot comparison card
+    this.updatePrompt(p, pickup, crate);
 
     // bug widget (desktop)
     const bug = p.bug;
@@ -373,6 +413,80 @@ export class HUD implements HudEvents {
     this.fpsEl.style.display = this.showFps ? 'block' : 'none';
     if (this.showFps) this.fpsEl.textContent = `${fps.toFixed(0)} fps`;
     this.bugWidget.style.display = touch ? 'none' : 'flex';
+  }
+
+  private updatePrompt(p: Actor, pickup: Pickup | null, crate: Crate | null) {
+    const rs = (r: number) => `color:${RARITY[r].css};-webkit-text-stroke:1px #2b2238`;
+    let html = '';
+    let cardKey = '';
+    if (pickup && pickup.kind === 'weapon') {
+      const def = WEAPONS[pickup.defId];
+      const act = p.previewOffer(pickup.defId, pickup.rarity);
+      const verb = act === 'fuse' ? 'FUSE' : act === 'swap' ? 'SWAP' : 'PICK UP';
+      html = `<span class="k">F</span><span>${verb}</span><span class="rar big" style="${rs(pickup.rarity)}">${RARITY[pickup.rarity].name.toUpperCase()} ${def.name.toUpperCase()}</span>`;
+      cardKey = `${pickup.id}|${p.weapons.map((w) => (w ? w.def.id + w.rarity : '-')).join()}|${p.activeSlot}`;
+      if (cardKey !== this.lootCardKey) this.buildLootCard(p, pickup, act);
+    } else if (pickup) {
+      const isHeal = pickup.kind === 'heal';
+      const name = isHeal ? HEALS[pickup.defId as HealId].name : UTILS[pickup.defId as UtilId].name;
+      html = `<span class="k">F</span><span>SWAP FOR</span><span class="rar big" style="${rs(pickup.rarity)}">${name.toUpperCase()}${pickup.amount > 1 ? ' x' + pickup.amount : ''}</span>`;
+    } else if (crate) {
+      html = `<span class="k">F</span><span>OPEN</span><span class="rar big" style="color:#f2c14e;-webkit-text-stroke:1px #2b2238">RASCAL CRATE</span>`;
+    }
+    if (html) {
+      if (this.promptEl.dataset.h !== html) {
+        this.promptEl.innerHTML = html;
+        this.promptEl.dataset.h = html;
+      }
+      this.promptEl.classList.add('show');
+    } else this.promptEl.classList.remove('show');
+    if (!cardKey) {
+      this.lootCardKey = '';
+      this.lootCard.classList.remove('show');
+    }
+  }
+
+  /** The "what am I looking at" card: stats with green/red arrows vs the gun in your hands. */
+  private buildLootCard(p: Actor, pickup: Pickup, act: 'fuse' | 'add' | 'swap') {
+    this.lootCardKey = `${pickup.id}|${p.weapons.map((w) => (w ? w.def.id + w.rarity : '-')).join()}|${p.activeSlot}`;
+    const def = WEAPONS[pickup.defId];
+    const cand = weaponStats(def, pickup.rarity);
+    // compare against the same gun if carried, else the one in hand
+    const same = p.weapons.find((w) => w && w.def.id === def.id) ?? null;
+    const cur = same ?? p.weapon;
+    const base = cur ? weaponStats(cur.def, cur.rarity) : null;
+    const rows: [string, keyof typeof cand][] = [
+      ['DAMAGE', 'damage'],
+      ['FIRE POWER', 'rate'],
+      ['RANGE', 'range'],
+      ['MAGAZINE', 'mag'],
+      ['HANDLING', 'handling'],
+    ];
+    const rc = RARITY[pickup.rarity].css;
+    let badge = '';
+    if (act === 'fuse') {
+      const next = RARITY[Math.min(4, pickup.rarity + 1)];
+      badge = `<div class="fuse" style="--nc:${next.css}"><span>FUSE</span>→ <b class="big" style="color:${next.css}">${next.name.toUpperCase()}</b><em>2 of the same!</em></div>`;
+    } else if (act === 'swap' && p.weapon) badge = `<div class="swapnote">Swaps your ${RARITY[p.weapon.rarity].name.toLowerCase()} ${p.weapon.def.name}</div>`;
+    const statRows = rows
+      .map(([label, key]) => {
+        const v = cand[key];
+        let arrow = '';
+        if (base) {
+          const d = v - base[key];
+          if (d > 0.03) arrow = '<i class="up">▲</i>';
+          else if (d < -0.03) arrow = '<i class="dn">▼</i>';
+          else arrow = '<i class="eq">=</i>';
+        }
+        const ghost = base ? `<b class="ghost" style="width:${Math.round(base[key] * 100)}%"></b>` : '';
+        return `<div class="st"><span>${label}</span><div class="sb">${ghost}<b class="fill" style="width:${Math.round(v * 100)}%;background:${rc}"></b></div>${arrow}</div>`;
+      })
+      .join('');
+    this.lootCard.style.setProperty('--rc', rc);
+    this.lootCard.innerHTML = `<div class="hd"><span class="ic">${(ICONS as Record<string, string>)[def.id]}</span><div><div class="rn big" style="color:${rc}">${RARITY[pickup.rarity].name.toUpperCase()}</div><div class="nm big">${def.name}</div></div></div><div class="bl">${def.blurb}${cur ? ` <em>vs your ${cur.def.name}</em>` : ''}</div>${statRows}${badge}`;
+    this.lootCard.classList.remove('show');
+    void this.lootCard.offsetWidth;
+    this.lootCard.classList.add('show');
   }
 
   private drawMinimap(p: Actor, others: Actor[]) {

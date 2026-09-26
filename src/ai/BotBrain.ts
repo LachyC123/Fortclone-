@@ -4,7 +4,10 @@ import type { GameCtx } from '../core/types';
 import { angleDelta, clamp, DEG, dirFromYawPitch, rand, wrapAngle, yawFromDir } from '../core/math';
 import { ColFlags } from '../physics/Collision';
 import { BUG, simulateBug, Blinkbug } from '../entities/Blinkbug';
-import type { Pickup } from '../loot/Loot';
+import type { Pickup, Crate } from '../loot/Loot';
+import { UTILS } from '../combat/Items';
+import { WEAPONS } from '../combat/Weapons';
+import { simulateThrow, throwVelocity, THROW } from '../combat/Throwables';
 import type { AmmoType } from '../combat/Weapons';
 
 export type Archetype = 'aggressive' | 'cautious' | 'goblin' | 'rooftop' | 'chaotic' | 'sniper';
@@ -77,6 +80,9 @@ export class BotController implements Controller {
   private crouchWant = false;
   private blinkPlanT = -1;
   private lootTarget: Pickup | null = null;
+  private crateTarget: Crate | null = null;
+  private utilCd = 2;
+  private lingerT = 0;
   private goalTimeout = 0;
   private jumpCd = 0;
   private headshotBias: number;
@@ -109,6 +115,12 @@ export class BotController implements Controller {
     it.throwAim = false;
     it.interact = false;
     it.slot = -1;
+    it.utilRelease = false;
+    it.utilAim = false;
+    it.heal = false;
+    it.drop = false;
+    this.utilCd -= dt;
+    this.lingerT -= dt;
     const wasBlink = it.blink;
     it.blink = false;
     if (wasBlink && me.bug.canBlink) it.blink = true;
@@ -148,7 +160,7 @@ export class BotController implements Controller {
       const yawTo = yawFromDir(tp.x - eye.x, tp.z - eye.z);
       const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5;
       let aw = this.awareness.get(o.id) ?? 0;
-      if (inCone && ctx.cw.lineClear(eye, tp, ColFlags.BlocksSight)) {
+      if (inCone && ctx.sightClear(eye, tp)) {
         // awareness builds faster when close, moving, or shooting; crouching hides you a bit
         const moving = o.motor.horizontalSpeed() > 3 ? 1.4 : 1;
         const crouch = o.motor.crouching ? 0.6 : 1;
@@ -203,6 +215,12 @@ export class BotController implements Controller {
       }
     }
 
+    // ---- weapon choice: the right tool for the range (and something with bullets in it)
+    this.chooseWeapon(me, ctx);
+
+    // ---- heal up when nobody is shooting at us
+    if (me.healItem && me.healT < 0 && me.hp < 72 && !this.targetVisible && ctx.time - me.lastDamageTime > 1.6) me.intent.heal = true;
+
     // ---- choose state
     const w = me.weapon;
     const ammoType = w?.def.ammo as AmmoType | undefined;
@@ -214,7 +232,20 @@ export class BotController implements Controller {
     else if (hasTarget) next = me.hp < this.profile.retreatHp ? 'retreat' : 'chase';
     else if (lowAmmo || (this.profile.archetype === 'goblin' && this.rng() < 0.3)) next = 'loot';
     else if (ctx.time - this.heardT < 6) next = 'investigate';
+    else if (this.state === 'loot' && !this.lootTarget && !this.crateTarget && me.armed && this.lingerT <= 0) next = 'wander';
     else if (this.state !== 'wander' && this.state !== 'loot') next = 'wander';
+    // opportunism: never walk past an unopened crate when nobody is shooting
+    if (next !== 'engage' && next !== 'retreat' && !this.crateTarget && me.armed) {
+      for (const c of ctx.loot.crates) {
+        if (c.opened || c.openT >= 0 || c.pos.y > 4) continue;
+        if (c.pos.distanceTo(me.motor.pos) < 8) {
+          this.crateTarget = c;
+          this.lootTarget = null;
+          next = 'loot';
+          break;
+        }
+      }
+    }
     if (next !== this.state) {
       this.state = next;
       this.hasGoal = false;
@@ -223,24 +254,27 @@ export class BotController implements Controller {
 
     switch (this.state) {
       case 'loot': {
-        if (!this.lootTarget || !ctx.loot.pickups.includes(this.lootTarget) || this.lootTarget.collectT >= 0) this.lootTarget = this.pickLoot(me, ctx);
-        if (this.lootTarget) {
-          this.setGoal(me, ctx, this.lootTarget.pos);
-          const d = this.lootTarget.pos.distanceTo(me.motor.pos);
-          if (d < 1.6) {
-            const p = this.lootTarget;
-            if (p.kind === 'weapon') {
-              // only swap if it's better (goblins can't resist though)
-              const cur = me.weapon;
-              if (!cur || p.rarity > cur.rarity || this.profile.archetype === 'goblin' || me.weapons.some((x) => !x)) ctx.loot.collect(me, p, ctx);
-            } else {
-              me.ammo[p.defId as AmmoType] += p.amount;
-              p.collectT = 0;
-              p.collector = me;
+        const valid = (this.lootTarget && ctx.loot.pickups.includes(this.lootTarget) && this.lootTarget.collectT < 0) || (this.crateTarget && !this.crateTarget.opened && this.crateTarget.openT < 0);
+        if (!valid) {
+          const pick = this.pickLoot(me, ctx);
+          this.lootTarget = pick.pickup;
+          this.crateTarget = pick.crate;
+        }
+        const goalPos = this.lootTarget?.pos ?? this.crateTarget?.pos;
+        if (goalPos) {
+          this.setGoal(me, ctx, goalPos);
+          const d = goalPos.distanceTo(me.motor.pos);
+          if (d < (this.crateTarget ? 2.0 : 1.6)) {
+            if (this.lootTarget) ctx.loot.collect(me, this.lootTarget, ctx);
+            else if (this.crateTarget) {
+              ctx.loot.openCrate(this.crateTarget, me);
+              this.idleT = 0.9; // wait for the goodies to land
+              this.lingerT = 2.5;
             }
             this.lootTarget = null;
+            this.crateTarget = null;
             this.hasGoal = false;
-            this.idleT = rand(0.2, 0.6);
+            this.idleT = Math.max(this.idleT, rand(0.2, 0.6));
           }
         } else if (!this.hasGoal) this.wanderGoal(me, ctx);
         break;
@@ -263,8 +297,11 @@ export class BotController implements Controller {
           if (!this.hasGoal || this.goalTimeout <= 0) this.setGoal(me, ctx, _v2, true);
           if (me.bug.ready && this.rng() < this.profile.blinkiness * 0.4) this.planEscapeBlink(me, ctx);
         }
-        // heal isn't in M1 — cautious bots regen a little while hiding (placeholder for Jam Jars)
-        if (!this.targetVisible) me.heal(tick * 4);
+        // pop smoke to cover the escape
+        if (me.util?.id === 'fizzbomb' && this.utilCd <= 0 && this.target) {
+          _v.subVectors(this.target.motor.pos, me.motor.pos).setY(0).normalize();
+          if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 3))) this.utilCd = 6;
+        }
         break;
       }
       case 'investigate':
@@ -277,6 +314,19 @@ export class BotController implements Controller {
       case 'wander':
         if (!this.hasGoal || me.motor.pos.distanceTo(this.goal) < 1.5 || this.goalTimeout <= 0) {
           if (this.rng() < 0.3) this.idleT = rand(0.5, 2); // hesitate / look around
+          // curiosity: crates and shiny loot pull rascals off their route
+          const curious = this.profile.archetype === 'goblin' ? 0.9 : 0.55;
+          if (this.rng() < curious) {
+            const pick = this.pickLoot(me, ctx);
+            const at = pick.pickup?.pos ?? pick.crate?.pos;
+            if (at && at.distanceTo(me.motor.pos) < 30) {
+              this.lootTarget = pick.pickup;
+              this.crateTarget = pick.crate;
+              this.state = 'loot';
+              this.hasGoal = false;
+              break;
+            }
+          }
           this.wanderGoal(me, ctx);
         }
         break;
@@ -311,6 +361,25 @@ export class BotController implements Controller {
     // reload when empty (backpedal behaviour happens naturally from range keeping)
     const w = me.weapon;
     if (w && w.mag === 0 && !w.reloading) me.intent.reload = true;
+    // utilities
+    if (me.util && this.utilCd <= 0 && me.healT < 0) {
+      const u = me.util.id;
+      const chaos = this.profile.archetype === 'chaotic' ? 2.5 : 1;
+      if (u === 'stickypop' && d > 5 && d < 22 && this.rng() < 0.1 * chaos) {
+        if (this.throwUtilAt(me, ctx, t.motor.pos)) this.utilCd = rand(3, 6);
+      } else if (u === 'gust' && d < 5.5) {
+        if (this.throwUtilAt(me, ctx, t.motor.pos)) this.utilCd = 4;
+      } else if (u === 'fizzbomb' && me.hp < 55 && this.rng() < 0.3) {
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 3))) this.utilCd = 6;
+      } else if (u === 'chicken' && this.rng() < 0.05 * chaos) {
+        const side = this.rng() < 0.5 ? -1 : 1;
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(-_v.z * side * 8, 0, _v.x * side * 8)))) this.utilCd = 5;
+      } else if (u === 'bouncejam' && this.rng() < 0.03 * chaos) {
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(me.motor.vel.x * 0.4, 0, me.motor.vel.z * 0.4)))) this.utilCd = 6;
+      }
+    }
     // Blinkbug flank: throw to the target's side, blink shortly after
     if (me.bug.ready && this.blinkPlanT < 0 && d < 26 && d > 5 && this.rng() < this.profile.blinkiness * 0.08) {
       const side = this.rng() < 0.5 ? -1 : 1;
@@ -319,6 +388,53 @@ export class BotController implements Controller {
       const aimPt = _v3.copy(t.motor.pos).addScaledVector(perp, rand(4, 7)).addScaledVector(_v, rand(-2, 3));
       if (this.throwAt(me, ctx, aimPt)) this.blinkPlanT = rand(0.5, 1.2);
     }
+  }
+
+  private chooseWeapon(me: Actor, ctx: GameCtx) {
+    if (me.healT >= 0) return;
+    const d = this.target && this.targetVisible ? this.target.motor.pos.distanceTo(me.motor.pos) : 20;
+    let best = -1, bestScore = -Infinity;
+    me.weapons.forEach((w, i) => {
+      if (!w) return;
+      if (w.mag === 0 && me.ammo[w.def.ammo] === 0) return;
+      const [lo, hi] = w.def.botRange;
+      const fit = d < lo ? -(lo - d) : d > hi ? -(d - hi) * 0.6 : 5;
+      const score = fit + w.rarity * 1.5 + (w.mag > 0 ? 1 : 0) + (i === me.activeSlot ? 1.5 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    });
+    if (best >= 0 && best !== me.activeSlot) me.intent.slot = best;
+    void ctx;
+  }
+
+  /** Solve a lob toward a point with the item's real physics, then throw it. */
+  private throwUtilAt(me: Actor, ctx: GameCtx, pt: THREE.Vector3): boolean {
+    if (!me.util || me.util.count <= 0) return false;
+    const def = UTILS[me.util.id];
+    const yaw = yawFromDir(pt.x - me.motor.pos.x, pt.z - me.motor.pos.z);
+    const start = new THREE.Vector3(me.motor.pos.x, me.motor.pos.y + 1.2, me.motor.pos.z);
+    let bestPitch = 0, bestErr = Infinity;
+    const pos = new THREE.Vector3(), vel = new THREE.Vector3(), dir = new THREE.Vector3();
+    for (let p = -0.5; p <= 0.9; p += 0.14) {
+      pos.copy(start);
+      throwVelocity(def, dirFromYawPitch(yaw, p, dir), vel);
+      for (let i = 0; i < 200; i++) {
+        const r = simulateThrow(ctx, def, pos, vel, THROW.step * 2);
+        if (r.settled || ((def.sticky || def.id === 'gust') && r.hit)) break;
+      }
+      const err = Math.hypot(pos.x - pt.x, pos.z - pt.z) + Math.abs(pos.y - pt.y) * 0.5;
+      if (err < bestErr) {
+        bestErr = err;
+        bestPitch = p;
+      }
+    }
+    if (bestErr > 6) return false;
+    dirFromYawPitch(yaw, bestPitch, me.intent.aimDir);
+    me.intent.aimYaw = yaw;
+    me.intent.utilRelease = true;
+    return true;
   }
 
   private planEscapeBlink(me: Actor, ctx: GameCtx) {
@@ -355,24 +471,50 @@ export class BotController implements Controller {
     return true;
   }
 
-  private pickLoot(me: Actor, ctx: GameCtx): Pickup | null {
-    let best: Pickup | null = null, bestScore = -Infinity;
-    const w = me.weapon;
+  private pickLoot(me: Actor, ctx: GameCtx): { pickup: Pickup | null; crate: Crate | null } {
+    let best: Pickup | null = null, bestCrate: Crate | null = null, bestScore = -Infinity;
+    const goblin = this.profile.archetype === 'goblin';
+    const worst = me.weapons.some((x) => !x) ? -1 : Math.min(...me.weapons.map((x) => x!.score));
     for (const p of ctx.loot.pickups) {
       if (p.collectT >= 0 || !p.settled) continue;
-      if (p.pos.y > 1.2) continue; // bots don't know how to reach upper floors via stairs yet
       const d = p.pos.distanceTo(me.motor.pos);
       if (d > 45) continue;
-      let v = 0;
-      if (p.kind === 'weapon') v = !w ? 30 : p.rarity > w.rarity ? 10 + p.rarity * 4 : this.profile.archetype === 'goblin' ? 4 : -50;
-      else v = w ? 8 : 1;
+      let v = -99;
+      if (p.kind === 'weapon') {
+        const act = me.previewOffer(p.defId, p.rarity);
+        const sc = p.rarity * 10 + (WEAPONS[p.defId]?.weight ?? 5);
+        if (!me.armed) v = 40;
+        else if (act === 'fuse') v = 26 + p.rarity * 4;
+        else if (act === 'add') v = 18 + p.rarity * 3;
+        else if (sc > worst + 4) v = 8 + (sc - worst) * 0.5;
+        if (goblin && v > 0) v += 8;
+      } else if (p.kind === 'ammo') {
+        const needs = me.weapons.some((w) => w && w.def.ammo === p.defId) && me.ammo[p.defId as AmmoType] < 40;
+        v = needs ? 12 : -99;
+      } else if (p.kind === 'heal') {
+        v = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3) ? (me.hp < 80 ? 14 : 7) : -99;
+      } else if (p.kind === 'util') {
+        v = !me.util || me.util.id === p.defId ? (this.profile.archetype === 'chaotic' ? 14 : 6) : -99;
+      }
       const score = v - d * 0.4;
       if (score > bestScore) {
         bestScore = score;
         best = p;
+        bestCrate = null;
       }
     }
-    return bestScore > -20 ? best : null;
+    for (const c of ctx.loot.crates) {
+      if (c.opened || c.openT >= 0) continue;
+      const d = c.pos.distanceTo(me.motor.pos);
+      if (d > 45) continue;
+      const score = (goblin ? 34 : 20) - d * 0.4 - (c.pos.y > 4 ? 30 : 0); // rooftops/towers are blink-only
+      if (score > bestScore) {
+        bestScore = score;
+        bestCrate = c;
+        best = null;
+      }
+    }
+    return bestScore > -5 ? { pickup: best, crate: bestCrate } : { pickup: null, crate: null };
   }
 
   private wanderGoal(me: Actor, ctx: GameCtx) {
@@ -430,8 +572,7 @@ export class BotController implements Controller {
       }
       // don't strafe off ledges/into walls forever
       _v2.set(me.motor.pos.x + sx * 1.2, 0, me.motor.pos.z + sz * 1.2);
-      const [ci, cj] = ctx.nav.toCell(_v2.x, _v2.z);
-      if (!ctx.nav.isWalk(ci, cj)) this.strafe *= -1;
+      if (!ctx.nav.isWalkAt(_v2.x, me.motor.pos.y, _v2.z)) this.strafe *= -1;
     }
     it.moveX = mx;
     it.moveZ = mz;
@@ -495,7 +636,7 @@ export class BotController implements Controller {
     this.aimYaw = wrapAngle(this.aimYaw + dy);
     this.aimPitch += clamp(desiredPitch - this.aimPitch, -maxTurn, maxTurn);
 
-    if (!it.throwRelease) {
+    if (!it.throwRelease && !it.utilRelease) {
       it.aimYaw = this.aimYaw;
       it.aimPitch = this.aimPitch;
       dirFromYawPitch(this.aimYaw, this.aimPitch, it.aimDir);

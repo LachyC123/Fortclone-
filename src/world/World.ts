@@ -78,6 +78,7 @@ export class World {
   private cloudData: { x: number; y: number; z: number; s: number; v: number }[] = [];
   zones: Zone[] = [];
   lootSpots: LootSpot[] = [];
+  crateSpots: { pos: THREE.Vector3; yaw: number }[] = [];
   playerSpawns: { pos: THREE.Vector3; yaw: number }[] = [];
   botSpawns: THREE.Vector3[] = [];
   islandRadius = 46;
@@ -303,6 +304,21 @@ export class World {
         audio.pop(kk.pos);
       }
     }
+  }
+
+  /** Radial shove for explosions and gusts: props tumble away. */
+  pushProps(p: THREE.Vector3, R: number, force: number) {
+    for (const kk of this.kickables) {
+      const d = kk.pos.clone().sub(p);
+      const dist = d.length();
+      if (dist > R) continue;
+      d.normalize();
+      const k = 1 - dist / R;
+      kk.vel.addScaledVector(d, force * k).y += force * 0.6 * k;
+      kk.spin.set(rand(-14, 14), rand(-14, 14), rand(-14, 14));
+    }
+    for (const d of this.doors) if (d.hinge.distanceTo(p) < R) d.vel -= 6;
+    for (const s of this.swingers) if (s.obj.position.distanceTo(p) < R + 2) s.vel += (Math.random() - 0.5) * 4;
   }
 
   /** Direct hit on a kickable prop (bullets test these separately; cheap sphere check). */

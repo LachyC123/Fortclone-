@@ -34,6 +34,10 @@ const res = await page.evaluate(() => {
   const p = g.player;
   const bot = g.actors[1];
   const brain = bot.controller; bot.controller = null; bot.motor.teleport(new p.motor.pos.constructor(40, 0.05, 0));
+  // deterministic starter gun for the test
+  for (const pk of [...g.loot.pickups]) if (pk.pos.distanceTo(new p.motor.pos.constructor(0, 0, 22)) < 4) g.loot.remove(pk);
+  g.loot.spawn('weapon', 'tincan', 0, 1, new p.motor.pos.constructor(0, 0.05, 22.5));
+  g.loot.spawn('ammo', 'medium', 0, 30, new p.motor.pos.constructor(2.2, 0.05, 21.5));
   step(0.5);
   log.push(`spawn pos ${f(p.motor.pos)} grounded=${p.motor.grounded}`);
   // walk forward to the rifle (at z=22.5)

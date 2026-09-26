@@ -3,7 +3,10 @@ import { CharacterMotor, MOTOR, MotorInput } from '../physics/Motor';
 import { RascalRig, RascalLook } from './RascalRig';
 import { Blinkbug, BugOwner, BUG } from './Blinkbug';
 import { Intent, makeIntent, GameCtx } from '../core/types';
-import { WeaponInstance, buildWeaponView, AmmoType, WEAPONS } from '../combat/Weapons';
+import { WeaponInstance, buildWeaponView, AmmoType, WEAPONS, AMMO_INFO } from '../combat/Weapons';
+import { HEALS, UTILS, HealId, UtilId, ItemStack, buildItemModel } from '../combat/Items';
+import { throwVelocity } from '../combat/Throwables';
+import { RARITY } from '../render/Palette';
 import { fireWeapon } from '../combat/Combat';
 import { angleDelta, clamp, damp, dampAngle, yawFromDir } from '../core/math';
 import { audio } from '../audio/Audio';
@@ -42,6 +45,13 @@ export class Actor implements BugOwner {
   weapons: (WeaponInstance | null)[] = [null, null, null];
   activeSlot = 0;
   ammo: Record<AmmoType, number> = { light: 0, medium: 0, heavy: 0, shells: 0, bolts: 0 };
+  util: ItemStack<UtilId> | null = null;
+  healItem: ItemStack<HealId> | null = null;
+  /** >=0 while eating/drinking */
+  healT = -1;
+  boostT = 0;
+  utilAiming = false;
+  fusions = 0;
 
   // stats
   kills = 0;
@@ -138,10 +148,70 @@ export class Actor implements BugOwner {
     return s;
   }
 
+  /**
+   * Offer a weapon to the inventory. Same gun + same rarity FUSES into the next rarity.
+   * Returns what happened so loot/HUD can celebrate it.
+   */
+  offerWeapon(defId: string, rarity: RarityIndex, mag: number): { action: 'fused' | 'added' | 'swapped'; slot: number; dropped: WeaponInstance | null } {
+    const fuseSlot = this.weapons.findIndex((w) => w && w.def.id === defId && w.rarity === rarity && rarity < 4);
+    if (fuseSlot >= 0) {
+      const w = this.weapons[fuseSlot]!;
+      w.rarity = (rarity + 1) as RarityIndex;
+      w.mag = w.def.mag;
+      this.fusions++;
+      this.equip(fuseSlot, true);
+      return { action: 'fused', slot: fuseSlot, dropped: null };
+    }
+    let slot = this.weapons.findIndex((w) => !w);
+    let dropped: WeaponInstance | null = null;
+    let action: 'added' | 'swapped' = 'added';
+    if (slot < 0) {
+      slot = this.activeSlot;
+      dropped = this.weapons[slot];
+      action = 'swapped';
+    }
+    this.giveWeapon(defId, rarity, slot, true);
+    this.weapons[slot]!.mag = Math.min(mag, WEAPONS[defId].mag);
+    return { action, slot, dropped };
+  }
+
+  /** What would picking this up do? (for the HUD comparison card) */
+  previewOffer(defId: string, rarity: RarityIndex): 'fuse' | 'add' | 'swap' {
+    if (this.weapons.some((w) => w && w.def.id === defId && w.rarity === rarity && rarity < 4)) return 'fuse';
+    return this.weapons.some((w) => !w) ? 'add' : 'swap';
+  }
+
+  addItem(kind: 'heal' | 'util', id: string, count: number): number {
+    if (kind === 'heal') {
+      const def = HEALS[id as HealId];
+      if (!this.healItem || this.healItem.count === 0) this.healItem = { id: def.id, count: 0 };
+      if (this.healItem.id !== def.id) return count;
+      const take = Math.min(count, def.maxStack - this.healItem.count);
+      this.healItem.count += take;
+      return count - take;
+    }
+    const def = UTILS[id as UtilId];
+    if (!this.util || this.util.count === 0) this.util = { id: def.id, count: 0 };
+    if (this.util.id !== def.id) return count;
+    const take = Math.min(count, def.maxStack - this.util.count);
+    this.util.count += take;
+    return count - take;
+  }
+
+  addAmmo(t: AmmoType, n: number) {
+    const before = this.ammo[t];
+    this.ammo[t] = Math.min(AMMO_INFO[t].max, this.ammo[t] + n);
+    return this.ammo[t] - before;
+  }
+
   equip(slot: number, silent = false) {
     if (slot < 0 || slot > 2) return;
     const cur = this.weapon;
-    if (cur) cur.reloadT = -1;
+    if (cur) {
+      cur.reloadT = -1;
+      cur.burstLeft = 0;
+    }
+    this.healT = -1;
     this.activeSlot = slot;
     const w = this.weapon;
     this.rig.setWeapon(w ? buildWeaponView(w.def, w.rarity) : null);
@@ -221,7 +291,7 @@ export class Actor implements BugOwner {
 
     // --- facing: armed/aiming rascals face the aim; unarmed ones face movement
     const moveLen = Math.hypot(it.moveX, it.moveZ);
-    const combatFacing = this.armed || it.fire || this.ads || this.throwAiming;
+    const combatFacing = this.armed || it.fire || this.ads || this.throwAiming || this.utilAiming;
     let targetYaw = this.bodyYaw;
     if (combatFacing) targetYaw = it.aimYaw;
     else if (moveLen > 0.1) targetYaw = yawFromDir(it.moveX, it.moveZ);
@@ -243,7 +313,7 @@ export class Actor implements BugOwner {
       sprint: it.sprint && !this.ads && this.sprintBlock <= 0 && !this.throwAiming,
       jump: it.jump,
       crouch: it.crouch,
-      speedMul: this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
+      speedMul: this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
     };
     const wasSliding = m.sliding;
     m.update(dt, mi);
@@ -290,6 +360,9 @@ export class Actor implements BugOwner {
       }
     }
 
+    // --- items (healing / utilities / drop)
+    this.updateItems(dt, ctx, it);
+
     // --- weapon handling
     this.updateWeapon(dt, ctx, it);
 
@@ -335,26 +408,115 @@ export class Actor implements BugOwner {
       return;
     }
     if (this.motor.mantleT >= 0) return;
+    const view = this.rig.weapon;
+    if (view?.loaded) view.loaded.visible = w.mag > 0;
+    if (view?.spinner) view.spinner.rotation.z = damp(view.spinner.rotation.z, (view.spinner.userData.target as number) ?? 0, 18, dt);
 
-    const trigger = it.fire && (w.def.mode === 'auto' || !this.fireHeld);
+    let trigger = it.fire && (w.def.mode === 'auto' || !this.fireHeld);
+    if (w.def.mode === 'burst') {
+      if (trigger && w.cooldown <= 0 && w.burstLeft <= 0) w.burstLeft = w.def.burst!;
+      trigger = w.burstLeft > 0;
+    }
     if (trigger && w.cooldown <= 0) {
       if (w.mag <= 0) {
+        w.burstLeft = 0;
         if (!this.fireHeld && this.isLocal) audio.dryFire();
       } else {
+        this.healT = -1;
         w.mag--;
-        w.cooldown = 60 / w.def.rpm;
+        if (w.def.mode === 'burst') {
+          w.burstLeft--;
+          w.cooldown = w.burstLeft > 0 ? 60 / w.def.burstRpm! : 60 / w.def.rpm;
+        } else w.cooldown = 60 / w.def.rpm;
         this.sprintBlock = 0.4;
         fireWeapon(this, ctx);
-        const f = this.rig.weapon?.flash;
+        const f = view?.flash;
         if (f) {
           f.visible = true;
           f.rotation.z = Math.random() * 6;
-          f.scale.setScalar(0.8 + Math.random() * 0.5);
+          f.scale.multiplyScalar(0).addScalar((f.userData.base ?? (f.userData.base = 1)) * (0.8 + Math.random() * 0.5));
           setTimeout(() => (f.visible = false), 45);
         }
+        if (view?.spinner) view.spinner.userData.target = ((view.spinner.userData.target as number) ?? 0) + Math.PI / 3;
+        if (w.mag === 0 && this.ammo[w.def.ammo] > 0 && w.def.mag <= 1) w.reloadT = 0; // single-shot guns auto-reload
       }
     }
     this.fireHeld = it.fire;
+  }
+
+  private updateItems(dt: number, ctx: GameCtx, it: Intent) {
+    const m = this.motor;
+    // speed boost from biscuits
+    this.boostT = Math.max(0, this.boostT - dt);
+    m.speedBoost = this.boostT > 0 ? 1.2 : 1;
+    if (this.boostT > 0 && m.horizontalSpeed() > 3 && Math.random() < dt * 20) ctx.fx.glow.emit(_v.copy(m.pos).setY(m.pos.y + 0.3), { count: 1, color: [0xffd36b, 0xffffff], speed: 0.5, life: 0.4, size: 0.12, shape: PShape.Star });
+
+    // healing: channelled, slows you, cancelled by shooting / throwing
+    const hs = this.healItem;
+    if (it.heal && this.healT < 0 && hs && hs.count > 0) {
+      if (this.hp >= this.maxHp) {
+        if (this.isLocal) ctx.hud.toast('Already full!', '#9dff8a');
+      } else {
+        this.healT = 0;
+        const w = this.weapon;
+        if (w) w.reloadT = -1;
+        this.rig.setHeld(buildItemModel(hs.id, false));
+      }
+    }
+    if (this.healT >= 0) {
+      if (!hs || hs.count <= 0 || it.fire || it.utilRelease || it.throwRelease) {
+        this.healT = -1;
+        this.rig.setHeld(null);
+      } else {
+        const def = HEALS[hs.id];
+        const prev = this.healT;
+        this.healT += dt;
+        const kind = hs.id === 'fizzle' ? 'drink' : 'eat';
+        if (Math.floor(prev / 0.45) !== Math.floor(this.healT / 0.45) && this.isLocal) audio.healUse(kind, false);
+        if (Math.random() < dt * 14) ctx.fx.healPuff(_v.copy(m.pos).setY(m.pos.y + 1.2));
+        if (this.healT >= def.useTime) {
+          this.heal(def.amount);
+          hs.count--;
+          if (def.boost) this.boostT = def.boost;
+          this.healT = -1;
+          this.rig.setHeld(null);
+          this.rig.setExpression('happy', 0.8);
+          ctx.fx.glow.emit(_v.copy(m.pos).setY(m.pos.y + 1), { count: 24, color: [0x9dff8a, 0xffffff, 0xff9ad5], speed: [1, 4], spread: 1, up: 2, life: [0.4, 0.8], size: [0.12, 0.22], shape: PShape.Star, drag: 2 });
+          ctx.fx.ring(_v.copy(m.pos).setY(m.pos.y + 0.05), 0x9dff8a, 0.2, 2.2, 0.4);
+          if (this.isLocal) {
+            audio.healUse(kind, true);
+            ctx.hud.toast(`+${def.amount} ${def.boost ? '& ZOOMIES!' : 'HEALTH'}`, '#9dff8a');
+          }
+          if (hs.count <= 0) this.healItem = null;
+        }
+      }
+    }
+
+    // utilities: hold to aim (arc preview), release to throw
+    const u = this.util;
+    this.utilAiming = !!(it.utilAim && u && u.count > 0);
+    if (it.utilRelease && u && u.count > 0) {
+      const def = UTILS[u.id];
+      const from = this.eyePos(_v2).setY(m.pos.y + 1.2).clone();
+      const vel = throwVelocity(def, it.aimDir, _v3);
+      vel.x += m.vel.x * 0.5;
+      vel.z += m.vel.z * 0.5;
+      ctx.throwables.throw(this, u.id, from, vel);
+      this.rig.onThrow();
+      this.healT = -1;
+      u.count--;
+      if (u.count <= 0) this.util = null;
+    }
+
+    // drop the held weapon
+    if (it.drop && this.weapon) {
+      const w = this.weapon;
+      const p = ctx.loot.spawn('weapon', w.def.id, w.rarity, 1, _v.copy(m.pos).setY(m.pos.y + 1), new THREE.Vector3(-Math.sin(this.bodyYaw) * 3, 4, -Math.cos(this.bodyYaw) * 3), w.mag);
+      p.lockUntil = performance.now() + 900;
+      this.weapons[this.activeSlot] = null;
+      this.equip(this.activeSlot, true);
+      if (this.isLocal) ctx.hud.toast(`Dropped ${w.def.name}`, RARITY[w.rarity].css);
+    }
   }
 
   private updateBug(dt: number, ctx: GameCtx, it: Intent) {
@@ -465,7 +627,7 @@ export class Actor implements BugOwner {
       armed: this.armed,
       ads: this.ads,
       reloadK: w && w.reloading ? w.reloadT / w.reloadTime : -1,
-      healing: false,
+      healing: this.healT >= 0,
     });
     void clamp;
   }

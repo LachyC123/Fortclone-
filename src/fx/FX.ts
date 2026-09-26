@@ -285,6 +285,28 @@ export class FX {
     this.lightFlash(p, 0xffe6a0, 10, 0.3);
   }
 
+  /** Toy explosion: white flash, fat candy fireball, confetti, smoke ring, chunks. No gore, lots of pop. */
+  explosion(p: THREE.Vector3, R: number) {
+    this.glow.emit(p, { count: 3, color: 0xffffff, speed: 0, life: 0.15, size: R * 1.6, sizeEnd: 1.4, alpha: 0.9 });
+    this.glow.emit(p, { count: 26, color: [0xffe08a, 0xffb347, 0xff7a5c, 0xff5c8a], speed: [3, R * 2.4], spread: 1, up: 2, life: [0.3, 0.6], size: [0.6, 1.2], sizeEnd: 0.3, drag: 5 });
+    this.glow.emit(p, { count: 24, color: [0xffffff, PAL.mustard, PAL.pink, PAL.turquoise], speed: [6, 14], spread: 1, up: 3, gravity: 8, life: [0.5, 1], size: [0.12, 0.22], shape: PShape.Star, drag: 2, spin: 10 });
+    this.soft.emit(p, { count: 18, color: [0x8a7a8a, 0xb0a4b0, 0xd8d0d8], speed: [1, 4], spread: 1, up: 1.5, life: [1.2, 2.2], size: [0.7, 1.2], sizeEnd: 2.8, alpha: 0.55, drag: 2 });
+    this.soft.emit(p, { count: 30, color: [PAL.mustard, PAL.pink, PAL.turquoise, PAL.lavender, 0xffffff], speed: [4, 10], spread: 1, up: 5, gravity: 10, life: [1.2, 2], size: [0.08, 0.14], shape: PShape.Confetti, drag: 1.2, spin: 14 });
+    this.ring(p.clone().setY(p.y + 0.1), 0xffffff, 0.3, R * 1.4, 0.4);
+    this.ring(p, 0xffb347, 0.3, R * 1.1, 0.35, undefined, true);
+    for (let i = 0; i < 8; i++) this.chunk(p, new THREE.Vector3(rand(-6, 6), rand(4, 10), rand(-6, 6)), [0x5a4a3a, 0x8a7a6a, PAL.mustard][i % 3], rand(0.08, 0.18), 1.8);
+    this.lightFlash(p.clone().setY(p.y + 0.8), 0xffb347, 14, 0.35);
+  }
+
+  /** Two weapons fusing into a better one. */
+  fuseBurst(p: THREE.Vector3, color: number) {
+    this.glow.emit(p, { count: 40, color: [color, 0xffffff, color], speed: [2, 7], spread: 1, up: 1, life: [0.4, 0.9], size: [0.12, 0.28], shape: PShape.Star, drag: 3, spin: 12 });
+    this.glow.emit(p, { count: 4, color, speed: 0, life: 0.3, size: 2.4, sizeEnd: 1.8, alpha: 0.7 });
+    for (let i = 0; i < 3; i++) this.ring(p, i === 1 ? 0xffffff : color, 0.2, 1.4 + i * 0.8, 0.35 + i * 0.12, undefined, true);
+    this.ring(p.clone().setY(p.y - 0.9), color, 0.2, 3, 0.5);
+    this.lightFlash(p, color, 10, 0.4);
+  }
+
   sparkBurst(p: THREE.Vector3, color: number, n = 12) {
     this.glow.emit(p, { count: n, color: [color, 0xffffff], speed: [2, 6], spread: 1, life: [0.2, 0.5], size: [0.08, 0.16], sizeEnd: 0.1, shape: PShape.Sparkle, drag: 3 });
   }

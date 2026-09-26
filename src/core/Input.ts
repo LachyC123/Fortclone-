@@ -20,6 +20,10 @@ export interface InputState {
   slotPressed: number;
   pausePressed: boolean;
   touchActive: boolean;
+  utilHeld: boolean;
+  utilReleased: boolean;
+  healPressed: boolean;
+  dropPressed: boolean;
 }
 
 export class Input {
@@ -41,6 +45,10 @@ export class Input {
     slotPressed: -1,
     pausePressed: false,
     touchActive: false,
+    utilHeld: false,
+    utilReleased: false,
+    healPressed: false,
+    dropPressed: false,
   };
   private keys = new Set<string>();
   locked = false;
@@ -122,6 +130,15 @@ export class Input {
         case 'Digit3':
           this.s.slotPressed = 2;
           break;
+        case 'KeyG':
+          this.s.utilHeld = true;
+          break;
+        case 'KeyH':
+          this.s.healPressed = true;
+          break;
+        case 'KeyX':
+          this.s.dropPressed = true;
+          break;
         case 'Escape':
         case 'KeyP':
           this.s.pausePressed = true;
@@ -130,6 +147,9 @@ export class Input {
     } else if (k === 'KeyQ' && this.s.throwHeld) {
       this.s.throwHeld = false;
       this.s.throwReleased = true;
+    } else if (k === 'KeyG' && this.s.utilHeld) {
+      this.s.utilHeld = false;
+      this.s.utilReleased = true;
     }
   }
 
@@ -155,6 +175,9 @@ export class Input {
     s.reloadPressed = false;
     s.interactPressed = false;
     s.throwReleased = false;
+    s.utilReleased = false;
+    s.healPressed = false;
+    s.dropPressed = false;
     s.blinkPressed = false;
     s.slotPressed = -1;
     s.pausePressed = false;

@@ -438,6 +438,21 @@ export class RascalRig {
     finalizeBinds(this.root, binds);
   }
 
+  private held: THREE.Object3D | null = null;
+  private healK = 0;
+  /** Put a consumable in the left hand (eating/drinking animation). */
+  setHeld(obj: THREE.Object3D | null) {
+    if (this.held) this.handL.remove(this.held);
+    this.held = obj;
+    if (obj) {
+      obj.scale.setScalar(0.9);
+      obj.position.set(0, -0.08, -0.04);
+      obj.rotation.set(Math.PI, 0, 0);
+      obj.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      this.handL.add(obj);
+    }
+  }
+
   setWeapon(view: WeaponView | null) {
     if (this.weapon) this.weaponMount.remove(this.weapon.group);
     this.weapon = view;
@@ -620,6 +635,24 @@ export class RascalRig {
       this.elbowL.rotation.set(0.4 + Math.max(0, -swing) * 0.6, 0, 0);
       this.elbowR.rotation.set(0.4 + Math.max(0, swing) * 0.6, 0, 0);
       if (this.throwT >= 0) this.throwArm(this.armR, this.elbowR, this.throwT, 1);
+    }
+
+    // --- eating / drinking: weapon tucked away, item to the mouth with little nibbles
+    this.healK = damp(this.healK, a.healing ? 1 : 0, 12, dt);
+    if (this.weapon) this.weapon.group.visible = this.healK < 0.5;
+    if (this.healK > 0.02) {
+      const nib = Math.sin(t * 14) * 0.12;
+      const k = this.healK;
+      _q.setFromEuler(new THREE.Euler(2.25 + nib, 0, -0.55));
+      this.armL.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x = this.elbowL.rotation.x * (1 - k) + (1.9 + nib) * k;
+      if (a.healing) {
+        _q2.setFromEuler(new THREE.Euler(0.3, 0, 0.2));
+        this.armR.quaternion.slerp(_q2, k);
+        this.elbowR.rotation.x = this.elbowR.rotation.x * (1 - k) + 0.6 * k;
+        this.head.rotation.x += 0.12 * k + nib * 0.3;
+        if (this.expression === 'normal') this.eyeL.scale.y = this.eyeR.scale.y = 0.35; // blissful squint
+      }
     }
 
     // --- secondary motion: backpack, scarf, hat

@@ -55,24 +55,33 @@ export function buildVillageBlock(k: Kit, world: World, doors: DoorSpec[]) {
   world.playerSpawns.push({ pos: new THREE.Vector3(0, 0.05, 27), yaw: 0 });
   world.botSpawns.push(new THREE.Vector3(9, 0.05, -28), new THREE.Vector3(33, 0.05, 0), new THREE.Vector3(-37, 0.05, 6), new THREE.Vector3(-4, 0.05, -30));
 
-  // loot
-  const L = (x: number, y: number, z: number, kind: 'weapon' | 'ammo', rarity: 0 | 1 | 2 | 3 | 4 = 0, secret = false) => world.lootSpots.push({ pos: new THREE.Vector3(x, y, z), kind, rarity, secret });
-  L(0, 0.05, 22.5, 'weapon', 0);
-  L(2.2, 0.05, 21.5, 'ammo');
-  L(-1.8, 0.05, 20.5, 'ammo');
-  L(-14.5, 0.05, -15.5, 'weapon', 1); // house living room
-  L(-9, 0.05, -18.5, 'ammo'); // kitchen
-  L(-14.5, 3.25, -14.8, 'ammo'); // bedroom
-  L(-13, 6.15, -17, 'weapon', 2, true); // secret attic
-  L(-11, 6.15, -17.5, 'ammo', 0, true);
-  L(11, 0.05, -18.5, 'weapon', 0); // bakery
-  L(8.5, 0.05, -14.5, 'ammo');
-  L(20, 7.05, 1.9, 'weapon', 3, true); // tower balcony
-  L(21.5, 7.05, 6.2, 'ammo');
-  L(-19, 0.05, 10, 'ammo'); // shed
-  L(-37, 0.05, -12, 'ammo', 0, true); // blinkbug nest
-  L(5, 0.05, 6.5, 'ammo'); // market
-  L(30, 0.05, 12, 'weapon', 0); // farm
+  // loot: floor spots roll from the loot tables; secret spots hold Rascal Crates
+  const L = (x: number, y: number, z: number, kind: 'weapon' | 'any' = 'any') => world.lootSpots.push({ pos: new THREE.Vector3(x, y, z), kind: kind === 'weapon' ? 'weapon' : 'ammo', rarity: 0 });
+  const C = (x: number, y: number, z: number, yaw = 0) => world.crateSpots.push({ pos: new THREE.Vector3(x, y, z), yaw });
+  L(0, 0.05, 22.5, 'weapon'); // right in front of spawn: something to shoot within seconds
+  L(2.2, 0.05, 21.5);
+  L(-1.8, 0.05, 20.5);
+  L(-14.5, 0.05, -15.5, 'weapon'); // house living room
+  L(-9, 0.05, -18.5); // kitchen
+  L(-14.5, 3.25, -14.8); // bedroom
+  L(-10.5, 3.25, -18.8, 'weapon'); // landing
+  L(11, 0.05, -15.2, 'weapon'); // bakery floor
+  L(8.5, 0.05, -14.5);
+  L(-19, 0.05, 10.8); // shed
+  L(5, 0.05, 6.5); // market
+  L(-5, 0.05, 6.5, 'weapon');
+  L(30, 0.05, 12, 'weapon'); // farm
+  L(-30.5, 0.05, 3); // bridge
+  L(-17, 0.05, 24, 'weapon'); // windmill
+  L(14, 0.05, 0);
+  L(-11, 0.05, 1);
+  C(-13, 6.12, -17, 0); // secret attic (get in through the gable window)
+  C(20, 7.02, 1.9, 0); // Old Tock balcony (blink only)
+  C(-35.2, 0.02, -12, 0.4); // blinkbug nest in the grove
+  C(9, 0.02, -18.6, 0); // bakery back
+  C(-18.5, 0.02, 9.3, Math.PI / 2); // toolshed
+  C(31, 0.02, 1, 0.3); // farm
+  C(-2, 0.02, -6.2, 0.2); // town square
 
   world.addZone('Pickle House', -17, -21, -7, -13, -1, 9, true);
   world.addZone('Crumb & Co.', 7, -20, 15, -13, -1, 6, true);

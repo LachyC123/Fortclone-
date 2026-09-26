@@ -5,6 +5,7 @@ import type { Actor } from '../entities/Actor';
 import type { World } from '../world/World';
 import type { LootSystem } from '../loot/Loot';
 import type { NavGrid } from '../world/NavGrid';
+import type { Throwables } from '../combat/Throwables';
 
 /**
  * Everything an actor can "want" in a frame. Player input and bot brains both produce this —
@@ -28,6 +29,13 @@ export interface Intent {
   throwRelease: boolean;
   blink: boolean;
   slot: number;
+  /** hold to aim a utility, release to throw */
+  utilAim: boolean;
+  utilRelease: boolean;
+  /** start using the healing item */
+  heal: boolean;
+  /** drop the held weapon */
+  drop: boolean;
 }
 
 export function makeIntent(): Intent {
@@ -49,6 +57,10 @@ export function makeIntent(): Intent {
     throwRelease: false,
     blink: false,
     slot: -1,
+    utilAim: false,
+    utilRelease: false,
+    heal: false,
+    drop: false,
   };
 }
 
@@ -69,6 +81,7 @@ export interface HudEvents {
   slotPulse(slot: number): void;
   playerEliminated(by: string): void;
   playerElimination(victim: string): void;
+  bigToast(text: string, color?: string): void;
 }
 
 export interface GameCtx {
@@ -86,4 +99,7 @@ export interface GameCtx {
   sounds: SoundEvent[];
   shake(amount: number): void;
   localActor: Actor | null;
+  throwables: Throwables;
+  /** line of sight that also respects smoke clouds */
+  sightClear(a: THREE.Vector3, b: THREE.Vector3): boolean;
 }

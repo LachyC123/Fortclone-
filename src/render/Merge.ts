@@ -18,15 +18,18 @@ export function mergeToVertexColored(root: THREE.Object3D, skip?: (m: THREE.Mesh
     const mat = m.material as THREE.MeshStandardMaterial;
     if (Array.isArray(mat) || (mat as THREE.Material).blending === THREE.AdditiveBlending) return;
     let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    // keep existing vertex colours (already-merged parts) tinted by the material colour
+    const existing = (mat as THREE.MeshStandardMaterial).vertexColors ? (g.getAttribute('color') as THREE.BufferAttribute | undefined) : undefined;
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && !(k === 'color' && existing)) g.deleteAttribute(k);
     g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
     const c = mat.color ?? new THREE.Color(1, 1, 1);
     const n = g.getAttribute('position').count;
     const col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      col[i * 3] = c.r;
-      col[i * 3 + 1] = c.g;
-      col[i * 3 + 2] = c.b;
+      const er = existing ? existing.getX(i) : 1, eg = existing ? existing.getY(i) : 1, eb = existing ? existing.getZ(i) : 1;
+      col[i * 3] = c.r * er;
+      col[i * 3 + 1] = c.g * eg;
+      col[i * 3 + 2] = c.b * eb;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     if (mat.metalness > 0.3) emissive = true;
