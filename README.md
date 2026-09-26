@@ -60,8 +60,9 @@ npm run typecheck
 > (climbable windmill, barn, silo, duck pond), **Tickerton** (two terraces of three-storey townhouses and a
 > clock tower — the densest spot on the map), **Snoozy Pines** (log cabins, a lodge and a fire lookout in a
 > dark pine wood), **Saltwhistle Wharf** (fisher cottages, boathouse, harbour lookout, a crane over the drop)
-> and **Rumpus Fair** (a big top you fight inside, Ferris wheel, carousel, haunted house). Twenty-odd lone
-> homesteads, cabins, huts and ruined towers fill the land between: 56 enterable buildings, up from 20.
+> and **Rumpus Fair** (a big top you fight inside, Ferris wheel, carousel, haunted house). Twenty lone
+> homesteads, cabins, huts and ruined towers fill the land between: 75 named enterable buildings (was 20),
+> 225 loot spots (was 99), 40 crates (was 29).
 > Every match the barge route decides which peninsulas are in reach, and two **Hot Drops** (orange beams,
 > flame markers on the map) get a rich crate and rare guns.
 

@@ -26,15 +26,15 @@ export function buildHomesteads(k: Kit, world: World, doors: DoorSpec[], count =
   const rng = new Rng(2468);
   const placed: [number, number][] = [];
   const clear = (x: number, z: number, r: number) => {
-    if (busy(x, z, r + 3.5, r + 3)) return false;
+    if (busy(x, z, r + 2.5, r + 2)) return false;
     if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - r - 5) return false;
     if (Math.abs(x - STREAM_X) < r + 7 && z > STREAM_Z0 - 6 && z < STREAM_Z1 + 6) return false;
     if (Math.hypot(x - LAGOON_POS.x, z - LAGOON_POS.z) < LAGOON_POS.r + r + 6) return false;
-    if (highGround(x, z, r) - lowGround(x, z, r) > 1.6) return false;
-    if (placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 17)) return false;
+    if (highGround(x, z, r) - lowGround(x, z, r) > 1.75) return false;
+    if (placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 13)) return false;
     // nothing solid already there (outcrops, walls, trees, other buildings)
     const gy = ground(x, z);
-    const hits = k.cw.query(x - r - 1.5, gy + 0.3, z - r - 1.5, x + r + 1.5, gy + 6, z + r + 1.5, ColFlags.BlocksMove);
+    const hits = k.cw.query(x - r - 1, gy + 0.3, z - r - 1, x + r + 1, gy + 6, z + r + 1, ColFlags.BlocksMove);
     return !hits.some((o) => o.tag !== 'ground' && o.tag !== 'boundary');
   };
   let n = 0;

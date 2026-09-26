@@ -264,7 +264,7 @@ shopfront, terrace mode without side windows), `cabin` (log courses, porch, opti
 `tower` (N levels, one flight per level; tops: battlements, lookout, windmill with turning sails, clock with
 four faces), `pavilion`, `signPost`. Places: `pois/Puddleby.ts`, `Tickerton.ts`, `SnoozyPines.ts`,
 `Saltwhistle.ts`, `RumpusFair.ts` (laid out in `placeFrame`, whose +z faces the island centre), and
-`pois/Homesteads.ts` (~22 lone buildings on flat, clear ground away from roads, places, the stream and each
+`pois/Homesteads.ts` (~20 lone buildings on flat, clear ground away from roads, places, the stream and each
 other — it queries the collision world, so it runs last).
 
 **Keeping it cheap**: furniture/fittings go through `Kit.beginInterior()/endInterior()` into an *interior*
