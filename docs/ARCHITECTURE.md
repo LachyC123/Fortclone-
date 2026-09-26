@@ -313,7 +313,7 @@ forwards: host messages with `to` go to one client, other host messages to all, 
 to the host with `from` stamped on. `npm run lan` builds and runs it and prints the Wi-Fi addresses.
 
 **Host-authoritative**: the host's browser runs the normal simulation (`HostSession`). Each remote player is
-an ordinary `Actor` driven by a `RemoteController` fed from 30Hz input packets (axes/aim held, button edges
+an ordinary `Actor` driven by a `RemoteController` fed from input packets sent every client frame (axes/aim held, button edges
 accumulated so a tap is never lost). The host sends:
 - a 20Hz snapshot: per actor a compact `NetActorState` (position, yaw, pitch, hp, bitflags, weapon, bug);
 - the fx/audio/loot/crate calls made during the tick, recorded by `net/Codec.tap` wrapping those methods;
