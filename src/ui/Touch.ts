@@ -53,8 +53,8 @@ export class TouchControls {
       ['bug', ICONS.throwBug, 262, 178, 'bug', true],
       ['blink', ICONS.blink, 348, 108, 'blink', false],
       ['interact', ICONS.interact, 262, 300, 'interact', false],
-      ['util', ICONS.utility, 352, 222, 'small item', true],
-      ['heal', ICONS.heal, 438, 110, 'small item', false],
+      ['util', ICONS.utility, 150, 322, 'small item', true],
+      ['heal', ICONS.heal, 58, 282, 'small item', false],
     ];
     for (const [id, icon, r, b, cls, look] of def) {
       const el = document.createElement('div');

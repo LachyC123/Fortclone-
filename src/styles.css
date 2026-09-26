@@ -1397,3 +1397,114 @@ input[type='range'] {
   opacity: 0.65;
   margin-left: auto;
 }
+/* compact loot card on touch screens: parked under the minimap, away from the thumbs */
+.touch-on .lootcard {
+  left: calc(10px + var(--safe-l));
+  right: auto;
+  top: calc(172px + var(--safe-t));
+  width: 176px;
+  padding: 7px 9px 8px;
+  font-size: 11px;
+  transform-origin: left top;
+}
+.touch-on .lootcard .bl {
+  display: none;
+}
+.touch-on .lootcard .hd .ic {
+  width: 38px;
+  height: 32px;
+}
+.touch-on .lootcard .hd .ic svg {
+  width: 30px;
+  height: 30px;
+}
+.touch-on .lootcard .nm {
+  font-size: 16px;
+}
+.touch-on .lootcard .rn {
+  font-size: 11px;
+}
+.touch-on .lootcard .st {
+  grid-template-columns: 62px 1fr 12px;
+  margin: 1px 0;
+  font-size: 9.5px;
+}
+.touch-on .lootcard .sb {
+  height: 7px;
+}
+.touch-on .lootcard .fuse {
+  margin-top: 5px;
+  padding: 3px 6px;
+  font-size: 10.5px;
+}
+.touch-on .lootcard .fuse em,
+.touch-on .lootcard .swapnote {
+  display: none;
+}
+@media (max-height: 500px) {
+  .touch-on .lootcard {
+    top: calc(126px + var(--safe-t));
+  }
+}
+.touch-on .prompt {
+  left: 40%;
+  top: calc(50% + 56px);
+  font-size: 14px;
+  padding: 4px 10px;
+}
+/* ---------- spyglass scope (Needler / Sparkbow ADS) */
+.scope {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(1.15);
+  transition: opacity 0.12s, transform 0.18s cubic-bezier(0.2, 1.4, 0.4, 1);
+  background: radial-gradient(circle at center, transparent 0 min(34vh, 34vw), rgba(43, 34, 56, 0.35) calc(min(34vh, 34vw) + 1px), #2b2238 calc(min(34vh, 34vw) + 14px), #1d1726 100%);
+}
+.scope.on {
+  opacity: 1;
+  transform: scale(1);
+}
+.scope::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(min(68vh, 68vw) + 22px);
+  height: calc(min(68vh, 68vw) + 22px);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 8px solid #d9a441;
+  box-shadow: inset 0 0 0 3px #8a5a3b, 0 0 0 3px #8a5a3b;
+}
+.scope i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(43, 34, 56, 0.85);
+}
+.scope i.h {
+  width: min(68vh, 68vw);
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(90deg, rgba(43, 34, 56, 0.9) 0 44%, transparent 44% 56%, rgba(43, 34, 56, 0.9) 56%);
+}
+.scope i.v {
+  width: 2px;
+  height: min(68vh, 68vw);
+  transform: translate(-50%, -50%);
+  background: linear-gradient(180deg, rgba(43, 34, 56, 0.9) 0 44%, transparent 44% 56%, rgba(43, 34, 56, 0.9) 56%);
+}
+.scope b {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #ff5c8a;
+  box-shadow: 0 0 6px #ff5c8a;
+}

@@ -32,6 +32,7 @@ const res = await page.evaluate(() => {
   const f = (v) => v.toArray().map((x) => x.toFixed(2)).join(',');
   const log = [];
   const p = g.player;
+  for (const extra of g.actors.slice(2)) { extra.parked = true; extra.controller = null; extra.alive = false; extra.rig.root.visible = false; extra.bug.root.visible = false; extra.motor.teleport(new extra.motor.pos.constructor(0, -500, 0)); }
   const bot = g.actors[1];
   const brain = bot.controller; bot.controller = null; bot.motor.teleport(new p.motor.pos.constructor(40, 0.05, 0));
   // deterministic starter gun for the test

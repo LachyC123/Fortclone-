@@ -66,6 +66,7 @@ export class HUD implements HudEvents {
   private blinkFlash = h('div', 'blinkflash');
   private speedLines = h('div', 'speedlines');
   private fpsEl = h('div', 'fps');
+  private scope = h('div', 'scope', '<i class="h"></i><i class="v"></i><b></b>');
   private dmgNums: DmgNum[] = [];
   private lastHp = 100;
   private lastZone = '';
@@ -113,7 +114,7 @@ export class HUD implements HudEvents {
     this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
     this.locator.innerHTML = `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" stroke="rgba(43,34,56,0.5)" stroke-width="5" fill="rgba(43,34,56,0.35)"/><circle class="arc" cx="22" cy="22" r="19" stroke="#6ff7ff" stroke-width="5" fill="none" stroke-dasharray="119.4" stroke-linecap="round"/></svg><div class="ic">${ICONS.bug}</div>`;
     r.append(this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
-    document.body.append(this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
+    document.body.append(this.scope, this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
   }
 
   onSlotTap: ((i: number) => void) | null = null;
@@ -304,6 +305,11 @@ export class HUD implements HudEvents {
       this.reloadBar.classList.remove('heal');
       bar.style.transform = `scaleX(${clamp(w.reloadT / w.reloadTime, 0, 1)})`;
     } else this.reloadBar.style.opacity = '0';
+
+    // spyglass scope for precision weapons
+    const scoped = !!(w && p.ads && w.def.adsFov <= 40);
+    this.scope.classList.toggle('on', scoped);
+    this.crosshair.style.visibility = scoped ? 'hidden' : 'visible';
 
     // crosshair spread + enemy tint
     const gap = 6 + spreadDeg * 5;

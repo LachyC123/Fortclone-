@@ -380,7 +380,7 @@ export class Game implements GameCtx {
       if (this.respawnT <= 0) this.respawnPlayer();
     }
     for (const a of this.actors) {
-      if (a === p || a.alive) continue;
+      if (a === p || a.alive || a.parked) continue;
       const t = (this.botRespawn.get(a) ?? 5) - dt;
       if (t <= 0) {
         this.botRespawn.delete(a);

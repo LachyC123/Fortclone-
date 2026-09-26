@@ -18,6 +18,7 @@ const out = await page.evaluate(() => {
   const step = (sec) => g.debugStep(Math.round(sec * 60));
   const V = g.player.motor.pos.constructor;
   const p = g.player; const log = [];
+  for (const extra of g.actors.slice(2)) { extra.parked = true; extra.controller = null; extra.alive = false; extra.rig.root.visible = false; extra.bug.root.visible = false; extra.motor.teleport(new extra.motor.pos.constructor(0, -500, 0)); }
   const bot = g.actors[1]; const brain = bot.controller; bot.controller = null; bot.motor.teleport(new V(40, 0.05, 0));
   const dummy = () => { bot.hp = 100; bot.alive = true; bot.rig.root.visible = true; bot.motor.teleport(new V(-2, 0.05, -2)); };
   p.motor.teleport(new V(-2, 0.05, 10)); g.camRig.yaw = 0; step(0.3);

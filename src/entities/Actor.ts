@@ -35,6 +35,8 @@ export class Actor implements BugOwner {
   intent: Intent = makeIntent();
   controller: Controller | null = null;
   isLocal = false;
+  /** test/debug: removed from play (no AI, no respawn) */
+  parked = false;
 
   hp = 100;
   maxHp = 100;

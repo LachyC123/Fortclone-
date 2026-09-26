@@ -205,7 +205,7 @@ export class PlayerController implements Controller {
       const dir = tp.clone().sub(camPos).normalize();
       const ang = Math.acos(clamp(dir.dot(fwd), -1, 1));
       if (ang > 0.09) continue;
-      if (!ctx.cw.lineClear(camPos, tp, ColFlags.BlocksBullets)) continue;
+      if (!ctx.cw.lineClear(camPos, tp, ColFlags.BlocksBullets) || ctx.throwables.smokeBlocks(camPos, tp)) continue;
       if (!best || ang < best.angle) best = { yaw: Math.atan2(-dir.x, -dir.z), pitch: Math.asin(dir.y), angle: ang, visible: true };
     }
     return best;

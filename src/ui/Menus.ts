@@ -56,7 +56,9 @@ export class Menus {
       <div class="hint">Milestone 1 · Combat Playground<br>
       <kbd>WASD</kbd> move · <kbd>Mouse</kbd> aim · <kbd>LMB</kbd> fire · <kbd>RMB</kbd> aim down sights<br>
       <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump/climb · <kbd>C</kbd> crouch/slide · <kbd>R</kbd> reload · <kbd>F</kbd> pick up<br>
-      <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!) · <kbd>Esc</kbd> pause</div></div>`;
+      <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!)<br>
+      <kbd>G</kbd> hold/release to throw a utility · <kbd>H</kbd> heal · <kbd>X</kbd> drop gun · <kbd>1-3</kbd> weapons · <kbd>Esc</kbd> pause<br>
+      Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!</div></div>`;
     this.title.querySelector('.play')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();
