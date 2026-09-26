@@ -68,6 +68,8 @@ npm run typecheck
 
 ## Play with friends (LAN)
 
+Short version to share: [LAN-QUICKSTART.md](LAN-QUICKSTART.md).
+
 Everyone on the **same Wi-Fi**. One computer runs the room server; phones, tablets and computers just open a web page.
 
 1. On one computer (with Node 18+), in this folder: `npm install` once, then **`npm run lan`**.
