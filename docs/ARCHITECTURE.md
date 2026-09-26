@@ -214,3 +214,37 @@ or damage); bots emote in the lobby and after a clear kill; kill-streak callouts
 long shot, clutch, first bonk). **Loot Balloons** (`Match.spawnBalloon`) drift into the safe zone at ~1:55
 and ~4:05 after landing with a rich crate (epic/mythic), a light beam and a minimap star; bots treat the
 landing spot as a `hotspot`.
+
+## 14. Juice and third-party behaviour (Milestone 6)
+
+**Time control** (`Game.hitStop`, `Game.slowMo`): applied to the real-time frame only (never to
+`debugStep`, so tests stay deterministic). Kill by you → 90ms freeze-frame at 3% speed plus an FOV punch;
+your headshot → 35ms; you knocked out → 1.1s slow-mo easing back; victory → 1.3s slow-mo.
+
+**KO tumble** (`Actor.updateKO`/`koPoof`): on elimination the rig is launched along the hit direction,
+spinning with squash-and-stretch and orbiting stars (`FX.koStars`), bounces once and pops into the
+confetti burst after 0.62s. Falling off the island skips straight to the poof.
+
+**World reactions**: `FX.casing` (instanced brass/red shells with bounce and a throttled tink for nearby
+shooters), `FX.leaves` (bullets that pass through a canopy — found with a `BlocksSight` ray — shake out
+leaves), water splash in `FX.landBurst`, `FX.bolt` lightning with distance-delayed `audio.thunder` in the
+Gloom. `fx/Birds.ts`: ~14 flocks (one instanced mesh, 72 birds max) peck and hop on open ground; running
+within 9m (not crouched), coming within 3.5m, or any gunshot/explosion in earshot sends them up with a
+feather puff and wing-flap audio; they settle somewhere else 20s later. Only flocks within 90m animate.
+
+**UI**: ammo counter kicks per shot and pops on reload (low/empty colours), kill and alive pills bump,
+`HUD.koFlash` whites out and desaturates the canvas for a beat. Victory lap (`Match` `celebrateT`): fanfare,
+confetti cannons every 0.55s around the winner, `CameraRig.cinematic` orbit and an auto dance, then the
+summary. (Also fixed: `checkWin` re-armed every frame, which kept postponing the victory summary.)
+
+**Third-party behaviour** (`BotBrain.onDamaged`, fight-or-flight): bots keep a decaying `threat` score per
+attacker. Getting shot by someone other than the current target makes one decision, with hysteresis
+(switch only if the newcomer's threat clearly exceeds the current target's, or it's a fresh ambush while
+hurt) and a 2.6s lock; attention snaps to the shooter instead of sweeping. Every 2s a pinched bot (hit by
+a third party recently and under 60hp) decides to flee (~70%); flight runs away from the threat-weighted
+sum of attackers, or sideways out of a crossfire, and within 16m it's a fighting retreat (eyes and gun on
+the threat). `tools/thirdparty.mjs` measures turns, target flips and reaction.
+
+**Blinkbug escape window**: a knocked-out rascal's bug gets `grace` 2.4s (bullets fizzle with a ring and a
+chirp, sparkles) and an upward burst; bots drop a graced bug as a target and ~60% of the time ignore it for
+5–9s.

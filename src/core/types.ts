@@ -83,6 +83,8 @@ export interface HudEvents {
   playerEliminated(by: string): void;
   playerElimination(victim: string, callout?: string): void;
   bigToast(text: string, color?: string): void;
+  /** you got knocked out: white flash, colour drains for a beat */
+  koFlash(): void;
 }
 
 export interface GameCtx {
@@ -99,6 +101,10 @@ export interface GameCtx {
   emitSound(e: Omit<SoundEvent, 'time'>): void;
   sounds: SoundEvent[];
   shake(amount: number): void;
+  /** freeze-frame for impact (dur in real seconds, scale = sim speed meanwhile) */
+  hitStop(dur: number, scale?: number): void;
+  /** dramatic slow motion that eases back to full speed */
+  slowMo(scale: number, dur: number): void;
   localActor: Actor | null;
   throwables: Throwables;
   /** line of sight that also respects smoke clouds */

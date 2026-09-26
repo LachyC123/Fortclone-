@@ -73,6 +73,8 @@ export class Match implements MatchHooks {
   private t = 0;
   private dmgTick = 0;
   private endT = -1;
+  private celebrateT = 0;
+  private cannonT = 0;
   private won = false;
   private dropTargets = new Map<number, THREE.Vector3>();
   private dropSeed = 0;
@@ -102,6 +104,8 @@ export class Match implements MatchHooks {
     this.phase = 'lobby';
     this.t = 0;
     this.endT = -1;
+    this.celebrateT = 0;
+    this.g.camRig.cinematic = false;
     this.won = false;
     this.summaryShown = false;
     this.firstOut = false;
@@ -270,14 +274,19 @@ export class Match implements MatchHooks {
   onRevive(_a: Actor) {}
 
   private checkWin() {
-    if (this.phase !== 'live' && this.phase !== 'barge') return;
+    if (this.won || (this.phase !== 'live' && this.phase !== 'barge')) return;
     const p = this.g.player;
     if (!p.out && this.remaining <= 1) {
       this.won = true;
       p.placement = 1;
-      this.endT = 1.2;
+      // victory lap: slow-mo on the final bonk, fanfare, confetti cannons, the camera swings round
+      // and our rascal busts a move before the summary
+      this.endT = 5.2;
+      this.celebrateT = 5.2;
+      this.cannonT = 0.5;
       this.ui.victory();
-      audio.fuse();
+      this.g.slowMo(0.3, 1.3);
+      audio.fanfare();
       this.g.fx.elimination(p.motor.pos.clone().setY(p.motor.pos.y + 2), [0xffd36b, 0xff9ad5, 0x6ff7ff]);
     }
   }
@@ -377,6 +386,24 @@ export class Match implements MatchHooks {
       }
       this.ui.bugout(p.bugout.t, p.bugout.hp / 30, best, bd, g.camera);
     } else this.ui.bugout(-1, 0, null, 0, g.camera);
+
+    // victory celebration
+    if (this.celebrateT > 0) {
+      this.celebrateT -= dt;
+      const p = g.player;
+      g.camRig.cinematic = this.celebrateT < 4.2 && this.celebrateT > 0;
+      if (this.celebrateT < 4.3 && p.alive && !p.emote && Math.hypot(p.intent.moveX, p.intent.moveZ) < 0.2) p.startEmote('dance', 3.5);
+      this.cannonT -= dt;
+      if (this.cannonT <= 0 && this.celebrateT > 0.8) {
+        this.cannonT = 0.55;
+        const a = Math.random() * Math.PI * 2;
+        const at = p.motor.pos.clone().add(new THREE.Vector3(Math.cos(a) * 5, 0.3, Math.sin(a) * 5));
+        const dir = new THREE.Vector3(-Math.cos(a) * 0.35, 1, -Math.sin(a) * 0.35).normalize();
+        g.fx.confettiCannon(at, dir);
+        audio.cannon(at);
+      }
+      if (this.celebrateT <= 0) g.camRig.cinematic = false;
+    }
 
     // end of match
     if (this.endT > 0) {

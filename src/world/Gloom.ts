@@ -3,6 +3,7 @@ import { shared } from '../render/Materials';
 import type { FX } from '../fx/FX';
 import { PShape } from '../fx/Particles';
 import { rand } from '../core/math';
+import { audio } from '../audio/Audio';
 
 export interface GloomPhase {
   wait: number;
@@ -196,6 +197,9 @@ export class Gloom {
       const p = new THREE.Vector3(this.center.x + Math.cos(a) * rr, rand(20, 45), this.center.y + Math.sin(a) * rr);
       this.fx.glow.emit(p, { count: 3, color: 0xe8c0ff, speed: 0, life: 0.18, size: rand(8, 14), sizeEnd: 1.3, alpha: 0.8 });
       for (let i = 0; i < 8; i++) this.fx.glow.emit(p.clone().setY(p.y - i * 3), { count: 1, color: 0xffffff, speed: 0.5, life: 0.2, size: 1.2, alpha: 0.9 });
+      // every other flash is a proper bolt down to the ground, with thunder rolling in after it
+      if (Math.random() < 0.55) this.fx.bolt(p.clone().setY(p.y + 25), 0);
+      audio.thunder(p);
       this.lastStrike = p;
     }
   }

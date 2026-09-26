@@ -24,6 +24,7 @@ import { Throwables } from '../combat/Throwables';
 import { geoStats } from '../render/GeoKit';
 import { Match } from './Match';
 import { Bubbles } from '../fx/Bubbles';
+import { Birds } from '../fx/Birds';
 import type { EmoteKind } from '../entities/RascalRig';
 import { ISLAND_R, POIS } from '../world/Heightmap';
 import { SPECIES_BY_ID, Collection, loadCollection, saveCollection, randomBugName, randomSpecies } from '../progression/Bugs';
@@ -70,6 +71,7 @@ export class Game implements GameCtx {
   private lowFpsTime = 0;
   private titleOrbit = 0;
   bubbles: Bubbles;
+  birds: Birds;
   private emoteIdx = 0;
   /** the battle royale in progress (null in the playground / on the title screen) */
   match: Match | null = null;
@@ -104,6 +106,9 @@ export class Game implements GameCtx {
     if (location.search.includes('timing')) console.log(`[t] world ${(tw2 - tw).toFixed(0)}ms nav ${(performance.now() - tw2).toFixed(0)}ms`);
 
     this.bubbles = new Bubbles(this.scene);
+    this.birds = new Birds(this.scene, this.cw, this.fx);
+    this.birds.reset();
+    this.fx.onCasingLand = (p) => audio.casing(p);
     this.input = new Input(canvas);
     this.camRig = new CameraRig(this.camera, this.cw);
     this.hud = new HUD(this.camera);
@@ -238,6 +243,42 @@ export class Game implements GameCtx {
     if (amount > 0) this.camRig.shake(amount);
   }
 
+  /** test hook: stop the real-time loop simulating (debugStep still works) */
+  freeze = false;
+
+  // ---- time control (juice): applied to the real-time frame only, never to debugStep
+  private stopT = 0;
+  private stopScale = 0.05;
+  private slowT = 0;
+  private slowDur = 1;
+  private slowScale = 1;
+  hitStop(dur: number, scale = 0.05) {
+    this.camRig.punch(dur * 45);
+    if (dur > this.stopT) {
+      this.stopT = dur;
+      this.stopScale = scale;
+    }
+  }
+  slowMo(scale: number, dur: number) {
+    this.slowScale = scale;
+    this.slowT = dur;
+    this.slowDur = dur;
+  }
+  private timeScale(realDt: number) {
+    let k = 1;
+    if (this.slowT > 0) {
+      this.slowT -= realDt;
+      // hold, then ease back to full speed over the last 40%
+      const u = Math.max(0, this.slowT) / this.slowDur;
+      k = u > 0.4 ? this.slowScale : this.slowScale + (1 - this.slowScale) * (1 - u / 0.4);
+    }
+    if (this.stopT > 0) {
+      this.stopT -= realDt;
+      k = Math.min(k, this.stopScale);
+    }
+    return k;
+  }
+
   /* ------------------------------------------------------------------ flow */
 
   start() {
@@ -324,6 +365,7 @@ export class Game implements GameCtx {
 
   /** Fresh loot, closed crates and recharged Rift Nests. */
   resetWorldForMatch() {
+    this.birds.reset();
     for (const p of [...this.loot.pickups]) this.loot.remove(p);
     for (const s of this.world.lootSpots) this.spawnLootSpot(s);
     // every place (and the wild land between them) gets guns on the ground and spare ammo,
@@ -428,6 +470,16 @@ export class Game implements GameCtx {
     }
     dt = Math.min(dt, 1 / 25);
 
+    if (this.freeze) {
+      // test hook: hold the simulation still and just draw (screenshots of transient FX)
+      if (this.debugCam) {
+        this.camera.position.copy(this.debugCam.pos);
+        this.camera.lookAt(this.debugCam.target);
+      }
+      this.r.render();
+      return;
+    }
+
     if (this.paused) {
       // attract mode: slow orbit around the square behind the title
       this.titleOrbit += dt * 0.08;
@@ -435,6 +487,7 @@ export class Game implements GameCtx {
       this.camera.position.set(Math.sin(this.titleOrbit) * r, 14 + Math.sin(this.titleOrbit * 0.7) * 2, Math.cos(this.titleOrbit) * r);
       this.camera.lookAt(0, 3, -6);
       this.world.update(dt, this.actors, this.camera.position);
+      this.birds.update(dt, performance.now() / 1000, this.camera.position, [], []);
       this.fx.update(dt, this.camera);
       for (const a of this.actors) if (a.alive) a.bug.update(0);
       this.r.followShadows(new THREE.Vector3(0, 0, -4));
@@ -449,7 +502,7 @@ export class Game implements GameCtx {
       this.input.endFrame();
       return;
     }
-    this.simulate(dt);
+    this.simulate(dt * this.timeScale(dt));
     if (this.debugCam) {
       this.camera.position.copy(this.debugCam.pos);
       this.camera.lookAt(this.debugCam.target);
@@ -483,6 +536,7 @@ export class Game implements GameCtx {
       this.playerEmote(kinds[this.emoteIdx++ % kinds.length]);
     }
     this.bubbles.update(this.actors, this.camera, this.time);
+    this.birds.update(dt, this.time, this.camera.position, this.actors, this.sounds);
 
     // camera & listener
     const p = this.player;

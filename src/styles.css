@@ -2623,3 +2623,44 @@ input[type='range'] {
   opacity: 0.6;
   margin-top: 6px;
 }
+
+/* ---------- M6 juice: counter pops, ammo kick, KO flash */
+.ammo { transform-origin: 100% 100%; }
+.ammo.kick { animation: ammoKick 0.12s ease-out; }
+.ammo.bump { animation: ammoBump 0.32s cubic-bezier(0.3, 1.8, 0.5, 1); }
+.ammo.low { color: #ffd36b; }
+.ammo.empty { color: #ff6b6b; }
+@keyframes ammoKick {
+  0% { transform: scale(1.14) rotate(-3deg); }
+  100% { transform: none; }
+}
+@keyframes ammoBump {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.25); }
+  100% { transform: none; }
+}
+.pill.bump { animation: pillBump 0.5s cubic-bezier(0.3, 1.9, 0.5, 1); }
+.pill.tick { animation: pillTick 0.3s ease-out; }
+@keyframes pillBump {
+  0% { transform: scale(1); filter: brightness(1.8); }
+  35% { transform: scale(1.45) rotate(-6deg); }
+  100% { transform: none; filter: none; }
+}
+@keyframes pillTick {
+  0% { transform: translateY(-4px) scale(1.12); }
+  100% { transform: none; }
+}
+.koflash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95), rgba(255, 240, 200, 0.6) 60%, rgba(255, 150, 150, 0.5));
+}
+.koflash.on { animation: koFlash 0.7s ease-out; }
+@keyframes koFlash {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+#game { transition: filter 0.6s ease; }
+body.ko #game { filter: saturate(0.2) contrast(1.08) brightness(1.05); transition: filter 0.08s; }

@@ -679,6 +679,87 @@ export class Audio {
     const t = this.ctx!.currentTime;
     this.tone(out, 'triangle', rand(160, 240), 90, t, 0.1, 0.4);
   }
+
+  /** brass on the floor */
+  casing(pos: THREE.Vector3) {
+    if (!this.throttle('casing', 45)) return;
+    const out = this.out(pos, 0.18, 14);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    const f = rand(3800, 5200);
+    this.tone(out, 'triangle', f, f * 0.97, t, 0.05, 0.35);
+    this.tone(out, 'sine', f * 1.5, f * 1.45, t + 0.06, 0.04, 0.15);
+  }
+
+  /** rolling thunder; farther strikes arrive later and duller */
+  thunder(pos: THREE.Vector3) {
+    if (!this.throttle('thunder', 900) || !this.ctx) return;
+    const dist = pos.distanceTo(this.listenerPos);
+    const out = this.out(undefined, Math.max(0.12, 0.55 - dist / 400));
+    if (!out) return;
+    const t = this.ctx.currentTime + Math.min(1.6, dist / 340);
+    const bright = Math.max(300, 1400 - dist * 6);
+    this.noise(out, t, 0.25, 0.7, 'lowpass', bright * 2, bright, 0.7);
+    this.noise(out, t + 0.1, 1.8, 0.8, 'lowpass', bright, 90, 0.9, 0.08);
+    this.tone(out, 'sine', 55, 32, t + 0.05, 1.4, 0.5, 0.1);
+  }
+
+  /** a flock bursting into the air */
+  flap(pos: THREE.Vector3, n = 6) {
+    if (!this.throttle('flap', 250)) return;
+    const out = this.out(pos, 0.35, 40);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    for (let i = 0; i < n; i++) this.noise(out, t + i * rand(0.03, 0.07), 0.07, 0.35, 'bandpass', rand(900, 1500), rand(500, 800), 1.5);
+    this.tone(out, 'sine', rand(2400, 3000), rand(3200, 3800), t + 0.05, 0.08, 0.06);
+    this.tone(out, 'sine', rand(2600, 3200), rand(3400, 4000), t + 0.16, 0.07, 0.05);
+  }
+
+  /** knocked-out rascal spinning away */
+  koWhoosh(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.5, 50);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.45, 0.5, 'bandpass', 600, 2400, 2, 0.05);
+    this.tone(out, 'triangle', 900, 300, t, 0.4, 0.2);
+    // cartoon "boing-ding" stars
+    this.tone(out, 'sine', 1760, 1760, t + 0.18, 0.12, 0.15);
+    this.tone(out, 'sine', 2217, 2217, t + 0.26, 0.12, 0.12);
+    this.tone(out, 'sine', 2637, 2637, t + 0.34, 0.2, 0.1);
+  }
+
+  /** victory! a little brass-ish fanfare built from stacked triangles */
+  fanfare() {
+    const out = this.out(undefined, 0.7);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    const notes: [number, number, number][] = [[523, 0, 0.14], [659, 0.14, 0.14], [784, 0.28, 0.14], [1047, 0.42, 0.5], [784, 0.95, 0.12], [1047, 1.08, 0.8]];
+    for (const [f, d, len] of notes) {
+      this.tone(out, 'triangle', f, f, t + d, len, 0.28, 0.01);
+      this.tone(out, 'sawtooth', f / 2, f / 2, t + d, len, 0.05, 0.01);
+      this.tone(out, 'sine', f * 2, f * 2, t + d, len * 0.6, 0.06, 0.01);
+    }
+    this.tone(out, 'sine', 65, 45, t + 0.42, 0.6, 0.6);
+    this.noise(out, t + 0.42, 0.5, 0.35, 'highpass', 5000, 8000, 0.7);
+  }
+
+  /** confetti cannon */
+  cannon(pos?: THREE.Vector3) {
+    const out = this.out(pos, 0.55, 60);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sine', 180, 50, t, 0.18, 0.7);
+    this.noise(out, t, 0.2, 0.6, 'lowpass', 4000, 600, 0.8);
+    for (let i = 0; i < 5; i++) this.tone(out, 'triangle', rand(1800, 3200), rand(2400, 4000), t + 0.08 + i * 0.035, 0.05, 0.12);
+  }
+
+  /** knocked out: a sinking "wah-wah" */
+  koSting() {
+    const out = this.out(undefined, 0.45);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    [392, 370, 349, 294].forEach((f, i) => this.tone(out, 'triangle', f, i === 3 ? f * 0.85 : f, t + i * 0.2, i === 3 ? 0.6 : 0.18, 0.22, 0.02));
+  }
 }
 
 export const audio = new Audio();

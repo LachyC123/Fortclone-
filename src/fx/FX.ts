@@ -34,6 +34,23 @@ interface Debris {
   color: THREE.Color;
 }
 
+interface Casing {
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  rot: THREE.Euler;
+  spin: THREE.Vector3;
+  life: number;
+  bounced: boolean;
+  color: THREE.Color;
+  loud: boolean;
+}
+
+interface Bolt {
+  line: THREE.Line;
+  t: number;
+  active: boolean;
+}
+
 interface Smear {
   mesh: THREE.Mesh;
   t: number;
@@ -73,6 +90,11 @@ export class FX {
   private debris: Debris[] = [];
   private debrisMesh: THREE.InstancedMesh;
   private smears: Smear[] = [];
+  private casings: Casing[] = [];
+  private casingMesh: THREE.InstancedMesh;
+  private bolts: Bolt[] = [];
+  /** set by the game: brass tinks for casings near the listener */
+  onCasingLand: ((p: THREE.Vector3) => void) | null = null;
   flash: THREE.PointLight;
   private flashT = 0;
   private flashDur = 0.06;
@@ -126,6 +148,27 @@ export class FX {
       m.frustumCulled = false;
       this.group.add(m);
       this.smears.push({ mesh: m, t: 0, dur: 0.3, active: false });
+    }
+
+    // shell casings: tiny brass cylinders that spin out of the gun and bounce once or twice
+    const cg = new THREE.CylinderGeometry(0.022, 0.022, 0.075, 6);
+    cg.rotateZ(Math.PI / 2);
+    this.casingMesh = new THREE.InstancedMesh(cg, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.8, emissive: 0x2a1c00 }), 64);
+    this.casingMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(64 * 3), 3);
+    this.casingMesh.count = 0;
+    this.casingMesh.castShadow = false;
+    this.casingMesh.frustumCulled = false;
+    this.group.add(this.casingMesh);
+
+    // lightning bolts (Gloom): a few reusable jagged lines
+    for (let i = 0; i < 3; i++) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(16 * 3), 3));
+      const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xf6e0ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      line.visible = false;
+      line.frustumCulled = false;
+      this.group.add(line);
+      this.bolts.push({ line, t: 0, active: false });
     }
 
     // Always present (intensity 0 when idle) so toggling it never forces shader recompiles
@@ -241,6 +284,14 @@ export class FX {
   }
 
   landBurst(p: THREE.Vector3, impact: number, surface: Surface) {
+    if (surface === 'water') {
+      // splash: a crown of droplets and a ripple ring
+      this.soft.emit(p, { count: Math.min(26, 8 + impact), color: [0xffffff, 0xbff3ff, 0x7fdcef], speed: [2, 3 + impact * 0.3], spread: 0.45, dir: _dir.set(0, 1, 0), gravity: 16, life: [0.4, 0.8], size: [0.08, 0.16], sizeEnd: 0.6, jitter: 0.3 });
+      this.soft.emit(p, { count: 4, color: 0xffffff, speed: [0.3, 1], spread: 1, up: 0.5, life: [0.4, 0.7], size: [0.4, 0.6], sizeEnd: 2, alpha: 0.5, drag: 3 });
+      this.ring(_p.copy(p).setY(p.y + 0.04), 0xdff8ff, 0.2, 1.4 + impact * 0.08, 0.6);
+      this.ring(_p.copy(p).setY(p.y + 0.04), 0xffffff, 0.1, 0.9 + impact * 0.05, 0.8);
+      return;
+    }
     const n = Math.min(18, 4 + impact * 0.8);
     const c = surface === 'grass' ? 0xd9e8b0 : surface === 'wood' ? 0xe0c49a : 0xe8dcc0;
     for (let i = 0; i < n; i++) {
@@ -309,6 +360,52 @@ export class FX {
 
   sparkBurst(p: THREE.Vector3, color: number, n = 12) {
     this.glow.emit(p, { count: n, color: [color, 0xffffff], speed: [2, 6], spread: 1, life: [0.2, 0.5], size: [0.08, 0.16], sizeEnd: 0.1, shape: PShape.Sparkle, drag: 3 });
+  }
+
+  /** A spent casing flicked out of the right side of the gun. */
+  casing(p: THREE.Vector3, right: THREE.Vector3, fwd: THREE.Vector3, shell = false, loud = false) {
+    if (this.casings.length >= 64) this.casings.shift();
+    const v = new THREE.Vector3().copy(right).multiplyScalar(rand(2.2, 3.4)).addScaledVector(fwd, rand(-0.6, 0.4));
+    v.y += rand(2.2, 3.4);
+    this.casings.push({ pos: p.clone(), vel: v, rot: new THREE.Euler(0, rand(0, 6), 0), spin: new THREE.Vector3(rand(-20, 20), rand(-30, 30), rand(-20, 20)), life: rand(1.4, 2), bounced: false, color: new THREE.Color(shell ? 0xe0463c : 0xf2c14e), loud });
+  }
+
+  /** Leaves shaken out of a canopy (bullets, explosions) — they flutter down slowly. */
+  leaves(p: THREE.Vector3, n = 6) {
+    this.soft.emit(p, { count: n, color: [0x7cc35a, 0x5aa347, 0xa6d86a, 0xd9c35a], speed: [0.6, 2.2], spread: 1, up: 0.6, gravity: 1.4, drag: 2.2, life: [1.6, 2.8], size: [0.09, 0.15], sizeEnd: 0.9, shape: PShape.Confetti, spin: 7, jitter: 0.3 });
+  }
+
+  /** Cartoon KO: little stars circling where the head was. */
+  koStars(p: THREE.Vector3) {
+    this.glow.emit(p, { count: 5, color: [0xfff27a, 0xffffff, 0xffb13d], speed: [1.2, 2.2], spread: 1, up: 1.5, gravity: 2, life: [0.5, 0.8], size: [0.16, 0.26], sizeEnd: 0.3, shape: PShape.Star, drag: 3, spin: 10 });
+  }
+
+  /** Party cannon: a directional blast of confetti and streamers (victory!). */
+  confettiCannon(p: THREE.Vector3, dir: THREE.Vector3) {
+    const c = [PAL.mustard, PAL.pink, PAL.turquoise, PAL.lavender, 0xffffff, 0x9dff8a];
+    this.soft.emit(p, { count: 46, color: c, speed: [8, 16], spread: 0.35, dir, gravity: 6, life: [2, 3.4], size: [0.1, 0.17], sizeEnd: 0.9, shape: PShape.Confetti, drag: 1.6, spin: 16 });
+    this.glow.emit(p, { count: 14, color: c, speed: [6, 12], spread: 0.3, dir, gravity: 3, life: [0.6, 1.1], size: [0.18, 0.3], sizeEnd: 0.2, shape: PShape.Star, drag: 2, spin: 10 });
+    this.glow.emit(p, { count: 2, color: 0xffffff, speed: 0, life: 0.12, size: 1.6, sizeEnd: 1.4, alpha: 0.8 });
+    this.soft.emit(p, { count: 4, color: [0xe8e0d0, 0xffffff], speed: [1, 2], spread: 0.5, dir, life: [0.6, 1], size: [0.4, 0.6], sizeEnd: 2.5, alpha: 0.4, drag: 2 });
+  }
+
+  /** A jagged lightning bolt from the sky down to (or near) the ground. */
+  bolt(top: THREE.Vector3, bottomY: number) {
+    const b = this.bolts.find((x) => !x.active) ?? this.bolts[0];
+    b.active = true;
+    b.t = 0;
+    const pos = b.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const n = pos.count;
+    let x = top.x, z = top.z;
+    for (let i = 0; i < n; i++) {
+      const k = i / (n - 1);
+      pos.setXYZ(i, x, top.y + (bottomY - top.y) * k, z);
+      x += rand(-1.6, 1.6);
+      z += rand(-1.6, 1.6);
+    }
+    pos.needsUpdate = true;
+    b.line.visible = true;
+    this.glow.emit(_p.set(x, bottomY, z), { count: 2, color: 0xf0d0ff, speed: 0, life: 0.25, size: 7, sizeEnd: 1.5, alpha: 0.6 });
   }
 
   /* ------------------------------------------------------ update */
@@ -421,6 +518,64 @@ export class FX {
         s.mesh.position.copy(from).addScaledVector(d, len * e * 0.85).addScaledVector(_p.set(0, 1, 0), 0);
       }
       (s.mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - k);
+    }
+
+    // casings
+    let cn = 0;
+    for (let i = this.casings.length - 1; i >= 0; i--) {
+      const c = this.casings[i];
+      c.life -= dt;
+      if (c.life <= 0) {
+        this.casings.splice(i, 1);
+        continue;
+      }
+      c.vel.y -= 20 * dt;
+      c.pos.addScaledVector(c.vel, dt);
+      let hitN = false;
+      this.cw.resolveSphere(c.pos, 0.03, ColFlags.BlocksMove, (nn) => {
+        tmpN.copy(nn);
+        hitN = true;
+      }, 1);
+      if (hitN) {
+        const vn = c.vel.dot(tmpN);
+        if (vn < -1.2) {
+          c.vel.addScaledVector(tmpN, -vn * 1.45);
+          c.vel.multiplyScalar(0.55);
+          c.spin.multiplyScalar(0.6);
+          if (!c.bounced && c.loud) this.onCasingLand?.(c.pos);
+          c.bounced = true;
+        } else if (vn < 0) {
+          c.vel.addScaledVector(tmpN, -vn);
+          c.vel.multiplyScalar(0.8);
+          c.spin.multiplyScalar(0.8);
+        }
+      }
+      c.rot.x += c.spin.x * dt;
+      c.rot.y += c.spin.y * dt;
+      c.rot.z += c.spin.z * dt;
+      _q.setFromEuler(c.rot);
+      const s = Math.min(1, c.life * 4);
+      _m.compose(c.pos, _q, _s.set(s, s, s));
+      this.casingMesh.setMatrixAt(cn, _m);
+      this.casingMesh.setColorAt(cn, c.color);
+      cn++;
+    }
+    this.casingMesh.count = cn;
+    if (cn) {
+      this.casingMesh.instanceMatrix.needsUpdate = true;
+      if (this.casingMesh.instanceColor) this.casingMesh.instanceColor.needsUpdate = true;
+    }
+
+    // lightning: bright flash, quick flicker, gone
+    for (const b of this.bolts) {
+      if (!b.active) continue;
+      b.t += dt;
+      const mat = b.line.material as THREE.LineBasicMaterial;
+      mat.opacity = b.t < 0.05 ? 1 : b.t < 0.09 ? 0.2 : b.t < 0.15 ? 0.9 : Math.max(0, 1 - (b.t - 0.15) / 0.2);
+      if (b.t > 0.35) {
+        b.active = false;
+        b.line.visible = false;
+      }
     }
 
     if (this.flashT > 0) {

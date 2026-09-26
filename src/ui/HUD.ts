@@ -74,6 +74,11 @@ export class HUD implements HudEvents {
   private scope = h('div', 'scope', '<i class="h"></i><i class="v"></i><b></b>');
   private dmgNums: DmgNum[] = [];
   private lastHp = 100;
+  private lastMag = -1;
+  private lastMagSig = '';
+  private lastKills = 0;
+  private lastAlive = -1;
+  private koEl = h('div', 'koflash');
   private lastZone = '';
   private zoneT = 0;
   private slotSig = '';
@@ -125,7 +130,7 @@ export class HUD implements HudEvents {
     this.mapCanvas.width = this.mapCanvas.height = 160;
     this.bugWidget.innerHTML = `<div class="ic"><svg class="ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" stroke="rgba(255,255,255,0.15)" stroke-width="6" fill="none"/><circle class="arc" cx="32" cy="32" r="28" stroke="#6ff7ff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="0"/></svg><span class="b">${ICONS.bug.replace('<svg', '<svg class="b"')}</span></div><div class="txt"><div class="nm"></div><div class="st big">READY</div><div class="keys"><kbd>Q</kbd> hold+release to throw · <kbd>E</kbd> blink</div></div>`;
     this.locator.innerHTML = `<svg class="ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" stroke="rgba(43,34,56,0.5)" stroke-width="5" fill="rgba(43,34,56,0.35)"/><circle class="arc" cx="22" cy="22" r="19" stroke="#6ff7ff" stroke-width="5" fill="none" stroke-dasharray="119.4" stroke-linecap="round"/></svg><div class="ic">${ICONS.bug}</div>`;
-    r.append(this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
+    r.append(this.koEl, this.minimap, this.zoneLabel, top, this.killfeedEl, this.crosshair, this.hitmarkerEl, this.dmgdir, this.reloadBar, this.promptEl, this.toastsEl, this.health, this.ammoEl, this.slotsEl, this.bugWidget, this.locator);
     this.emotePick.innerHTML = [['dance', 'DANCE'], ['wave', 'WAVE'], ['laugh', 'LOL'], ['flex', 'FLEX']].map(([k, l]) => `<button class="big" data-k="${k}">${l}</button>`).join('');
     this.emoteBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -294,6 +299,20 @@ export class HUD implements HudEvents {
     this.onPlayerEliminated?.(by);
   }
 
+  koFlash() {
+    this.koEl.classList.remove('on');
+    void this.koEl.offsetWidth;
+    this.koEl.classList.add('on');
+    document.body.classList.add('ko');
+    setTimeout(() => document.body.classList.remove('ko'), 1400);
+  }
+
+  private bump(el: HTMLElement, cls = 'bump') {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+  }
+
   gloomHit() {
     this.gloomFlash.classList.remove('on');
     void this.gloomFlash.offsetWidth;
@@ -369,6 +388,15 @@ export class HUD implements HudEvents {
       const reserve = p.ammo[w.def.ammo];
       this.ammoEl.innerHTML = `${w.mag}<small> / ${reserve}</small>`;
       this.ammoEl.classList.toggle('empty', w.mag === 0);
+      this.ammoEl.classList.toggle('low', w.mag > 0 && w.mag <= Math.ceil(w.def.mag * 0.25));
+      // a little kick on every shot, a bigger pop when a reload lands
+      const sig = w.def.id + p.activeSlot;
+      if (sig === this.lastMagSig) {
+        if (w.mag < this.lastMag) this.bump(this.ammoEl, 'kick');
+        else if (w.mag > this.lastMag) this.bump(this.ammoEl, 'bump');
+      }
+      this.lastMagSig = sig;
+      this.lastMag = w.mag;
       this.ammoEl.style.display = 'block';
     } else this.ammoEl.style.display = 'none';
     const bar = this.reloadBar.firstElementChild as HTMLElement;
@@ -484,6 +512,10 @@ export class HUD implements HudEvents {
     const alive = others.filter((a) => !a.out && !a.parked).length;
     (this.aliveEl.lastElementChild as HTMLElement).textContent = String(alive);
     (this.elimsEl.lastElementChild as HTMLElement).textContent = String(p.kills);
+    if (p.kills > this.lastKills) this.bump(this.elimsEl, 'bump');
+    if (this.lastAlive >= 0 && alive < this.lastAlive) this.bump(this.aliveEl, 'tick');
+    this.lastKills = p.kills;
+    this.lastAlive = alive;
 
     // zone label
     const z = world.zoneAt(p.motor.pos);

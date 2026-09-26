@@ -48,6 +48,14 @@ export class Actor implements BugOwner {
   /** eliminated but piloting their Blinkbug toward a Rift Nest */
   bugout: { t: number; hp: number; vel: THREE.Vector3; grace: number } | null = null;
   reviveUsed = false;
+  /** KO tumble: the rascal is launched spinning before popping into confetti */
+  private koT = 0;
+  private koVel = new THREE.Vector3();
+  private koPos = new THREE.Vector3();
+  private koSpin = new THREE.Vector3();
+  private koStarT = 0;
+  private koFloor = 0;
+  private lastHitDir = new THREE.Vector3();
   /** fully out of the match */
   out = false;
   placement = 0;
@@ -180,6 +188,8 @@ export class Actor implements BugOwner {
     this.alive = true;
     this.rig.root.visible = true;
     this.rig.root.scale.setScalar(1);
+    this.rig.root.rotation.set(0, yaw, 0);
+    this.koT = 0;
     this.bug.reset();
     this.bug.root.position.copy(p);
     this.eliminatedAt = -1;
@@ -290,6 +300,7 @@ export class Actor implements BugOwner {
     this.hp -= amount;
     this.lastDamagedBy = from;
     this.lastDamageTime = ctx.time;
+    this.lastHitDir.copy(dir);
     this.emote = null;
     if (from) from.damageDealt += amount;
     // hit reaction direction in local space
@@ -358,14 +369,30 @@ export class Actor implements BugOwner {
       }
     }
     const p = _v.copy(this.motor.pos).setY(this.motor.pos.y + 0.9);
-    const L = this.rig.look;
-    ctx.fx.elimination(p, [L.outfit, L.accent, L.scarf, L.pack]);
-    audio.elimination(p, !!by?.isLocal);
     ctx.shake(by?.isLocal || this.isLocal ? 0.5 : 0);
-    // backpack & hat pop off
-    ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.3), new THREE.Vector3((Math.random() - 0.5) * 3, 8, (Math.random() - 0.5) * 3), L.pack, 0.4, 2.4);
-    ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.8), new THREE.Vector3((Math.random() - 0.5) * 3, 10, (Math.random() - 0.5) * 3), L.hatColor, 0.3, 2.4);
-    this.rig.root.visible = false;
+    if (by?.isLocal) ctx.hitStop(0.09, 0.03);
+    if (this.isLocal && weaponName !== 'THE SKY') {
+      ctx.slowMo(0.3, 1.1);
+      audio.koSting();
+      ctx.hud.koFlash();
+    }
+    if (weaponName === 'THE SKY' || !this.rig.root.visible) this.koPoof(ctx, !!by?.isLocal);
+    else {
+      // cartoon KO: launched spinning away from the hit, stars round the head, then POOF
+      this.koT = 0.62;
+      this.koPos.copy(this.motor.pos);
+      this.koFloor = this.motor.pos.y;
+      _v2.copy(this.lastHitDir).setY(0);
+      if (_v2.lengthSq() < 1e-4) _v2.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+      _v2.normalize();
+      this.koVel.set(_v2.x * 4.5, 7.5, _v2.z * 4.5);
+      this.koSpin.set(_v2.z * 12, (Math.random() - 0.5) * 10, -_v2.x * 12);
+      this.koStarT = 0;
+      ctx.fx.hitSplat(p, true);
+      ctx.fx.ring(p, 0xffffff, 0.2, 2.2, 0.25, undefined, true);
+      audio.koWhoosh(p);
+      this.koKiller = !!by?.isLocal;
+    }
     ctx.loot.dropInventory(this);
     this.healT = -1;
     this.rig.setHeld(null);
@@ -380,6 +407,54 @@ export class Actor implements BugOwner {
     }
     this.bug.vanish();
     this.goOut(by, ctx, weaponName);
+  }
+
+  private koKiller = false;
+
+  private updateKO(dt: number, ctx: GameCtx) {
+    this.koT -= dt;
+    const r = this.rig.root;
+    this.koVel.y -= 22 * dt;
+    this.koPos.addScaledVector(this.koVel, dt);
+    if (this.koPos.y < this.koFloor && this.koVel.y < 0) {
+      this.koPos.y = this.koFloor;
+      this.koVel.y *= -0.45;
+      this.koVel.x *= 0.6;
+      this.koVel.z *= 0.6;
+    }
+    r.position.copy(this.koPos);
+    r.rotation.x += this.koSpin.x * dt;
+    r.rotation.y += this.koSpin.y * dt;
+    r.rotation.z += this.koSpin.z * dt;
+    // squash-and-stretch wobble, then a quick inflate right before the pop
+    const k = this.koT;
+    const sc = k < 0.12 ? 1 + (0.12 - k) * 3 : 1 + Math.sin(k * 30) * 0.06;
+    r.scale.set(sc, sc * (k < 0.12 ? 0.9 : 1), sc);
+    this.koStarT -= dt;
+    if (this.koStarT <= 0) {
+      this.koStarT = 0.09;
+      ctx.fx.koStars(_v.copy(this.koPos).setY(this.koPos.y + 1.4));
+    }
+    if (this.koT <= 0) {
+      this.koT = 0;
+      this.motor.pos.x = this.koPos.x;
+      this.motor.pos.z = this.koPos.z;
+      this.koPoof(ctx, this.koKiller);
+      r.rotation.set(0, this.bodyYaw, 0);
+      r.scale.setScalar(1);
+    }
+  }
+
+  private koPoof(ctx: GameCtx, localKill: boolean) {
+    const src = this.koT > 0 || this.koPos.lengthSq() === 0 ? this.motor.pos : this.rig.root.position;
+    const p = _v.copy(src).setY(src.y + 0.9);
+    const L = this.rig.look;
+    ctx.fx.elimination(p, [L.outfit, L.accent, L.scarf, L.pack]);
+    audio.elimination(p, localKill);
+    // backpack & hat pop off
+    ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.3), new THREE.Vector3((Math.random() - 0.5) * 3, 8, (Math.random() - 0.5) * 3), L.pack, 0.4, 2.4);
+    ctx.fx.chunk(_v2.copy(p).setY(p.y + 0.8), new THREE.Vector3((Math.random() - 0.5) * 3, 10, (Math.random() - 0.5) * 3), L.hatColor, 0.3, 2.4);
+    this.rig.root.visible = false;
   }
 
   private goOut(by: Actor | null, ctx: GameCtx, weaponName: string) {
@@ -647,6 +722,7 @@ export class Actor implements BugOwner {
 
   /* ----------------------------------------------------------------- update */
   update(dt: number, ctx: GameCtx) {
+    if (this.koT > 0) this.updateKO(dt, ctx);
     if (this.bugout) {
       this.updateBugout(dt, ctx);
       return;

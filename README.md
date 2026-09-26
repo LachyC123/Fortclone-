@@ -47,6 +47,15 @@ npm run typecheck
 > react with speech bubbles and emotes, you get kill-streak callouts, and mid-match **Loot Balloons**
 > float down with epic loot.
 
+> **Milestone 6 — juice.** Hit-stop and an FOV punch when you bonk someone, knocked-out rascals get launched
+> spinning with cartoon stars before popping into confetti, brass casings tinkle out of every gun, shot
+> canopies shed leaves, water splashes, flocks of birds peck about the island and burst into the air when
+> someone runs past or fires (a handy tell!), Gloom lightning bolts with rolling thunder, ammo/kill/alive
+> counters pop, a slow-mo KO sting when you go down, and a proper victory lap: slow-mo, fanfare, confetti
+> cannons, an orbiting camera and a dance. Bots caught in a third-party now make one decision (turn and
+> fight, or break out of the crossfire sideways while shooting back) instead of spinning, and a freshly
+> knocked-out Blinkbug gets a 2.4s shimmering head start.
+
 ## A match
 
 1. **Launch Isle** (~14s): rascals pop in; shoot and blink all you like, nobody can get hurt.
@@ -98,6 +107,8 @@ node tools/matchperf.mjs                      # draw calls / triangles per match
 node tools/balance.mjs --br=4                 # bots-only matches: remaining-over-time curve & match length
 node tools/balance.mjs --duel                 # each bot skill vs a strafing player: accuracy, DPS, TTK
 node tools/m5shots.mjs                        # emotes, bubbles, Loot Balloon screenshots
+node tools/m6shots.mjs                        # KO tumble, birds, casings, victory lap screenshots
+node tools/thirdparty.mjs                     # third-partying a bot fight (no spinning) + Blinkbug escape
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

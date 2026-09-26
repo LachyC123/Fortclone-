@@ -162,7 +162,16 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
       ctx.hud.hitmarker(anyHead, anyKill);
       ctx.hud.damageNumber(lastVictim.headCenter(new THREE.Vector3()).setY(lastVictim.motor.pos.y + 1.9), totalDmg, anyHead);
       audio.hitmarker(anyHead, anyKill);
+      if (anyHead && !anyKill) ctx.hitStop(0.035, 0.2);
     }
+  }
+
+  // juice for nearby shooters: a spent casing, and leaves shaken out of any canopy the shot tore through
+  const camD2 = _muzzle.distanceToSquared(ctx.camera.position);
+  if (camD2 < 30 * 30) {
+    ctx.fx.casing(_a.copy(_muzzle).addScaledVector(aimD, -0.3), _right, aimD, def.pellets > 1, shooter.isLocal || camD2 < 8 * 8);
+    const foliage = ctx.cw.raycast(aimO, aimD, def.range, ColFlags.BlocksSight, _hit2);
+    if (foliage && foliage.collider?.surface === 'grass' && foliage.t < def.range * 0.9) ctx.fx.leaves(foliage.point, 5);
   }
 
   // bloom & recoil
