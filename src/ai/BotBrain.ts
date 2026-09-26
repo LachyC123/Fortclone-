@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { PerkId } from '../combat/Perks';
 import type { Actor, Controller } from '../entities/Actor';
 import type { GameCtx } from '../core/types';
 import { angleDelta, clamp, DEG, dirFromYawPitch, noise1, rand, wrapAngle, yawFromDir } from '../core/math';
@@ -768,6 +769,13 @@ export class BotController implements Controller {
         const side = this.rng() < 0.5 ? -1 : 1;
         _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
         if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(-_v.z * side * 8, 0, _v.x * side * 8)))) this.utilCd = 5;
+      } else if (u === 'jammer' && d < 26 && this.rng() < 0.06) {
+        // drop a jammer between us so their Blinkbug can't flank
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 2.5))) this.utilCd = 10;
+      } else if (u === 'snaptrap' && d > 6 && this.rng() < 0.03 * chaos) {
+        // leave a trap where we stand: they'll come looking
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(me.motor.vel, -0.2))) this.utilCd = 6;
       } else if (u === 'bouncejam' && this.rng() < 0.03 * chaos) {
         if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(me.motor.vel.x * 0.4, 0, me.motor.vel.z * 0.4)))) this.utilCd = 6;
       }
@@ -899,6 +907,8 @@ export class BotController implements Controller {
         v = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3) ? (me.hp < 80 ? 14 : 7) : -99;
       } else if (p.kind === 'util') {
         v = !me.util || me.util.id === p.defId ? (this.profile.archetype === 'chaotic' ? 14 : 6) : -99;
+      } else if (p.kind === 'perk') {
+        v = !me.hasPerk(p.defId as PerkId) && me.perks.length < 2 ? 16 : -99;
       }
       const score = v - d * 0.4;
       if (score > bestScore) {

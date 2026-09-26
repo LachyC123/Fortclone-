@@ -294,7 +294,7 @@ export class HostSession {
     this.snapT -= dt;
     if (this.snapT > 0) return;
     this.snapT = 1 / 20;
-    this.link.send({ t: 'S', tm: g.time, m: this.matchState(), a: g.actors.filter((a) => !a.parked).map((a) => this.actorState(a)), ev: this.events });
+    this.link.send({ t: 'S', tm: g.time, m: this.matchState(), a: g.actors.filter((a) => !a.parked).map((a) => this.actorState(a)), w: g.throwables.netState(), ev: this.events });
     this.events = [];
     this.privT -= 1 / 20;
     const priv = this.privT <= 0;
@@ -375,6 +375,8 @@ export class HostSession {
       ut: a.util ? [a.util.id, a.util.count] : null,
       he: a.healItem ? [a.healItem.id, a.healItem.count] : null,
       ht: Math.round(a.healT * 100) / 100,
+      pk: a.perks,
+      sw: [Math.round(a.slowT * 100) / 100, a.slowK],
       bug: [Math.round(b.cooldown * 10) / 10, Math.round(b.cooldownMax * 10) / 10, Math.round(b.window * 10) / 10],
       st: [a.kills, Math.round(a.damageDealt), a.blinks, Math.round(a.distance), a.fusions, a.bestRarity, a.revives, a.placement],
       wd: a.weaponDamage,

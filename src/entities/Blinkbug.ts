@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CollisionWorld, ColFlags, OBB } from '../physics/Collision';
 import { PAL } from '../render/Palette';
-import { clamp, damp, lerp } from '../core/math';
+import { clamp, damp, dampAngle as dampAngleB, lerp } from '../core/math';
 import type { FX } from '../fx/FX';
 import { PShape } from '../fx/Particles';
 import { audio } from '../audio/Audio';
@@ -29,6 +29,8 @@ export interface BugOwner {
   isLocal: boolean;
   me: { sfx: { bugReady(): void } } | null;
   alive: boolean;
+  /** nap multiplier (Bug Snacks perk) */
+  bugCdMul?: number;
   dockWorld(out: THREE.Vector3): THREE.Vector3;
   facingYaw(): number;
 }
@@ -190,6 +192,30 @@ export class Blinkbug {
         this.bodyG.add(sp);
       }
     }
+    if (L.turret) {
+      // a tin helmet and a little blaster on its back
+      const tin = new THREE.MeshStandardMaterial({ color: 0x8a94a3, roughness: 0.35, metalness: 0.6 });
+      const helm = new THREE.Mesh(G.sphere(0.1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), tin);
+      helm.position.set(0, 0.07, 0.0);
+      helm.scale.set(1.05, 0.8, 1.1);
+      this.bodyG.add(helm);
+      const barrel = new THREE.Mesh(G.cylinder(0.018, 0.022, 0.16, 8), ink);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(0, 0.13, -0.05);
+      this.bodyG.add(barrel);
+      const tip = new THREE.Mesh(G.sphere(0.022, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd36b }));
+      tip.position.set(0, 0.13, -0.13);
+      this.bodyG.add(tip);
+    }
+    if (L.spinner) {
+      const silk = new THREE.Mesh(G.sphere(0.06, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
+      silk.position.set(0, 0.02, 0.13);
+      this.bodyG.add(silk);
+      const thread = new THREE.Mesh(G.torus(0.045, 0.006, 4, 12), new THREE.MeshStandardMaterial({ color: 0xe8e8ff, roughness: 0.9 }));
+      thread.position.copy(silk.position);
+      thread.rotation.set(0.6, 0.4, 0);
+      this.bodyG.add(thread);
+    }
     if (L.leaf) {
       const lf = new THREE.Mesh(G.sphere(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0x4fbf4a, roughness: 0.6 }));
       lf.scale.set(1, 0.18, 0.55);
@@ -207,9 +233,10 @@ export class Blinkbug {
     this.wingR.position.set(0.05, 0.08, 0.05);
     this.bodyG.add(this.wingL, this.wingR);
     // stubby legs (springs for Hopper, sucker feet for Stickle)
-    for (let i = 0; i < 4; i++) {
+    const nLegs = L.spinner ? 8 : 4;
+    for (let i = 0; i < nLegs; i++) {
       const l = new THREE.Mesh(G.capsule(0.015, 0.04, 2, 4), ink);
-      l.position.set(i % 2 ? 0.06 : -0.06, -0.11, i < 2 ? -0.04 : 0.04);
+      l.position.set(i % 2 ? 0.06 + (i >> 2) * 0.02 : -0.06 - (i >> 2) * 0.02, -0.11, [-0.04, -0.04, 0.04, 0.04, -0.08, -0.08, 0.08, 0.08][i]);
       this.bodyG.add(l);
       this.legs.push(l);
       if (L.springs) {
@@ -297,6 +324,8 @@ export class Blinkbug {
   }
 
   private beginReturn(cd: number) {
+    this.faceYaw = null;
+    cd *= this.owner.bugCdMul ?? 1;
     this.state = 'returning';
     this.retFrom.copy(this.pos);
     this.retT = 0;
@@ -306,6 +335,18 @@ export class Blinkbug {
     this.wasReady = false;
     const d = this.pos.distanceTo(this.owner.dockWorld(_p));
     this.retDur = clamp(d / 22, 0.25, 0.8);
+  }
+
+  /** where a Pewpew turret is aiming (null: look around) */
+  faceYaw: number | null = null;
+
+  /** zapped by an enemy Bug Jammer: dizzy, and a longer nap than a normal recall */
+  jam() {
+    if (!this.out) return false;
+    this.dizzyT = 0.6;
+    this.squashV = 10;
+    this.beginReturn(BUG.cooldownAfterExpire + 2.5);
+    return true;
   }
 
   recall() {
@@ -508,7 +549,7 @@ export class Blinkbug {
         this.lookT = 0.6 + Math.random();
         this.idleLook = (Math.random() - 0.5) * 4;
       }
-      this.yaw = damp(this.yaw, this.idleLook, 6, dt);
+      this.yaw = this.faceYaw !== null ? dampAngleB(this.yaw, this.faceYaw, 14, dt) : damp(this.yaw, this.idleLook, 6, dt);
       flap = Math.sin(t * 5) * 0.4;
       // beacon pulse speeds up as the window closes
       const urgency = 1 - this.window / this.stats.window;

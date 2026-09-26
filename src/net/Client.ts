@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { NetProp } from '../combat/Throwables';
+import type { PerkId } from '../combat/Perks';
 import type { Game } from '../core/Game';
 import { Actor, NetActorState } from '../entities/Actor';
 import type { SparkInfo } from '../core/types';
@@ -15,6 +17,7 @@ import type { HealId, UtilId } from '../combat/Items';
 interface Snap {
   tm: number;
   a: Map<number, NetActorState>;
+  w: NetProp[];
   ev: unknown[][];
   fired: boolean;
 }
@@ -114,7 +117,7 @@ export class ClientSession {
     const tm = m.tm as number;
     const a = new Map<number, NetActorState>();
     for (const s of m.a as NetActorState[]) a.set(s.id, s);
-    this.snaps.push({ tm, a, ev: (m.ev as unknown[][]) ?? [], fired: false });
+    this.snaps.push({ tm, a, w: (m.w as NetProp[]) ?? [], ev: (m.ev as unknown[][]) ?? [], fired: false });
     if (this.snaps.length > 30) this.snaps.splice(0, this.snaps.length - 30);
     this.m = m.m as MatchNet;
     // keep a smooth estimate of the host's clock
@@ -187,6 +190,10 @@ export class ClientSession {
     me.util = ut ? { id: ut[0], count: ut[1] } : null;
     me.healItem = he ? { id: he[0], count: he[1] } : null;
     me.healT = p.ht as number;
+    me.perks = (p.pk as PerkId[]) ?? [];
+    me.applyPerks();
+    const sw = p.sw as [number, number] | undefined;
+    if (sw) [me.slowT, me.slowK] = sw;
     const b = p.bug as number[];
     me.bug.cooldown = b[0];
     me.bug.cooldownMax = b[1];
@@ -273,6 +280,7 @@ export class ClientSession {
         a.netApply(own, dt, g.time, isMe && predicted);
         a.netTick(dt, g);
       }
+      g.throwables.netApply(s0?.w ?? s1?.w, s1?.w, k, dt);
     }
     this.snaps = this.snaps.filter((s) => !s.fired || s.tm > rt - 0.5);
     this.applyMatch(dt);

@@ -11,13 +11,14 @@ import { toyMaterial } from '../render/Materials';
 import { mergeToVertexColored } from '../render/Merge';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { G, detail } from '../render/Detail';
+import { PERKS, PERK_IDS, PerkId, buildPerkModel, MAX_PERKS } from '../combat/Perks';
 
-export type LootKind = 'weapon' | 'ammo' | 'heal' | 'util';
+export type LootKind = 'weapon' | 'ammo' | 'heal' | 'util' | 'perk';
 
 export interface Pickup {
   id: number;
   kind: LootKind;
-  defId: string; // weapon id, ammo type, heal id or util id
+  defId: string; // weapon id, ammo type, heal id, util id or perk id
   rarity: RarityIndex;
   amount: number;
   pos: THREE.Vector3;
@@ -113,6 +114,11 @@ export function rollConsumable(): LootRoll {
   return { kind: 'util', defId: u.id, rarity: u.rarity, amount: u.id === 'stickypop' || u.id === 'fizzbomb' ? 2 : 1 };
 }
 
+export function rollPerk(): LootRoll {
+  const id = weighted(PERK_IDS, (k) => PERKS[k].weight);
+  return { kind: 'perk', defId: id, rarity: PERKS[id].rarity, amount: 1 };
+}
+
 /** What a floor loot spot produces. */
 export function rollFloor(): LootRoll[] {
   const r = Math.random();
@@ -125,6 +131,7 @@ export function rollFloor(): LootRoll[] {
     return [w, ammoFor(w.defId, 2)];
   }
   if (r < 0.8) return Math.random() < 0.5 ? [rollConsumable(), ammo()] : [rollConsumable()];
+  if (r < 0.86) return [rollPerk()];
   return [ammo(1.5), ammo()];
 }
 
@@ -133,10 +140,11 @@ export function rollCrate(rich = false): LootRoll[] {
   if (rich) {
     const a = rollWeapon([0, 0, 0, 70, 30]);
     const b = rollWeapon([0, 0, 40, 45, 15]);
-    return [a, ammoFor(a.defId, 2), b, ammoFor(b.defId, 2), rollConsumable(), rollConsumable()];
+    return [a, ammoFor(a.defId, 2), b, ammoFor(b.defId, 2), rollConsumable(), rollPerk()];
   }
   const w = rollWeapon(CRATE_RARITY);
-  return [w, ammoFor(w.defId, 1.5), rollConsumable(), Math.random() < 0.5 ? rollConsumable() : ammoFor(rollWeapon().defId)];
+  const extra = Math.random();
+  return [w, ammoFor(w.defId, 1.5), rollConsumable(), extra < 0.2 ? rollPerk() : extra < 0.6 ? rollConsumable() : ammoFor(rollWeapon().defId)];
 }
 
 /* ------------------------------------------------------------------ crates */
@@ -283,6 +291,12 @@ export class LootSystem {
       g.add(mergeToVertexColored(tin));
       return g;
     }
+    if (kind === 'perk') {
+      const m = buildPerkModel(defId as PerkId);
+      m.scale.setScalar(1.5);
+      g.add(m);
+      return g;
+    }
     const m = buildItemModel(defId as HealId | UtilId);
     m.scale.setScalar(1.6);
     g.add(m);
@@ -291,6 +305,7 @@ export class LootSystem {
 
   colorOf(p: { kind: LootKind; defId: string; rarity: RarityIndex }) {
     if (p.kind === 'ammo') return AMMO_INFO[p.defId as AmmoType].color;
+    if (p.kind === 'perk') return PERKS[p.defId as PerkId].color;
     return RARITY[p.rarity].color;
   }
 
@@ -359,6 +374,9 @@ export class LootSystem {
     }
     if (a.healItem && a.healItem.count > 0) this.spawn('heal', a.healItem.id, HEALS[a.healItem.id].rarity, a.healItem.count, base, toss());
     if (a.util && a.util.count > 0) this.spawn('util', a.util.id, UTILS[a.util.id].rarity, a.util.count, base, toss());
+    for (const id of a.perks) this.spawn('perk', id, PERKS[id].rarity, 1, base, toss());
+    a.perks = [];
+    a.applyPerks();
     a.healItem = null;
     a.util = null;
     a.rig.setWeapon(null);
@@ -369,6 +387,7 @@ export class LootSystem {
     if (p.kind === 'ammo') return true;
     if (p.kind === 'heal') return !a.healItem || (a.healItem.id === p.defId && a.healItem.count < HEALS[p.defId as HealId].maxStack);
     if (p.kind === 'util') return !a.util || (a.util.id === p.defId && a.util.count < UTILS[p.defId as UtilId].maxStack);
+    if (p.kind === 'perk') return !a.hasPerk(p.defId as PerkId) && a.perks.length < MAX_PERKS;
     return false;
   }
 
@@ -379,6 +398,7 @@ export class LootSystem {
     for (const p of this.pickups) {
       if (p.collectT >= 0 || p.lockUntil > performance.now() || !p.settled) continue;
       if (p.kind === 'ammo' || (p.kind !== 'weapon' && this.autoFor(a, p))) continue;
+      if (p.kind === 'perk' && a.hasPerk(p.defId as PerkId)) continue;
       const d = p.pos.distanceTo(a.motor.pos);
       if (d > maxDist || Math.abs(p.pos.y - a.motor.pos.y) > 1.6) continue;
       _v.subVectors(p.pos, eye).normalize();
@@ -419,6 +439,14 @@ export class LootSystem {
       if (a.me) {
         a.me.hud.slotPulse(res.slot);
         a.me.sfx.equip();
+      }
+      p.amount = 0;
+    } else if (p.kind === 'perk') {
+      if (a.hasPerk(p.defId as PerkId)) return;
+      const dropped = a.addPerk(p.defId as PerkId);
+      if (dropped) {
+        const d = this.spawn('perk', dropped, PERKS[dropped].rarity, 1, _v.copy(a.motor.pos).setY(a.motor.pos.y + 1), new THREE.Vector3(Math.sin(a.bodyYaw) * -2, 4, Math.cos(a.bodyYaw) * -2));
+        d.lockUntil = performance.now() + 900;
       }
       p.amount = 0;
     } else if (p.kind === 'ammo') {
@@ -648,6 +676,7 @@ export class LootSystem {
   /** Default loot model colour for UI chips. */
   static itemColor(kind: LootKind, id: string) {
     if (kind === 'heal' || kind === 'util') return ITEM_COLOR[id as HealId | UtilId];
+    if (kind === 'perk') return PERKS[id as PerkId].color;
     return 0xffffff;
   }
 }

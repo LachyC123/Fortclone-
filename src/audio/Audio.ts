@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { SoundProfile } from '../combat/Weapons';
 import { Surface } from '../physics/Collision';
 import { rand } from '../core/math';
 
@@ -258,7 +259,7 @@ export class Audio {
 
   /* ----------------------------------------------------------- weapons */
 
-  gunshot(pos: THREE.Vector3 | undefined, profile: 'pop' | 'rifle' | 'heavy' | 'smg' | 'shotgun' | 'needle' | 'bow' | 'pepper', isLocal: boolean) {
+  gunshot(pos: THREE.Vector3 | undefined, profile: SoundProfile, isLocal: boolean) {
     // your own shots play flat (not panned); the position is still passed so LAN hosts can share it
     const out = this.out(isLocal ? undefined : pos, isLocal ? 0.75 : 0.95, 120);
     if (!out) return;
@@ -311,6 +312,23 @@ export class Audio {
       case 'smg':
         this.tone(out, 'square', 300 * p, 120, t, 0.05, 0.25);
         this.noise(out, t, 0.06, 0.6, 'bandpass', 3000, 1000, 0.8);
+        break;
+      case 'zap':
+        // electric crackle: buzzy saw sweep plus fizzing highs
+        this.tone(out, 'sawtooth', 1400 * p, 300, t, 0.07, 0.22);
+        this.tone(out, 'square', 90 * p, 60, t, 0.06, 0.2);
+        this.noise(out, t, 0.07, 0.45, 'highpass', 6000, 3500, 1.2);
+        break;
+      case 'lob':
+        // hollow cannon THOOMP
+        this.tone(out, 'sine', 120 * p, 45, t, 0.3, 0.9);
+        this.noise(out, t, 0.2, 0.6, 'lowpass', 1400, 200, 1);
+        this.tone(out, 'triangle', 420 * p, 260, t + 0.01, 0.08, 0.25);
+        break;
+      case 'gloop':
+        // wet blorp
+        this.tone(out, 'sine', 260 * p, 720, t, 0.12, 0.45);
+        this.noise(out, t, 0.1, 0.35, 'lowpass', 1400, 400, 3);
         break;
     }
     if (!isLocal && pos) {
@@ -612,6 +630,50 @@ export class Audio {
     this.noise(out, t, 0.7, 0.9, 'bandpass', 300, 2500, 1, 0.02);
     this.tone(out, 'sine', 90, 40, t, 0.3, 0.6);
     this.tone(out, 'sine', 900, 400, t, 0.1, 0.3); // cork pop
+  }
+
+  /** Pewpew turret bug: a tiny blaster */
+  pew(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.4, 45);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'square', rand(1700, 1900), 500, t, 0.07, 0.2);
+  }
+
+  /** Bug Jammer zapping a bug out of the air */
+  jam(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.7, 55);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sawtooth', 220, 80, t, 0.3, 0.35);
+    this.tone(out, 'square', 1600, 400, t, 0.12, 0.2);
+    this.noise(out, t, 0.25, 0.5, 'bandpass', 4000, 1500, 1.5);
+  }
+
+  /** Bug Jammer humming while it works */
+  jamHum(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.18, 25);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.tone(out, 'sawtooth', 110, 112, t, 0.5, 0.25);
+  }
+
+  /** Snap Trap closing */
+  snap(pos: THREE.Vector3) {
+    const out = this.out(pos, 0.9, 45);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    this.noise(out, t, 0.06, 0.9, 'highpass', 2500, 1500, 1);
+    this.tone(out, 'square', 900, 200, t, 0.08, 0.5);
+    for (let i = 0; i < 3; i++) this.tone(out, 'triangle', rand(2000, 3200), 1500, t + 0.05 + i * 0.03, 0.04, 0.15);
+  }
+
+  /** a perk badge being pinned on */
+  perk() {
+    const out = this.out(undefined, 0.5);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    [660, 880, 1320].forEach((f, i) => this.tone(out, 'triangle', f, f, t + i * 0.07, 0.12, 0.3));
   }
 
   explosion(pos: THREE.Vector3) {

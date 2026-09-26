@@ -327,3 +327,27 @@ from the snapshot. The summary's PLAY AGAIN is host-only, and it restarts everyo
 
 `tools/lantest.mjs` runs the real server with two browsers and checks join, teams, movement, firing, effects,
 knock/revive, results and replay.
+
+## 18. Weird weapons, gadgets, bug tricks and perks
+
+**Weapons** (`combat/Weapons.ts`): `WeaponDef.chain` (Zapcoil: `Combat.chainZap` arcs to the nearest enemy
+near the victim with line of sight) and `projectile.style / explode / slow` (Boomkin pumpkins call
+`Throwables.explode`; Gloop blobs call `Actor.slow`). Projectile aim now uses the distance to what's under the
+crosshair (actors included) and adds the ballistic angle, so lobbed weapons land on target (bots too).
+
+**Slow** (`Actor.slow(k, t)`): the strongest slow wins; `moveMul` multiplies motor speed. Used by gloop,
+Tanglet webs and Snap Traps.
+
+**Throwables** gained `jammers`, `traps` and `webs`. Jammers check every enemy Blinkbug that is out and call
+`Blinkbug.jam()` (recall with a longer nap). `shootProps` replaces `shootChickens`: bullets, bolts and
+explosions can damage enemy jammers. Webs come from the Tanglet trick; the Pewpew turret lives in
+`Actor.turretTick` (range 15, line of sight from 0.45m above the bug, skips knocked rascals).
+
+**Perks** (`combat/Perks.ts`): `Actor.perks` (max 2), applied through `applyPerks` (jump), `bugCdMul` (the
+Blinkbug nap), `takeDamage` (Thick Wool), reload rate, footstep loudness and `onKnockedSomeone` (Vampire
+Teeth). A new loot kind, `'perk'`, drops from floor spots (~6%), crates (~20%) and Loot Balloons, and
+rascals drop theirs when they're knocked out.
+
+**LAN**: every world object gets a `nid`; `Throwables.netState()` goes in each snapshot (`w`) and clients
+mirror it with `netApply` (interpolated), so thrown items, pads, chickens, bolts, pumpkins, jammers, traps
+and webs all show up for friends. Perks and slow ride along in each player's private packet.

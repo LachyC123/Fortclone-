@@ -117,6 +117,17 @@ log.push('host view of friend input: ' + (await A.evaluate(() => { const r = [..
 log.push('friend intent: ' + (await B.evaluate(() => { window.__game.input.s.fire = true; const me = window.__game.net.me; window.__game.pc.update(me, window.__game, 0.016); const f = me.intent.fire; window.__game.input.s.fire = false; return JSON.stringify({ f, flight: me.flight, alive: me.alive }); })));
 await B.waitForTimeout(400);
 log.push(`friend fired on host: mag ${magBefore} -> ${magAfter}; friend sees own gun: ${await B.evaluate(() => { const w = window.__game.net.me.weapon; return w ? w.def.id + ' mag ' + w.mag : 'none'; })}`);
+// gadgets and perks show up on the friend's screen
+await A.evaluate(() => {
+  const g = window.__game;
+  const r = [...g.net.remote.values()][0].actor;
+  const enemy = g.actors.find((a) => a.team !== r.team && a.alive);
+  g.throwables.addWeb(r.motor.pos.clone().add(new r.motor.pos.constructor(2, 0.14, 0)), g.player, 20);
+  g.throwables.placeJammer(r.motor.pos.clone().add(new r.motor.pos.constructor(-3, 0, 0)), enemy, g);
+  r.addPerk('springy');
+});
+for (let i = 0; i < 4; i++) { await hostStep(0.2); await B.waitForTimeout(250); }
+log.push('friend sees gadgets: ' + (await B.evaluate(() => { const g = window.__game; return `props=${g.throwables['netObjs'].size} perks=${g.net.me.perks.join(',')} jumpMul=${g.net.me.motor.jumpMul} badges=${document.querySelector('.healthbox .perks')?.children.length}`; })));
 // knocked & revived across the network
 await A.evaluate(() => {
   const g = window.__game;

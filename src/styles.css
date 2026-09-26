@@ -2762,3 +2762,36 @@ body.ko #game { filter: saturate(0.2) contrast(1.08) brightness(1.05); transitio
   .homebtns { margin-top: 6px; }
   .homebtns .btn { font-size: 15px; padding: 5px 14px; }
 }
+
+/* ---------- perk badges (above the health bar) */
+.healthbox .perks {
+  position: absolute;
+  right: 4px;
+  bottom: 100%;
+  margin-bottom: 6px;
+  display: flex;
+  gap: 5px;
+  pointer-events: none;
+}
+.healthbox .perk {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--pc);
+  color: var(--ink);
+  border: 3px solid #d9a441;
+  box-shadow: 0 2px 0 var(--ink);
+  display: grid;
+  place-items: center;
+}
+.healthbox .perk svg {
+  width: 18px;
+  height: 18px;
+}
+.healthbox .perk.fresh {
+  animation: perkpop 0.5s cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+@keyframes perkpop {
+  0% { transform: scale(0.2) rotate(-40deg); }
+  100% { transform: scale(1) rotate(0); }
+}

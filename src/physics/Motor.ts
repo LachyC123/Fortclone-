@@ -131,6 +131,8 @@ export class CharacterMotor {
 
   /** Temporary speed multiplier (Golden Biscuit zoomies). */
   speedBoost = 1;
+  /** Springy Socks */
+  jumpMul = 1;
 
   horizontalSpeed() {
     return Math.hypot(this.vel.x, this.vel.z);
@@ -277,7 +279,7 @@ export class CharacterMotor {
         this.endSlide();
         this.slideCd = MOTOR.slideCooldown;
       }
-      this.vel.y = MOTOR.jumpVel;
+      this.vel.y = MOTOR.jumpVel * this.jumpMul;
       this.grounded = false;
       this.coyoteT = 0;
       this.jumpBufT = 0;

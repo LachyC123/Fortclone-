@@ -111,11 +111,28 @@ stronger. Hatch cocoons from matches, rename your bugs, equip one before you PLA
 | Mender | Uncommon | each blink heals 12 | longer nap |
 | Boomble | Rare | arrival shockwave shoves & stings | longer nap |
 | Wisp | Rare | 2s shimmer: bots lose you | shorter window |
+| Tanglet | Rare | spins a sticky web where it lands: enemies in it move at half speed | throws shorter, shorter window |
 | Snatchet | Epic | swap with the enemy beside your bug | much longer nap |
+| Pewpew | Epic | lands and becomes a tiny turret: 3 damage twice a second at the nearest enemy it can see | longer nap, the pews give it away |
 | Glimmerwing | Epic | flies far and flat | longer nap, barely bounces |
 | Nimbus | Mythic | marks rascals near the landed bug | glows, longer nap |
 
 Duplicates level a bug up (cosmetic). Collection is saved in the browser (`localStorage`).
+
+## Weird weapons, gadgets and perks
+
+- **Zapcoil** (auto): every hit arcs on to the nearest other enemy within 7m for 60% damage.
+- **Boomkin** (3 pumpkins): lobbed pumpkins burst on impact (splash, 58 at the centre). The crosshair
+  accounts for the arc, so aim at what you want to hit.
+- **Gloop Gun** (semi): sticky blobs slow whoever they hit to 55% speed for 1.6s.
+- **Bug Jammer** (gadget): a red bubble (8m, 22s). Enemy Blinkbugs that fly into it are zapped straight
+  home with a long nap, so no blinking in. Enemies can shoot it (45 HP) or blow it up.
+- **Snap Trap** (gadget): sits on the ground and arms after a moment. The first enemy to step on it takes
+  25, is slowed hard for 2.5s and gets marked.
+- **Perks** are badges on the floor and in crates. You can carry two (a third swaps out the oldest), and you
+  lose them when you're knocked out:
+  **Springy Socks** (jump higher), **Speedy Fingers** (reload faster), **Bug Snacks** (bug naps less),
+  **Thick Wool** (12% less damage), **Quiet Paws** (quiet footsteps), **Vampire Teeth** (heal 20 on a knock).
 
 ## Weapon fusion
 
@@ -145,6 +162,7 @@ node tools/densitymap.mjs                     # ASCII map of buildings / cover /
 node tools/tierprobe.mjs [low medium high]    # per-quality boot time, triangles and draw calls
 node tools/squadtest.mjs                      # duos: knock, revive, sparks, nest rebuild, team wipe
 node tools/lantest.mjs                        # LAN: two browsers, room, join, move, fire, knock/revive, results, replay
+node tools/contenttest.mjs [--shots]          # new weapons, Bug Jammer, Snap Trap, Pewpew, Tanglet, perks
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

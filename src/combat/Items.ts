@@ -5,7 +5,7 @@ import { mergeToVertexColored } from '../render/Merge';
 import { G } from '../render/Detail';
 
 export type HealId = 'jamjar' | 'fizzle' | 'biscuit';
-export type UtilId = 'fizzbomb' | 'bouncejam' | 'chicken' | 'gust' | 'stickypop';
+export type UtilId = 'fizzbomb' | 'bouncejam' | 'chicken' | 'gust' | 'stickypop' | 'jammer' | 'snaptrap';
 
 export interface HealDef {
   id: HealId;
@@ -46,6 +46,8 @@ export const UTILS: Record<UtilId, UtilDef> = {
   chicken: { id: 'chicken', name: 'Pocket Chicken', maxStack: 2, rarity: 2, speed: 13, bounce: 0.3, sticky: false, fuse: 0.3, weight: 6, blurb: 'Loud. Distracting.' },
   gust: { id: 'gust', name: 'Gust Bottle', maxStack: 3, rarity: 2, speed: 18, bounce: 0.0, sticky: false, fuse: 0.0, weight: 7, blurb: 'Whoosh. Everyone away.' },
   stickypop: { id: 'stickypop', name: 'Sticky Pop', maxStack: 4, rarity: 2, speed: 19, bounce: 0.0, sticky: true, fuse: 1.6, weight: 8, blurb: 'Sticks. Beeps. Pops.' },
+  jammer: { id: 'jammer', name: 'Bug Jammer', maxStack: 1, rarity: 3, speed: 12, bounce: 0.05, sticky: false, fuse: 0.2, weight: 4, blurb: 'No bugs allowed. Zaps enemy Blinkbugs in its bubble. Shoot it to break it.' },
+  snaptrap: { id: 'snaptrap', name: 'Snap Trap', maxStack: 2, rarity: 1, speed: 11, bounce: 0.05, sticky: false, fuse: 0.2, weight: 6, blurb: 'Hides in the grass. SNAP! Stings, slows and marks.' },
 };
 
 export interface ItemStack<T extends string> {
@@ -142,6 +144,25 @@ export function buildItemModel(id: HealId | UtilId, merged = true): THREE.Object
         [sph(0.025), 0xff2020, 0, 0.24, 0],
       ]);
       break;
+    case 'jammer':
+      g = mk([
+        [new THREE.BoxGeometry(0.2, 0.12, 0.16), 0x5a6270, 0, 0.06, 0, 0, 0, 0, { metal: 0.5 }],
+        [new THREE.BoxGeometry(0.21, 0.03, 0.17), PAL.mustard, 0, 0.12, 0],
+        [cyl(0.008, 0.008, 0.22), 0x2b2238, 0.05, 0.24, 0],
+        [sph(0.022), 0xff3b3b, 0.05, 0.36, 0, 0, 0, 0, { emissive: 1 }],
+        [G.cone(0.07, 0.05, 10, 1, true), 0xdfe6ee, -0.04, 0.17, 0, Math.PI, 0, 0, { metal: 0.5 }],
+        [sph(0.015), 0x6ff7ff, 0.07, 0.07, 0.085],
+        [sph(0.015), 0xff3b3b, 0.02, 0.07, 0.085],
+      ]);
+      break;
+    case 'snaptrap':
+      g = mk([
+        [cyl(0.15, 0.16, 0.03, 16), 0x6b7380, 0, 0.015, 0, 0, 0, 0, { metal: 0.5 }],
+        [G.torus(0.13, 0.018, 5, 16, Math.PI), PAL.mustard, 0, 0.04, 0.0, -Math.PI / 2 + 0.5, 0, 0, { metal: 0.4 }],
+        [G.torus(0.13, 0.018, 5, 16, Math.PI), PAL.mustard, 0, 0.04, 0.0, -Math.PI / 2 - 0.5, Math.PI, 0, { metal: 0.4 }],
+        [cyl(0.04, 0.04, 0.02, 10), 0xff5c8a, 0, 0.04, 0],
+      ]);
+      break;
     default:
       g = mk([[sph(0.1), 0xffffff, 0, 0.1, 0]]);
   }
@@ -160,4 +181,6 @@ export const ITEM_COLOR: Record<HealId | UtilId, number> = {
   chicken: 0xffffff,
   gust: 0xbfeaf2,
   stickypop: 0xff5c8a,
+  jammer: 0xff3b3b,
+  snaptrap: 0xf2c14e,
 };

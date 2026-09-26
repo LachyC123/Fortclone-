@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HudEvents, SparkInfo } from '../core/types';
 import { ICONS } from './icons';
+import { PERKS, PerkId, perkSvg } from '../combat/Perks';
 import { RARITY } from '../render/Palette';
 import type { Actor } from '../entities/Actor';
 import type { Pickup, Crate } from '../loot/Loot';
@@ -64,6 +65,8 @@ export class HUD implements HudEvents {
   private hitmarkerEl = h('div', 'hitmarker');
   private dmgdir = h('div', 'dmgdir');
   private health = h('div', 'healthbox panel');
+  private perksEl = h('div', 'perks');
+  private perkSig = '';
   private hpFill!: HTMLDivElement;
   private hpGhost!: HTMLDivElement;
   private hpNum!: HTMLDivElement;
@@ -120,6 +123,7 @@ export class HUD implements HudEvents {
     this.hpFill = this.health.querySelector('.fill')!;
     this.hpGhost = this.health.querySelector('.ghost')!;
     this.hpNum = this.health.querySelector('.num')!;
+    this.health.appendChild(this.perksEl);
     for (let i = 0; i < 3; i++) {
       const s = h('div', 'slot empty', `<span class="key big">${i + 1}</span>${ICONS.tincan}<div class="rar"></div>`) as HTMLDivElement;
       this.slotEls.push(s);
@@ -404,6 +408,14 @@ export class HUD implements HudEvents {
         el.style.setProperty('--rc', st ? '#' + ITEM_COLOR[st.id as HealId].toString(16).padStart(6, '0') : 'transparent');
       }
     }
+    // perk badges above the health bar
+    const psig = p.perks.join();
+    if (psig !== this.perkSig) {
+      this.perkSig = psig;
+      this.perksEl.innerHTML = p.perks.map((id) => `<span class="perk" style="--pc:${PERKS[id].css}" title="${PERKS[id].name}: ${PERKS[id].blurb}">${perkSvg(id)}</span>`).join('');
+      const last = this.perksEl.lastElementChild;
+      last?.classList.add('fresh');
+    }
     this.utilSlot.classList.toggle('aiming', p.utilAiming);
     this.healSlot.classList.toggle('using', p.healT >= 0);
     const w = p.weapon;
@@ -646,6 +658,9 @@ export class HUD implements HudEvents {
       html = `<span class="k">F</span><span>${verb}</span><span class="rar big" style="${rs(pickup.rarity)}">${RARITY[pickup.rarity].name.toUpperCase()} ${def.name.toUpperCase()}</span>`;
       cardKey = `${pickup.id}|${p.weapons.map((w) => (w ? w.def.id + w.rarity : '-')).join()}|${p.activeSlot}`;
       if (cardKey !== this.lootCardKey) this.buildLootCard(p, pickup, act);
+    } else if (pickup && pickup.kind === 'perk') {
+      const pd = PERKS[pickup.defId as PerkId];
+      html = `<span class="k">F</span><span>SWAP FOR</span><span class="rar big" style="color:${pd.css};-webkit-text-stroke:1px #2b2238">${pd.name.toUpperCase()}</span>`;
     } else if (pickup) {
       const isHeal = pickup.kind === 'heal';
       const name = isHeal ? HEALS[pickup.defId as HealId].name : UTILS[pickup.defId as UtilId].name;

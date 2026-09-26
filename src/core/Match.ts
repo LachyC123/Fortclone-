@@ -323,6 +323,7 @@ export class Match implements MatchHooks {
     this.ui.spectating('', false);
     this.ui.hideSummary();
     g.resetWorldForMatch();
+    g.throwables.clear();
     // make sure we have a full lobby of rascals
     while (g.actors.length < MATCH_SIZE) g.createBot();
     const L = g.world.lobby;

@@ -5,7 +5,7 @@ import { RarityIndex } from '../render/Palette';
  * Mythic bug is rarer and flashier but never simply stronger. Rarity is about collecting and
  * showing off; skill still decides fights.
  */
-export type BugAbility = 'none' | 'sticky' | 'hop' | 'mend' | 'boom' | 'wisp' | 'snatch' | 'glide' | 'ping';
+export type BugAbility = 'none' | 'sticky' | 'hop' | 'mend' | 'boom' | 'wisp' | 'snatch' | 'glide' | 'ping' | 'turret' | 'web';
 
 export interface BugStats {
   throwSpeed: number;
@@ -40,6 +40,10 @@ export interface BugSpecies {
     suckers?: boolean;
     longWings?: boolean;
     ghost?: boolean;
+    /** Pewpew: helmet + blaster */
+    turret?: boolean;
+    /** Tanglet: silk ball and extra legs */
+    spinner?: boolean;
     scale?: number;
   };
   stats: Partial<BugStats>;
@@ -140,6 +144,20 @@ export const SPECIES: BugSpecies[] = [
     stats: { window: 5 },
   },
   {
+    id: 'tanglet',
+    name: 'Tanglet',
+    rarity: 2,
+    ability: 'web',
+    trick: 'Wherever it lands it spins a sticky web. Enemies caught in it move at half speed.',
+    catch: 'Throws a bit shorter, and the blink window is 1s shorter.',
+    flavour: 'Knits constantly. Nobody knows what for. Nobody dares ask.',
+    tint: 0x8fe3d0,
+    belly: 0xf2fffb,
+    wing: 0xe8fff8,
+    look: { spinner: true },
+    stats: { throwSpeed: 17, window: 5 },
+  },
+  {
     id: 'snatchet',
     name: 'Snatchet',
     rarity: 3,
@@ -152,6 +170,20 @@ export const SPECIES: BugSpecies[] = [
     wing: 0xffe6f4,
     look: { pincers: true },
     stats: { cooldown: 12 },
+  },
+  {
+    id: 'pewpew',
+    name: 'Pewpew',
+    rarity: 3,
+    ability: 'turret',
+    trick: 'Where it lands it plants its feet and turns into a tiny turret: pew-pews the nearest enemy (3 damage a shot, twice a second) until you blink or its time runs out.',
+    catch: 'Naps 3s longer, and every pew gives away where it is.',
+    flavour: 'Wears a tiny helmet. Takes guard duty VERY seriously.',
+    tint: 0xff5a4a,
+    belly: 0xffe4dc,
+    wing: 0xffece6,
+    look: { turret: true },
+    stats: { cooldown: 11 },
   },
   {
     id: 'glimmerwing',

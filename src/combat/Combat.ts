@@ -84,10 +84,15 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
       _dir.addScaledVector(_right, Math.cos(a) * r).addScaledVector(_up, Math.sin(a) * r).normalize();
     }
     const wh = ctx.cw.raycast(aimO, _dir, def.range, ColFlags.BlocksBullets, _hit);
-    const target = _to.copy(aimO).addScaledVector(_dir, wh ? wh.t : def.range);
-    const bd = _b.subVectors(target, _muzzle).normalize();
-    // compensate a touch for gravity so the crosshair is honest at mid range
-    bd.y += Math.min(0.08, (def.projectile.gravity * (wh ? wh.t : 60)) / (2 * def.projectile.speed * def.projectile.speed));
+    const ahit = raycastActors(ctx, aimO, _dir, wh ? wh.t : def.range, shooter);
+    const dist = ahit ? ahit.t : wh ? wh.t : Math.min(def.range, 60);
+    const target = _to.copy(aimO).addScaledVector(_dir, dist);
+    const bd = _b.subVectors(target, _muzzle);
+    const flat = Math.hypot(bd.x, bd.z);
+    bd.normalize();
+    // lob just enough that it lands on what's under the crosshair (ballistic angle, small-angle nudge)
+    const v2 = def.projectile.speed * def.projectile.speed;
+    bd.y += Math.min(0.45, 0.5 * Math.asin(Math.min(1, (def.projectile.gravity * flat) / v2)));
     bd.normalize();
     ctx.throwables.fireBolt(shooter, def, w.damage, _muzzle.clone(), bd);
     w.bloom = clamp(w.bloom + def.bloomPerShot, 0, def.bloomMax);
@@ -111,7 +116,7 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
     const wh = ctx.cw.raycast(aimO, _dir, def.range, ColFlags.BlocksBullets, _hit);
     const worldT = wh ? wh.t : def.range;
     let ah = raycastActors(ctx, aimO, _dir, worldT, shooter);
-    const chT = ctx.throwables.shootChickens(aimO, _dir, ah ? ah.t : worldT, ctx);
+    const chT = ctx.throwables.shootProps(aimO, _dir, ah ? ah.t : worldT, ctx, shooter, Math.round(w.damage));
     if (chT >= 0) ah = null;
     const endT = ah ? ah.t : chT >= 0 ? chT : worldT;
     const target = _to.copy(aimO).addScaledVector(_dir, endT);
@@ -140,6 +145,9 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
         ah.actor.motor.impulse(_a.copy(md).setY(0).normalize().multiplyScalar(kb).setY(kb * 0.35));
       }
       ctx.fx.hitSplat(target, ah.headshot);
+      if (def.chain) {
+        chainZap(shooter, ah.actor, target.clone(), Math.round(dmg * def.chain.mul), def.chain.range, def.tracer, def.short, ctx);
+      }
       anyHit = true;
       anyHead = anyHead || ah.headshot;
       anyKill = anyKill || killed;
@@ -183,4 +191,31 @@ export function fireWeapon(shooter: Actor, ctx: GameCtx) {
   if (def.knockback && def.knockback > 5 && !shooter.motor.grounded) shooter.motor.impulse(_a.copy(aimD).multiplyScalar(-def.knockback * 0.4));
   audio.gunshot(_muzzle, def.sound, shooter.isLocal);
   ctx.emitSound({ pos: _muzzle.clone(), loudness: 70, source: shooter, kind: 'gunshot' });
+}
+
+/** Zapcoil: the hit arcs to the nearest other rascal (not a teammate) near the victim. */
+export function chainZap(shooter: Actor, victim: Actor, from: THREE.Vector3, dmg: number, range: number, color: number, name: string, ctx: GameCtx) {
+  let best: Actor | null = null, bd = range;
+  for (const o of ctx.actors) {
+    if (o === victim || o === shooter || !o.alive || o.parked || o.team === shooter.team) continue;
+    const d = o.motor.pos.distanceTo(victim.motor.pos);
+    if (d >= bd) continue;
+    if (!ctx.cw.lineClear(from, _a.copy(o.motor.pos).setY(o.motor.pos.y + 1), ColFlags.BlocksBullets)) continue;
+    bd = d;
+    best = o;
+  }
+  if (!best || dmg <= 0) return;
+  const to = best.motor.pos.clone().setY(best.motor.pos.y + 1);
+  // a jagged little lightning bolt made of short tracers
+  let p = from.clone();
+  const segs = 4;
+  for (let i = 1; i <= segs; i++) {
+    const q = i === segs ? to : from.clone().lerp(to, i / segs).add(_b.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6));
+    ctx.fx.tracer(p, q, color, 0.06);
+    p = q;
+  }
+  ctx.fx.sparkBurst(to, color, 10);
+  audio.pew(to);
+  best.takeDamage(dmg, shooter, false, _b.subVectors(to, from).normalize(), ctx, name);
+  shooter.me?.hud.damageNumber(to.clone().setY(to.y + 0.9), dmg, false);
 }

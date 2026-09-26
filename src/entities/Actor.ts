@@ -16,6 +16,7 @@ import { PShape } from '../fx/Particles';
 import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
 import { islandRadius, groundHeight } from '../world/Terrain';
 import { detail } from '../render/Detail';
+import { PerkId, PERKS, MAX_PERKS } from '../combat/Perks';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -119,6 +120,13 @@ export class Actor implements BugOwner {
   boostT = 0;
   utilAiming = false;
   fusions = 0;
+  /** perk badges pinned on this match (oldest first) */
+  perks: PerkId[] = [];
+  /** gloop / webs / snap traps: move slower for a while */
+  slowT = 0;
+  slowK = 1;
+  private turretT = 0;
+  private lastBugState = 'docked';
 
   // stats
   kills = 0;
@@ -221,6 +229,39 @@ export class Actor implements BugOwner {
     return this.motor.pos;
   }
 
+  hasPerk(id: PerkId) {
+    return this.perks.includes(id);
+  }
+  /** pin a perk; returns the one it pushed off (if you already had two) */
+  addPerk(id: PerkId): PerkId | null {
+    if (this.hasPerk(id)) return null;
+    let dropped: PerkId | null = null;
+    if (this.perks.length >= MAX_PERKS) dropped = this.perks.shift()!;
+    this.perks.push(id);
+    this.applyPerks();
+    if (this.me) {
+      this.me.sfx.perk();
+      this.me.hud.bigToast(`${PERKS[id].name.toUpperCase()}!`, PERKS[id].css);
+      this.me.hud.toast(PERKS[id].blurb, PERKS[id].css);
+    }
+    return dropped;
+  }
+  applyPerks() {
+    this.motor.jumpMul = this.hasPerk('springy') ? 1.3 : 1;
+  }
+  /** Blinkbug nap multiplier (Bug Snacks) */
+  get bugCdMul() {
+    return this.hasPerk('bugsnacks') ? 0.65 : 1;
+  }
+  /** slow this rascal down: k = speed multiplier, for t seconds (the strongest slow wins) */
+  slow(k: number, t: number) {
+    if (this.slowT <= 0 || k <= this.slowK) this.slowK = k;
+    this.slowT = Math.max(this.slowT, t);
+  }
+  private get moveMul() {
+    return (this.downed ? 0.5 : this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1) * (this.slowT > 0 ? this.slowK : 1);
+  }
+
   spawn(p: THREE.Vector3, yaw: number) {
     this.motor.teleport(p);
     this.bodyYaw = yaw;
@@ -228,6 +269,9 @@ export class Actor implements BugOwner {
     this.intent.aimYaw = yaw;
     this.hp = this.maxHp;
     this.alive = true;
+    this.slowT = 0;
+    this.perks = [];
+    this.applyPerks();
     this.rig.root.visible = true;
     this.rig.root.scale.setScalar(1);
     this.rig.root.rotation.set(0, yaw, 0);
@@ -344,6 +388,7 @@ export class Actor implements BugOwner {
     // no friendly fire between teammates
     if (from && from !== this && from.team === this.team) return false;
     if (from && !from.me && !this.me && ctx.match) amount *= ctx.match.botDamageMul;
+    if (this.hasPerk('thickwool')) amount = Math.max(1, Math.round(amount * 0.88));
     if (this.downed) {
       // finishing off a knocked rascal
       this.downHp -= amount;
@@ -359,6 +404,7 @@ export class Actor implements BugOwner {
       if (this.downHp <= 0) {
         this.downed = false;
         this.eliminate(from ?? this.downBy, ctx, weaponName);
+        from?.onKnockedSomeone();
         return true;
       }
       return false;
@@ -386,9 +432,18 @@ export class Actor implements BugOwner {
       this.hp = 0;
       if (ctx.match?.canGoDown(this)) this.goDown(from, ctx, weaponName);
       else this.eliminate(from, ctx, weaponName);
+      from?.onKnockedSomeone();
       return true;
     }
     return false;
+  }
+
+  /** Vampire Teeth: a knock or elimination tops you up */
+  onKnockedSomeone() {
+    if (!this.alive || this.downed || !this.hasPerk('vampteeth')) return;
+    const before = this.hp;
+    this.heal(20);
+    if (this.hp > before) this.me?.hud.toast(`+${Math.round(this.hp - before)} VAMPIRE TEETH`, PERKS.vampteeth.css);
   }
 
   /* ----------------------------------------------------------------- knocked down (squads) */
@@ -627,7 +682,7 @@ export class Actor implements BugOwner {
       sprint: it.sprint && !this.ads && this.sprintBlock <= 0 && !it.throwAim,
       jump: it.jump,
       crouch: it.crouch,
-      speedMul: this.downed ? 0.5 : this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
+      speedMul: this.moveMul,
     });
     if (m.events.jumped) this.rig.onJump();
     if (m.events.landed > 3) {
@@ -1081,7 +1136,7 @@ export class Actor implements BugOwner {
       sprint: it.sprint && !this.ads && this.sprintBlock <= 0 && !this.throwAiming,
       jump: it.jump,
       crouch: it.crouch,
-      speedMul: this.downed ? 0.5 : this.healT >= 0 ? 0.5 : this.ads ? 0.62 : this.weapon?.reloading ? 0.85 : 1,
+      speedMul: this.moveMul,
     };
     const wasSliding = m.sliding;
     m.update(dt, mi);
@@ -1120,8 +1175,8 @@ export class Actor implements BugOwner {
       if (this.stepDist > strideLen) {
         this.stepDist = 0;
         const loud = m.crouching ? 0.35 : m.sprinting ? 1.1 : 0.75;
-        audio.footstep(m.pos, m.surface, loud * (this.isLocal ? 0.7 : 1));
-        ctx.emitSound({ pos: m.pos.clone(), loudness: m.crouching ? 5 : m.sprinting ? 22 : 14, source: this, kind: 'footstep' });
+        audio.footstep(m.pos, m.surface, loud * (this.isLocal ? 0.7 : this.hasPerk('quietpaws') ? 0.3 : 1));
+        ctx.emitSound({ pos: m.pos.clone(), loudness: (m.crouching ? 5 : m.sprinting ? 22 : 14) * (this.hasPerk('quietpaws') ? 0.35 : 1), source: this, kind: 'footstep' });
         if (m.sprinting || m.surface === 'water') {
           const col = m.surface === 'grass' ? 0xd9e8b0 : m.surface === 'water' ? 0xffffff : 0xe8dcc0;
           ctx.fx.dust(m.pos, m.surface === 'water' ? 3 : 1.5, col);
@@ -1167,7 +1222,7 @@ export class Actor implements BugOwner {
     // reload
     if (w.reloading) {
       const prev = w.reloadT / w.reloadTime;
-      w.reloadT += dt;
+      w.reloadT += dt * (this.hasPerk('quickhands') ? 1 / 0.7 : 1);
       const k = w.reloadT / w.reloadTime;
       if (this.me) {
         if (prev < 0.3 && k >= 0.3) this.me.sfx.reload(1);
@@ -1231,6 +1286,11 @@ export class Actor implements BugOwner {
     const m = this.motor;
     // speed boost from biscuits
     this.boostT = Math.max(0, this.boostT - dt);
+    if (this.slowT > 0) {
+      this.slowT = Math.max(0, this.slowT - dt);
+      // dripping gloop
+      if (Math.random() < dt * 10) ctx.fx.soft.emit(_v.copy(m.pos).setY(m.pos.y + 0.3 + Math.random() * 1.2), { count: 1, color: [0x9dff6b, 0x6fd64a], speed: 0.3, gravity: 6, life: 0.6, size: 0.1, sizeEnd: 0.5, alpha: 0.8 });
+    }
     m.speedBoost = this.boostT > 0 ? 1.2 : 1;
     if (this.boostT > 0 && m.horizontalSpeed() > 3 && Math.random() < dt * 20) ctx.fx.glow.emit(_v.copy(m.pos).setY(m.pos.y + 0.3), { count: 1, color: [0xffd36b, 0xffffff], speed: 0.5, life: 0.4, size: 0.12, shape: PShape.Star });
 
@@ -1458,8 +1518,24 @@ export class Actor implements BugOwner {
     }
   }
 
-  /** Per-frame species effects: Wisp shimmer and Nimbus sensing. */
+  /** Per-frame species effects: Wisp shimmer, Nimbus sensing, Pewpew turret, Tanglet webs. */
   private updateBugTricks(dt: number, ctx: GameCtx) {
+    const bug = this.bug;
+    const ab = bug.species.ability;
+    if (bug.state === 'landed' && this.lastBugState !== 'landed') {
+      if (ab === 'web') {
+        ctx.throwables.addWeb(bug.pos, this, bug.window + 2);
+        audio.splat(bug.pos);
+        ctx.fx.soft.emit(bug.pos, { count: 10, color: [0xffffff, 0xe8fff8], speed: [1, 3], spread: 1, up: 1, gravity: 4, life: [0.4, 0.8], size: [0.06, 0.12], shape: PShape.Sparkle });
+      } else if (ab === 'turret') {
+        this.turretT = 0.5; // plant its feet first
+        ctx.fx.ring(_v.copy(bug.pos).setY(bug.pos.y - 0.1), bug.tint, 0.1, 1.2, 0.3);
+        audio.chirp(bug.pos, 0.8, 0.4);
+      }
+    }
+    this.lastBugState = bug.state;
+    if (ab === 'turret' && bug.state === 'landed') this.turretTick(dt, ctx);
+    else bug.faceYaw = null;
     if (this.stealthT > 0) {
       this.stealthT -= dt;
       const k = this.stealthT > 0 ? (this.stealthT < 0.4 ? 1 - this.stealthT / 0.4 : 0) : 1;
@@ -1486,6 +1562,42 @@ export class Actor implements BugOwner {
           this.me?.hud.toast(`${this.bugName} senses ${n} rascal${n > 1 ? 's' : ''}!`, '#ffe27a');
         }
       }
+    }
+  }
+
+  /** Pewpew: a pew at the nearest enemy it can see, a few times a second */
+  private turretTick(dt: number, ctx: GameCtx) {
+    const bug = this.bug;
+    this.turretT -= dt;
+    // it stands up tall on its back legs to see over kerbs and clutter
+    const from = _v2.copy(bug.pos).setY(bug.pos.y + 0.45);
+    let best: Actor | null = null, bd = 15;
+    for (const o of ctx.actors) {
+      if (o === this || !o.alive || o.parked || o.downed || o.team === this.team || o.flight !== 'none') continue;
+      const d = o.motor.pos.distanceTo(bug.pos);
+      if (d >= bd) continue;
+      _v3.copy(o.motor.pos).setY(o.motor.pos.y + 1);
+      if (!ctx.cw.lineClear(from, _v3, ColFlags.BlocksBullets) || ctx.throwables.smokeBlocks(from, _v3)) continue;
+      bd = d;
+      best = o;
+    }
+    if (!best) {
+      bug.faceYaw = null;
+      return;
+    }
+    bug.faceYaw = Math.atan2(-(best.motor.pos.x - bug.pos.x), -(best.motor.pos.z - bug.pos.z));
+    if (this.turretT > 0) return;
+    this.turretT = 0.5;
+    const to = _v3.copy(best.motor.pos).setY(best.motor.pos.y + 0.9 + (Math.random() - 0.5) * 0.6);
+    ctx.fx.tracer(from, to, bug.tint, 0.04);
+    ctx.fx.glow.emit(from, { count: 3, color: [bug.tint, 0xffffff], speed: [0.5, 1.5], life: 0.15, size: 0.12, shape: PShape.Sparkle });
+    audio.pew(from);
+    ctx.emitSound({ pos: from.clone(), loudness: 30, source: this, kind: 'gunshot' });
+    const killed = best.takeDamage(3, this, false, _v.subVectors(to, from).normalize(), ctx, bug.species.name.toUpperCase());
+    ctx.fx.sparkBurst(to, bug.tint, 4);
+    if (this.me) {
+      this.me.hud.hitmarker(false, killed);
+      this.me.hud.damageNumber(to.clone().setY(to.y + 0.9), 3, false);
     }
   }
 
