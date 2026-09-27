@@ -414,3 +414,30 @@ could fall through the island).
   100). Hitmarker pitch climbs through a burst of hits. Kills give a gold edge flash and +XP pops, and
   streaks (DOUBLE BONK! → TRIPLE TROUBLE! → RAMPAGE! → UNSTOPPABLE!) get the announcer banner with its
   own sting. Streaks of 3 or more add a beat of slow motion.
+
+## 22. Saves, Trophy Road, landmarks
+
+**Saves** (`core/Save.ts`): `installSave()` wraps `Storage` so `rr.*` keys still work when storage throws
+(there's an in-memory copy), and stamps every change. On claude.ai, `connectCloudSave()` uses the page's
+`db` + `user` capabilities to mirror the `rr.*` keys into `data/users/<id>/save` (private to the player).
+The newer copy wins on load. Boot waits up to 1.5s for it; if it arrives later, `Game.reloadSave()` picks
+it up. Anyone with a match played counts as trained (`Game.trained`).
+
+**Trophy Road** (`progression/Trophies.ts`, `ui/TrophyRoad.ts`):
+- `trophyDelta(place24, kills)`, where `place24` is placement scaled to 24 so every mode feels the same.
+- `applyMatch` never drops you below the gate of an arena you've reached.
+- Arenas carry a bot skill: `Match.botSkillBase()` blends it with the adaptive rating on AUTO, or uses the
+  LAN room's average trophies. Members send `tr` when they create or join, the server relays it in the
+  roster, and `HostSession` averages it.
+- The road screen fills a gold line up to your trophies between milestones, and rewards (cocoons, titles,
+  arenas) are claimed there.
+
+**Landmarks** (`world/pois/Landmarks.ts`):
+- `planLandmarks()` runs first in `buildIsland`. It picks flat-enough sites clear of places, roads, the
+  stream, the lagoon and the Wilds' fixed fields and barns, and reserves them (`common.reserved`, which
+  `busy()` honours) so woods, outcrops and homesteads grow round them.
+- `buildLandmarks()` runs last. It builds about 13 set pieces from ten kinds (camps, ruins, balloon wreck,
+  stone-edged pond, orchards, lumber camp, standing stones, picnic spot, scout post, pumpkin patch), each
+  with loot (some with a crate), an outdoor zone name and a minimap label (`world.landmarks`).
+- Low pieces follow the slope through the frame's `h(lx, lz)`. Roads get lamp posts every ~22m, and the
+  newer roads get a "PLACE →" signpost halfway along.

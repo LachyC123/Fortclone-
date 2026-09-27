@@ -52,10 +52,14 @@ export function cottage(k: Kit, world: World, doors: DoorSpec[], c: CottageSpec)
   if (c.floors === 2) loot(world, ...at(0.4, 3.05, 0.6), 'weapon');
 }
 
-/** True if (x, z) is near any place, a road, or the island rim (keep scatter out). */
+/** land set aside for landmarks (planned before the woods and homesteads fill in round them) */
+export const reserved: [number, number, number][] = [];
+
+/** True if (x, z) is near any place, a road, a reserved landmark site, or the island rim (keep scatter out). */
 export function busy(x: number, z: number, roadPad = 3.5, poiPad = 0) {
   const r = Math.hypot(x, z);
   if (r > islandRadius(Math.atan2(z, x)) - 4) return true;
+  for (const [rx, rz, rr] of reserved) if (Math.hypot(x - rx, z - rz) < rr) return true;
   if (roadDist(x, z) < roadPad) return true;
   for (const p of POIS) if (Math.hypot(x - p.x, z - p.z) < p.r + poiPad) return true;
   return false;

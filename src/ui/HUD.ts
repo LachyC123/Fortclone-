@@ -183,7 +183,9 @@ export class HUD implements HudEvents {
 
   onSlotTap: ((i: number) => void) | null = null;
 
+  private landmarks: { name: string; x: number; z: number }[] = [];
   setMapBase(world: World) {
+    this.landmarks = world.landmarks;
     // pre-render the island map once: hill-shaded terrain, water, roads, buildings
     const N = MAP_PX;
     const c = document.createElement('canvas');
@@ -951,6 +953,18 @@ export class HUD implements HudEvents {
       if (!overview && Math.hypot(rx, ry) < 14) continue;
       g.strokeText(poi.name, 80 + rx, 80 + ry);
       g.fillText(poi.name, 80 + rx, 80 + ry);
+    }
+    // the little landmarks in between: smaller, softer, only nearby unless it's the big map
+    g.font = overview ? 'italic 600 7px Fredoka, sans-serif' : 'italic 600 8px Fredoka, sans-serif';
+    g.fillStyle = '#ffe9a8';
+    g.lineWidth = 2.5;
+    for (const lm of this.landmarks) {
+      const u = U(lm.x), v = V(lm.z);
+      const rx = u * cy - v * sy, ry = u * sy + v * cy;
+      const d = Math.hypot(rx, ry);
+      if (d > 66 || (!overview && (d < 12 || d > 58))) continue;
+      g.strokeText(lm.name, 80 + rx, 80 + ry);
+      g.fillText(lm.name, 80 + rx, 80 + ry);
     }
     // you
     g.fillStyle = '#fff8e8';

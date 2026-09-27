@@ -87,6 +87,20 @@ as usual. The host's device runs the match, so the fastest device should host. I
 server, check everyone is on the same Wi-Fi and the computer's firewall allows port 8787 (`PORT=9000 npm run lan`
 to use another port).
 
+## Trophy Road
+
+Every match moves your trophies: placing in the top half wins some, the bottom quarter loses a few, and
+eliminations add a couple. There are seven arenas (Puddle Pals, Pebble Park, Crate Canyon, Blink Bay,
+Gloom Gardens, Rift Royale, Legends' Lagoon). You can't lose trophies in the first one, and you never drop
+below an arena you've reached. The **Trophy Road** (the banner on the home screen) has 22 milestones:
+cocoons, titles to wear and new arenas. On AUTO difficulty your arena sets how sharp the bots are; in a
+LAN room the bots play at the **average** of everyone's trophies.
+
+## Saving
+
+Progress (bugs, trophies, titles, settings, training done) is saved in the browser. On the claude.ai page
+it's also mirrored to your own private save, so it comes back even if the browser forgets.
+
 ## Training (first play)
 
 The first time you press **PLAY** you get a short training lap on Launch Isle before your first match. It's a
@@ -189,6 +203,9 @@ node tools/squadai.mjs                        # bot teammates: throw you a gun/a
 node tools/botdiag.mjs                        # unarmed bots after landing: do they go somewhere (no dithering)?
 node tools/botidle.mjs [--team=2]             # armed enemies standing near each other not fighting; low-hp bots & heals
 node tools/juiceshots.mjs                     # screenshots: combo damage numbers, streak announcer, explosion
+node tools/trophytest.mjs [--mobile]          # trophy banner, road screen & claiming, trophies from a won match
+node tools/savetest.mjs                       # saves survive a wiped browser via a (fake) claude.ai cloud store
+node tools/landmarkshots.mjs [--only=pond]    # drone shots of the in-between landmarks
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

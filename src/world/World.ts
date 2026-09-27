@@ -83,6 +83,8 @@ export class World {
   private cloudData: { x: number; y: number; z: number; s: number; v: number }[] = [];
   zones: Zone[] = [];
   lootSpots: LootSpot[] = [];
+  /** small named spots between places (minimap labels) */
+  landmarks: { name: string; x: number; z: number }[] = [];
   crateSpots: { pos: THREE.Vector3; yaw: number }[] = [];
   nests: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }[] = [];
   /** Launch Isle (pre-match lobby) */
