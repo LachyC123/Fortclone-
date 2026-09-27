@@ -5,7 +5,7 @@ tablets and other computers only need a web browser.
 
 ## Once, on the computer that will host
 
-1. Install **Node.js** (the "LTS" button on https://nodejs.org).
+1. Install **Node.js 22 or newer** (the "LTS" button on https://nodejs.org). Older versions (you can check with `node -v`) cannot build the game.
 2. Get the game:
    ```bash
    git clone https://github.com/LachyC123/Fortclone-.git
