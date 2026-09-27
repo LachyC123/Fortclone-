@@ -4,6 +4,10 @@ import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
 import { CollectionScreen } from './Collection';
 import { LanScreen } from './LanScreen';
+import { TrophyRoadScreen, nextReward } from './TrophyRoad';
+import { arenaFor, unclaimed, ROAD } from '../progression/Trophies';
+
+const ROAD_ATS = ROAD.map((r) => r.at);
 import { SPECIES_BY_ID } from '../progression/Bugs';
 import { RARITY } from '../render/Palette';
 
@@ -55,12 +59,14 @@ export class Menus {
   private elimEl = h('div', 'overlay hidden');
   collection!: CollectionScreen;
   lan!: LanScreen;
+  road!: TrophyRoadScreen;
 
   constructor(private game: Game) {
     this.title.innerHTML = `<div class="title home">
       <div class="logo">RIFT<span>RASCALS</span></div>
       <div class="tagline">DROP. BLINK. GRAB. RUN.</div>
       <div class="profile big"></div>
+      <button class="trophybtn"></button>
       <div class="modepick"><button data-n="1">SOLO</button><button data-n="2">DUOS</button><button data-n="3">TRIOS</button><button data-n="4">SQUADS</button></div>
       <div class="modehint"></div>
       <div class="playrow"><button class="btn play">PLAY</button><button class="btn secondary friends">WITH FRIENDS<small>same Wi-Fi</small></button></div>
@@ -120,6 +126,17 @@ export class Menus {
       audio.unlock();
       audio.uiTap();
       this.game.startPlayground();
+    });
+    this.road = new TrophyRoadScreen(this.game);
+    this.road.onClose = () => {
+      this.title.classList.remove('hidden');
+      this.refreshProfile();
+    };
+    this.title.querySelector('.trophybtn')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.road.open();
     });
     this.lan = new LanScreen(this.game);
     this.lan.onClose = () => this.title.classList.remove('hidden');
@@ -219,7 +236,17 @@ export class Menus {
     } catch {
       /* ignore */
     }
-    (this.title.querySelector('.profile') as HTMLElement).innerHTML = `<span>LV ${p.level}</span><span>${ICONS.skull} ${p.wins} wins</span>`;
+    const tr = this.game.trophies;
+    (this.title.querySelector('.profile') as HTMLElement).innerHTML = `<span>LV ${p.level}</span><span>${ICONS.skull} ${p.wins} wins</span>${tr.title ? `<span class="title">“${tr.title}”</span>` : ''}`;
+    // trophy banner: count, arena, progress to the next reward, and a badge when one's waiting
+    const arena = arenaFor(tr.trophies);
+    const next = nextReward(tr.trophies);
+    const waiting = unclaimed(tr).length;
+    const lastAt = Math.max(0, ...ROAD_ATS.filter((a) => a <= tr.trophies));
+    const pct = next ? ((tr.trophies - lastAt) / Math.max(1, next.at - lastAt)) * 100 : 100;
+    const tb = this.title.querySelector('.trophybtn') as HTMLElement;
+    tb.style.setProperty('--ac', arena.color);
+    tb.innerHTML = `<span class="tr big">${ICONS.trophy}${tr.trophies}</span><span class="mid"><b class="big">${arena.name}</b><span class="bar"><i style="width:${pct}%"></i></span><small>${next ? `next reward at ${next.at}` : 'road complete!'}</small></span><span class="go big">TROPHY ROAD ›</span>${waiting ? `<span class="badge">${waiting}</span>` : ''}`;
     const c = this.game.collection;
     const own = c.bugs.find((b) => b.species === c.equipped)!;
     const sp = SPECIES_BY_ID[own.species];

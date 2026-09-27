@@ -3158,3 +3158,386 @@ body.tut-nobug .tbtn[data-id='blink'] {
   100% { opacity: 0; transform: translateY(-26px); }
 }
 .touch-on .xppops .xp { font-size: 14px; }
+
+/* ---------- trophy road: home banner */
+.home .profile .title {
+  color: #ff9ad5;
+  font-style: italic;
+}
+.trophybtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px auto 0;
+  width: min(460px, 92vw);
+  padding: 6px 14px;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ac) 35%, var(--paper)), var(--paper));
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.trophybtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--ink);
+}
+.trophybtn .tr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 24px;
+  color: #d98b1f;
+  -webkit-text-stroke: 1px var(--ink);
+}
+.trophybtn .tr svg,
+.roadtop .tr svg,
+.trophyrow .tr svg {
+  width: 26px;
+  height: 26px;
+  color: #f2c14e;
+  -webkit-text-stroke: 0;
+}
+.trophybtn .mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.trophybtn .mid b {
+  font-size: 16px;
+}
+.trophybtn .bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(43, 34, 56, 0.2);
+  border: 2px solid var(--ink);
+  overflow: hidden;
+}
+.trophybtn .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #f2c14e, #ffdf7a);
+}
+.trophybtn small {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.trophybtn .go {
+  font-size: 14px;
+  color: var(--terra);
+  white-space: nowrap;
+}
+.trophybtn .badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 26px;
+  height: 26px;
+  line-height: 20px;
+  border-radius: 13px;
+  background: var(--terra);
+  color: #fff;
+  border: 3px solid var(--ink);
+  font-weight: 800;
+  text-align: center;
+  animation: tuthi 1.2s infinite;
+}
+
+/* ---------- trophy road: the screen */
+.roadpanel {
+  width: min(560px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.roadtop {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 4px 10px;
+  border-bottom: 3px dashed rgba(43, 34, 56, 0.2);
+}
+.roadtop .tr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 30px;
+  color: #d98b1f;
+}
+.roadtop .an {
+  font-size: 20px;
+  color: var(--ac);
+  -webkit-text-stroke: 1px var(--ink);
+}
+.roadtop .best {
+  margin-left: auto;
+  font-size: 13px;
+}
+.roadtop .best b {
+  color: var(--terra);
+}
+.track {
+  position: relative;
+  overflow-y: auto;
+  flex: 1;
+  padding: 10px 6px 16px 0;
+  min-height: 0;
+}
+.trackin {
+  position: relative;
+}
+.track .line {
+  position: absolute;
+  left: 82px;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  margin-left: -5px;
+  border-radius: 5px;
+  background: rgba(43, 34, 56, 0.15);
+}
+.track .line .fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 5px;
+  background: linear-gradient(0deg, #f2c14e, #ffdf7a);
+  box-shadow: 0 0 10px rgba(242, 193, 78, 0.8);
+}
+.track .line .you {
+  position: absolute;
+  right: 12px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #ffdf7a;
+  z-index: 3;
+}
+.track .node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 60px 28px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.track .node .at {
+  text-align: right;
+  font-size: 16px;
+  opacity: 0.6;
+}
+.track .node.reached .at {
+  opacity: 1;
+  color: #d98b1f;
+}
+.track .node .dot {
+  justify-self: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: var(--paper);
+  z-index: 1;
+}
+.track .node.reached .dot {
+  background: #f2c14e;
+}
+.track .node .card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--c) 18%, #fff);
+  opacity: 0.6;
+}
+.track .node.reached .card {
+  opacity: 1;
+}
+.track .node.ready .card {
+  box-shadow: 0 0 0 3px #ffdf7a, 0 0 18px rgba(242, 193, 78, 0.9);
+  animation: roadpulse 1.2s ease-in-out infinite;
+}
+@keyframes roadpulse {
+  50% { transform: scale(1.02); }
+}
+.track .node .coc {
+  width: 24px;
+  height: 30px;
+  border-width: 2px;
+  flex: none;
+}
+.track .node .tt {
+  font-family: 'Lilita One', sans-serif;
+  font-size: 22px;
+  color: #ff6bb5;
+  width: 24px;
+  text-align: center;
+}
+.track .node .txt {
+  flex: 1;
+  font-weight: 800;
+  font-size: 14px;
+}
+.track .node .ok {
+  font-weight: 900;
+  color: #3f9a2f;
+  font-size: 18px;
+}
+.track .node .claim,
+.track .node .wear {
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: 800 13px inherit;
+  background: #f2c14e;
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+  cursor: pointer;
+}
+.track .node .wear {
+  background: #fff;
+}
+.track .node .wear.on {
+  background: #ff9ad5;
+}
+.track .arenarow {
+  position: relative;
+  margin: 14px 0 6px 96px;
+  padding: 8px 14px;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--ac), color-mix(in srgb, var(--ac) 40%, #fff));
+  box-shadow: var(--shadow);
+  z-index: 1;
+  filter: saturate(0.35) brightness(0.95);
+}
+.track .arenarow.open {
+  filter: none;
+}
+.track .arenarow span {
+  display: block;
+  font-size: 20px;
+  color: #fff;
+  -webkit-text-stroke: 2px var(--ink);
+  paint-order: stroke fill;
+}
+.track .arenarow small {
+  font-size: 12px;
+  font-weight: 700;
+}
+.roadhint {
+  font-size: 12px;
+  opacity: 0.7;
+  padding-top: 8px;
+  border-top: 3px dashed rgba(43, 34, 56, 0.2);
+}
+.roadconf {
+  position: fixed;
+  width: 9px;
+  height: 12px;
+  border-radius: 2px;
+  z-index: 60;
+  pointer-events: none;
+  animation: roadconf 0.9s cubic-bezier(0.2, 0.8, 0.4, 1) forwards;
+}
+@keyframes roadconf {
+  0% { transform: translate(-50%, -50%); opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy) + 120px)) rotate(540deg); opacity: 0; }
+}
+
+/* ---------- trophy road: match summary */
+.trophyrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.trophyrow .tr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 24px;
+  color: #d98b1f;
+}
+.trophyrow .gain {
+  font-size: 22px;
+  color: #3f9a2f;
+}
+.trophyrow .gain.neg {
+  color: #d9534f;
+}
+.trophyrow .abar {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  border: 3px solid var(--ink);
+  border-radius: 11px;
+  background: rgba(43, 34, 56, 0.12);
+  overflow: hidden;
+}
+.trophyrow .abar .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ac), color-mix(in srgb, var(--ac) 50%, #fff));
+  transition: width 0.05s linear;
+}
+.trophyrow .abar span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 12px;
+}
+.newarena {
+  font-size: 22px;
+  text-align: center;
+  color: #ff9ad5;
+  -webkit-text-stroke: 2px var(--ink);
+  paint-order: stroke fill;
+  animation: arenapop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) 0.8s both;
+}
+@keyframes arenapop {
+  0% { opacity: 0; transform: scale(2.2) rotate(-6deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+.rewardswait {
+  text-align: center;
+  font-weight: 800;
+  color: var(--terra);
+}
+.lanroom .mem .trs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #d98b1f;
+}
+.lanroom .mem .trs svg,
+.lanroom .roomtr svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+/* short phone screens: slimmer banner */
+@media (max-height: 500px) {
+  .trophybtn {
+    margin-top: 4px;
+    padding: 3px 10px;
+  }
+  .trophybtn .tr {
+    font-size: 18px;
+  }
+  .trophybtn small {
+    display: none;
+  }
+}

@@ -26,7 +26,8 @@ import { CollisionWorld, ColFlags } from '../physics/Collision';
 import { Throwables } from '../combat/Throwables';
 import { Training } from '../tutorial/Training';
 import { geoStats } from '../render/GeoKit';
-import { Match } from './Match';
+import { loadProfile, Match } from './Match';
+import { loadTrophies, TrophyState } from '../progression/Trophies';
 import { Bubbles } from '../fx/Bubbles';
 import { Birds } from '../fx/Birds';
 import type { EmoteKind } from '../entities/RascalRig';
@@ -89,6 +90,8 @@ export class Game implements GameCtx {
   training: Training | null = null;
   /** your Blinkbug collection (saved locally) */
   collection: Collection = loadCollection();
+  /** Trophy Road progress */
+  trophies: TrophyState = loadTrophies();
   /** test hook: fixed camera for visual review */
   debugCam: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 
@@ -472,8 +475,10 @@ export class Game implements GameCtx {
   /** team size for the next match (1 solo, 2 duos, 3 trios, 4 squads) */
   teamSize = 1;
 
-  startMatch(teamSize = this.teamSize) {
+  /** roomTrophies: LAN rooms play at the arena of everyone's average trophies */
+  startMatch(teamSize = this.teamSize, roomTrophies: number | null = null) {
     if (this.mode === 'training') this.leaveTraining();
+    this.matchCtl.roomTrophies = roomTrophies;
     this.teamSize = teamSize;
     this.mode = 'match';
     this.match = this.matchCtl;
@@ -515,13 +520,27 @@ export class Game implements GameCtx {
     this.respawnPlayer();
   }
 
-  /** has this player done (or skipped) the training yet? */
+  /** has this player done (or skipped) the training yet? (anyone who has played a match has) */
   get trained() {
     try {
-      return localStorage.getItem('rr.trained') === '1';
+      if (localStorage.getItem('rr.trained') === '1') return true;
+      const prof = JSON.parse(localStorage.getItem('rr.profile') || '{}') as { matches?: number };
+      return (prof.matches ?? 0) > 0 || this.collection.bugs.length > 1;
     } catch {
       return true;
     }
+  }
+
+  /** a newer save arrived (cloud save on claude.ai): pick everything up again from storage */
+  reloadSave() {
+    this.collection = loadCollection();
+    this.settings = loadSettings();
+    this.applySettings();
+    this.matchCtl.profile = loadProfile();
+    this.trophies = loadTrophies();
+    const own = this.collection.bugs.find((b) => b.species === this.collection.equipped);
+    if (own && this.mode === 'none') this.player.setSpecies(SPECIES_BY_ID[own.species], own.name);
+    this.menus.refreshProfile();
   }
 
   /** Training on Launch Isle: everyone else steps aside, then a tick-list of the controls. */

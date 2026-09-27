@@ -154,7 +154,8 @@ await A.evaluate(() => {
 for (let i = 0; i < 12; i++) { await hostStep(0.5); await B.waitForTimeout(400); }
 log.push('host team state: ' + (await A.evaluate(() => { const g = window.__game; const r = [...g.net.remote.values()][0]; return JSON.stringify({ res: r.result, ph: g.match.phase, team: g.actors.filter((a) => a.team === r.actor.team).map((a) => [a.name, a.alive, a.downed, !!a.bugout, a.out, a.parked]), sparks: g.match.sparks.length }); })));
 log.push('friend net result: ' + (await B.evaluate(() => JSON.stringify(window.__game.net.result))));
-await B.waitForFunction(() => !document.querySelector('.summary')?.classList.contains('hidden'), null, { timeout: 60000 }).catch(() => {});
+await B.waitForFunction(() => !document.querySelector('.summary')?.classList.contains('hidden'), null, { timeout: 180000 }).catch(() => {});
+log.push('friend summary probe: ' + (await B.evaluate(() => { try { const mc = window.__game.matchCtl; return `resultT=${window.__game.net.resultT} summaryShown=${mc.summaryShown} fps=${window.__game.fps.toFixed(2)} paused=${window.__game.paused}`; } catch (e) { return 'ERR ' + e.message; } })));
 log.push('friend result: ' + (await B.evaluate(() => `summary=${!document.querySelector('.summary')?.classList.contains('hidden')} text=${document.querySelector('.summary .place')?.textContent}`)));
 await B.screenshot({ path: 'tools/out/lan-friend.png', timeout: 120000 });
 // PLAY AGAIN from the host takes everyone into a fresh match

@@ -14,6 +14,8 @@ export interface RoomMember {
   name: string;
   team: number;
   host: boolean;
+  /** trophies this player brought (the room plays at the average) */
+  tr?: number;
 }
 
 const FX_METHODS = ['muzzle', 'impact', 'hitSplat', 'dust', 'landBurst', 'blinkBurst', 'bugTrail', 'pickupSparkle', 'healPuff', 'elimination', 'explosion', 'fuseBurst', 'sparkBurst', 'tracer', 'ring', 'decal', 'chunk', 'smear', 'casing', 'leaves', 'koStars', 'confettiCannon', 'bolt', 'lightFlash'];
@@ -159,7 +161,8 @@ export class HostSession {
       }
       for (let i = 0; i < bots.length; i++) bots[i].team = next + Math.floor(i / teamSize);
     };
-    g.startMatch(teamSize);
+    const trs = members.map((m) => m.tr ?? 0);
+    g.startMatch(teamSize, Math.round(trs.reduce((a, b) => a + b, 0) / Math.max(1, trs.length)));
     this.sendRoster();
     this.link.send({ t: 'go' });
   }

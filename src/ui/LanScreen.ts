@@ -3,6 +3,8 @@ import { audio } from '../audio/Audio';
 import { Link, Msg } from '../net/Link';
 import { HostSession, RoomMember } from '../net/Host';
 import { ClientSession } from '../net/Client';
+import { ICONS } from './icons';
+import { arenaFor } from '../progression/Trophies';
 
 const h = (tag: string, cls = '', html = '') => {
   const e = document.createElement(tag);
@@ -124,7 +126,7 @@ export class LanScreen {
     this.root.querySelector('.create')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();
-      this.link?.send({ t: 'create', name: getName() });
+      this.link?.send({ t: 'create', name: getName(), tr: this.game.trophies.trophies });
     });
     const join = () => {
       audio.unlock();
@@ -134,7 +136,7 @@ export class LanScreen {
         this.flash('Room codes are 4 letters');
         return;
       }
-      this.link?.send({ t: 'join', code: c, name: getName() });
+      this.link?.send({ t: 'join', code: c, name: getName(), tr: this.game.trophies.trophies });
     };
     this.root.querySelector('.join')!.addEventListener('click', join);
     code.addEventListener('keydown', (e) => {
@@ -159,16 +161,18 @@ export class LanScreen {
       .map((x) => {
         const col = TEAM_COLORS[x.team % TEAM_COLORS.length];
         const team = size > 1 ? `<span class="team" style="--tc:${col}">${x.id === this.you ? '<button class="tprev">◀</button>' : ''}TEAM ${x.team + 1}${x.id === this.you ? '<button class="tnext">▶</button>' : ''}</span>` : '';
-        return `<div class="mem${x.id === this.you ? ' me' : ''}"><span class="nm">${esc(x.name)}${x.host ? ' <small>HOST</small>' : ''}${x.id === this.you ? ' <small>YOU</small>' : ''}</span>${team}</div>`;
+        return `<div class="mem${x.id === this.you ? ' me' : ''}"><span class="nm">${esc(x.name)}${x.host ? ' <small>HOST</small>' : ''}${x.id === this.you ? ' <small>YOU</small>' : ''} <small class="trs">${ICONS.trophy}${x.tr ?? 0}</small></span>${team}</div>`;
       })
       .join('');
     const humans = L.members.length;
+    const avgTr = Math.round(L.members.reduce((a, m) => a + (m.tr ?? 0), 0) / Math.max(1, humans));
     const bots = 24 - humans;
     this.render(`<div class="lanroom">
       <div class="code big">ROOM <b>${L.code}</b></div>
       <div class="hint">Friends on this Wi-Fi: open <b>${esc(location.host)}</b> and join with the code.</div>
       <div class="modes">${[1, 2, 3, 4].map((n) => `<button data-n="${n}" class="${n === size ? 'on' : ''}" ${isHost ? '' : 'disabled'}>${MODES[n]}</button>`).join('')}</div>
       <div class="members">${rows}</div>
+      <div class="hint roomtr">Room average ${ICONS.trophy}<b>${avgTr}</b> · bots play like <b style="color:${arenaFor(avgTr).color}">${arenaFor(avgTr).name}</b></div>
       <div class="hint">${size > 1 ? `Same team number = teammates (up to ${size}). Want to play <b>against</b> each other? Pick different teams. ` : 'Solo: everyone for themselves. '}${bots} bots fill the rest of the island.</div>
       ${isHost ? '<button class="btn start">START MATCH</button>' : '<div class="wait big">Waiting for the host to start…</div>'}
     </div>`);

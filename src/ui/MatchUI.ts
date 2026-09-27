@@ -29,6 +29,15 @@ export interface MatchSummary {
   startXp: number;
   endLevel: number;
   endXp: number;
+  trophyGain: number;
+  trophiesBefore: number;
+  trophies: number;
+  arenaName: string;
+  arenaColor: string;
+  arenaAt: number;
+  nextArenaAt: number;
+  newArena: string;
+  rewardsWaiting: number;
 }
 
 const h = (tag: string, cls = '', html = '') => {
@@ -232,6 +241,9 @@ export class MatchUI {
     this.summaryEl.innerHTML = `<div class="sumcard panel">
       <div class="place big ${s.won ? 'win' : ''}">${s.won ? 'VICTORY ROYALE-ISH!' : `#${s.placement}`}<small> of ${s.of}${s.teams ? ' teams' : ''}</small></div>
       <div class="stats">${rows.map(([k, v, c]) => `<div class="st"><span>${k}</span><b class="big" ${c ? `style="color:${c}"` : ''}>${v}</b></div>`).join('')}</div>
+      <div class="trophyrow" style="--ac:${s.arenaColor}"><span class="tr big">${ICONS.trophy}<b class="n">${s.trophiesBefore}</b></span><span class="gain big ${s.trophyGain < 0 ? 'neg' : ''}">${s.trophyGain >= 0 ? '+' : ''}${s.trophyGain}</span><div class="abar"><div class="fill" style="width:${Math.max(0, Math.min(100, ((s.trophiesBefore - s.arenaAt) / Math.max(1, s.nextArenaAt - s.arenaAt)) * 100))}%"></div><span>${s.arenaName}</span></div></div>
+      ${s.newArena ? `<div class="newarena big">NEW ARENA: ${s.newArena.toUpperCase()}!</div>` : ''}
+      ${s.rewardsWaiting ? `<div class="rewardswait">${s.rewardsWaiting} Trophy Road reward${s.rewardsWaiting > 1 ? 's' : ''} to claim!</div>` : ''}
       <div class="xp"><div class="lv big">LV <span class="n">${s.startLevel}</span></div><div class="xpbar"><div class="fill"></div></div><div class="gain big">+${s.xp} XP</div></div>
       <div class="xplines">${lines}</div>
       <div class="diff">Bots: <b>${s.difficulty}</b> · change in Settings</div>
@@ -263,6 +275,20 @@ export class MatchUI {
       requestAnimationFrame(step);
     };
     setTimeout(step, 700);
+    // count the trophies up (or down) and slide the arena bar
+    const tn = this.summaryEl.querySelector('.trophyrow .n') as HTMLElement;
+    const tf = this.summaryEl.querySelector('.trophyrow .abar .fill') as HTMLElement;
+    let shown = s.trophiesBefore;
+    const tstep = () => {
+      if (shown === s.trophies || this.summaryEl.classList.contains('hidden')) return;
+      shown += Math.sign(s.trophies - shown);
+      tn.textContent = String(shown);
+      tf.style.width = `${Math.max(0, Math.min(100, ((shown - s.arenaAt) / Math.max(1, s.nextArenaAt - s.arenaAt)) * 100))}%`;
+      if (shown % 3 === 0) audio.uiTap();
+      setTimeout(tstep, 45);
+    };
+    setTimeout(tstep, 500);
+    if (s.newArena) setTimeout(() => audio.fanfare(), 900);
     this.summaryEl.querySelector('.again')?.addEventListener('click', () => {
       audio.uiTap();
       this.onPlayAgain?.();

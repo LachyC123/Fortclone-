@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyMatch, arenaFor, arenaIndex, ARENAS, trophyDelta, unclaimed } from '../progression/Trophies';
 import type { Game } from './Game';
 import type { Actor } from '../entities/Actor';
 import { MatchHooks, MatchPhase, SparkInfo } from './types';
@@ -345,8 +346,7 @@ export class Match implements MatchHooks {
         a.setSpecies(randomSpecies(), randomBugName());
         // skill mix around your rating: some rookies, mostly regulars, a few aces
         const br = a.controller as { setSkill?: (s: number) => void } | null;
-        const d = this.g.settings.botDifficulty;
-        const r = d === 'easy' ? 0.15 : d === 'normal' ? 0.4 : d === 'hard' ? 0.72 : this.profile.rating;
+        const r = this.botSkillBase();
         const roll = Math.random();
         const s = roll < 0.3 ? r - 0.3 + Math.random() * 0.1 : roll < 0.82 ? r - 0.08 + Math.random() * 0.16 : r + 0.3 + Math.random() * 0.1;
         br?.setSkill?.(s);
@@ -718,11 +718,22 @@ export class Match implements MatchHooks {
     this.botDamageMul = Math.max(0.35, Math.min(1, 0.3 + aggro * 0.9)) * (L < 90 ? 0.75 : 1);
   }
 
+  /** LAN: the average trophies of the humans in the room (null = just you) */
+  roomTrophies: number | null = null;
+
+  /** the middle of the bot skill spread: your arena (or the room's), nudged by how you've been doing */
+  botSkillBase() {
+    const d = this.g.settings.botDifficulty;
+    if (d !== 'auto') return d === 'easy' ? 0.15 : d === 'normal' ? 0.4 : 0.72;
+    if (this.roomTrophies !== null) return arenaFor(this.roomTrophies).skill;
+    return Math.max(0.1, Math.min(0.85, arenaFor(this.g.trophies.trophies).skill * 0.6 + this.profile.rating * 0.4));
+  }
+
   difficultyLabel() {
     const d = this.g.settings.botDifficulty;
     if (d !== 'auto') return d.toUpperCase();
-    const r = this.profile.rating;
-    return `AUTO · ${r < 0.25 ? 'CHILL' : r < 0.45 ? 'NORMAL' : r < 0.65 ? 'SPICY' : 'WILD'}`;
+    const a = arenaFor(this.roomTrophies ?? this.g.trophies.trophies);
+    return `AUTO · ${a.name.toUpperCase()}${this.roomTrophies !== null ? ' (room average)' : ''}`;
   }
 
   /* ------------------------------------------------------------------ Loot Balloons */
@@ -949,6 +960,11 @@ export class Match implements MatchHooks {
       prof.level++;
     }
     saveProfile(prof);
+    // trophy road
+    const tr = this.g.trophies;
+    const res = applyMatch(tr, trophyDelta(place24, p.kills, tr.trophies));
+    const arena = arenaFor(tr.trophies);
+    const nextArena = ARENAS[arenaIndex(tr.trophies) + 1];
     // every match hatches progress: a cocoon, better the higher you placed
     const cocoon = cocoonForPlacement(place24, MATCH_SIZE, p.kills);
     this.g.collection.cocoons.push({ rarity: cocoon });
@@ -978,6 +994,15 @@ export class Match implements MatchHooks {
       startXp,
       endLevel: prof.level,
       endXp: prof.xp,
+      trophyGain: res.gained,
+      trophiesBefore: res.before,
+      trophies: res.after,
+      arenaName: arena.name,
+      arenaColor: arena.color,
+      arenaAt: arena.at,
+      nextArenaAt: nextArena?.at ?? arena.at + 500,
+      newArena: res.newArena >= 0 ? ARENAS[res.newArena].name : '',
+      rewardsWaiting: unclaimed(tr).length,
     };
     this.ui.showSummary(summary);
   }

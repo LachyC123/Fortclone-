@@ -148,7 +148,7 @@ function code4() {
 }
 
 function roster(room) {
-  return [...room.members.values()].map((c) => ({ id: c.id, name: c.name, team: room.teams.get(c.id) ?? 0, host: c === room.host }));
+  return [...room.members.values()].map((c) => ({ id: c.id, name: c.name, team: room.teams.get(c.id) ?? 0, host: c === room.host, tr: c.tr ?? 0 }));
 }
 
 function broadcastRoom(room) {
@@ -164,6 +164,7 @@ function handle(c, m, raw) {
       rooms.set(r.code, r);
       c.room = r;
       c.name = String(m.name || 'Host').slice(0, 16);
+      c.tr = Math.max(0, Math.min(99999, Number(m.tr) || 0));
       broadcastRoom(r);
       console.log(`room ${r.code} created by ${c.name}`);
       return;
@@ -175,6 +176,7 @@ function handle(c, m, raw) {
       if (r.members.size >= 8) return c.send({ t: 'error', msg: 'Room is full (8 players).' });
       c.room = r;
       c.name = String(m.name || 'Rascal').slice(0, 16);
+      c.tr = Math.max(0, Math.min(99999, Number(m.tr) || 0));
       r.members.set(c.id, c);
       // new players join the host's team by default when there's room, else the next free team
       r.teams.set(c.id, pickTeam(r));
