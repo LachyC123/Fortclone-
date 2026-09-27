@@ -68,6 +68,7 @@ export class Menus {
       <div class="homebtns">
         <button class="btn secondary bugsbtn">MY BUGS<span class="badge"></span></button>
         <button class="btn secondary practice">PRACTICE</button>
+        <button class="btn secondary training">TRAINING</button>
         <button class="btn secondary howto">HOW TO PLAY</button>
       </div>
       <div class="hint hidden">
@@ -106,7 +107,14 @@ export class Menus {
     this.title.querySelector('.play')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();
-      this.game.startMatch();
+      // first time ever: a quick (skippable) training lap before the real thing
+      if (!this.game.trained) this.game.startTraining();
+      else this.game.startMatch();
+    });
+    this.title.querySelector('.training')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.game.startTraining();
     });
     this.title.querySelector('.practice')!.addEventListener('click', () => {
       audio.unlock();
@@ -152,7 +160,7 @@ export class Menus {
   private buildPause() {
     const s = this.game.settings;
     this.pauseEl.innerHTML = `<div class="menu panel">
-      <div class="menuhead"><h2>PAUSED</h2><button class="btn resume">RESUME</button></div>
+      <div class="menuhead"><h2>PAUSED</h2><button class="btn secondary skiptut hidden">SKIP TRAINING</button><button class="btn resume">RESUME</button></div>
       <div class="rows"><div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
       <div class="row qnote hidden"><small>Model &amp; world detail change after a reload.</small></div>
       <div class="row"><span>Auto-adjust graphics</span><div class="seg" data-k="autoQuality"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
@@ -192,6 +200,11 @@ export class Menus {
         this.game.applySettings();
       }),
     );
+    this.pauseEl.querySelector('.skiptut')!.addEventListener('click', () => {
+      audio.uiTap();
+      this.pauseEl.classList.add('hidden');
+      this.game.training?.skip();
+    });
     this.pauseEl.querySelector('.resume')!.addEventListener('click', () => {
       audio.uiTap();
       this.game.play();
@@ -232,6 +245,7 @@ export class Menus {
   }
 
   showPause() {
+    this.pauseEl.querySelector('.skiptut')!.classList.toggle('hidden', this.game.mode !== 'training');
     this.pauseEl.classList.remove('hidden');
   }
 

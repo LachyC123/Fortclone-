@@ -6,6 +6,7 @@ const server = spawn('npx', ['vite', 'preview', '--port', '4176', '--strictPort'
 await new Promise((r) => setTimeout(r, 2500));
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ ...devices['iPhone 13 landscape'] });
+await ctx.addInitScript(() => localStorage.setItem('rr.trained', '1')); // training has its own test (tutorialtest.mjs)
 const page = await ctx.newPage();
 const errors = [];
 page.on('console', (m) => errors.push(`[${m.type()}] ${m.text()}`));

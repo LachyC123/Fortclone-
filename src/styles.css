@@ -2795,3 +2795,285 @@ body.ko #game { filter: saturate(0.2) contrast(1.08) brightness(1.05); transitio
   0% { transform: scale(0.2) rotate(-40deg); }
   100% { transform: scale(1) rotate(0); }
 }
+
+/* ---------- training (first play) */
+.tut {
+  position: fixed;
+  left: calc(14px + var(--safe-l));
+  top: calc(170px + var(--safe-t));
+  width: min(300px, 38vw);
+  background: var(--paper);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px 12px;
+  z-index: 30;
+  font-size: 13px;
+}
+.tut.pop {
+  animation: tutpop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+@keyframes tutpop {
+  0% { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+.tut .hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tut .hd b {
+  font-size: 16px;
+  color: var(--terra);
+}
+.tut .hd .n {
+  font-weight: 800;
+  opacity: 0.6;
+}
+.tut .skip {
+  margin-left: auto;
+  background: var(--ink);
+  color: var(--paper);
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.tut .now {
+  font-size: 19px;
+  line-height: 1.1;
+  margin: 4px 0;
+}
+.tut .how {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.tut kbd {
+  display: inline-block;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-bottom-width: 4px;
+  border-radius: 6px;
+  padding: 0 6px;
+  font: 800 12px/1.5 inherit;
+}
+.tut ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 34vh;
+  overflow: hidden;
+}
+.tut li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  opacity: 0.45;
+  font-weight: 700;
+}
+.tut li .tick {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 900;
+}
+.tut li.ok {
+  opacity: 0.8;
+  text-decoration: line-through;
+}
+.tut li.ok .tick {
+  background: var(--hp);
+}
+.tut li.cur {
+  opacity: 1;
+}
+.tut li.cur .tick {
+  background: var(--mustard);
+}
+.tut .tutbtns {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  pointer-events: auto;
+}
+.tut .tutbtns .btn {
+  font-size: 15px;
+  padding: 8px 12px;
+}
+/* phones: a slim card under the weapon slots with just the current step and the ticks */
+.touch-on .tut {
+  top: calc(52px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 56vw);
+  padding: 5px 10px 7px;
+}
+.touch-on .tut .hd {
+  margin-bottom: 2px;
+}
+.touch-on .tut .hd b {
+  font-size: 13px;
+}
+.touch-on .tut .skip {
+  padding: 3px 10px;
+}
+body.tut-on.touch-on .toasts {
+  top: calc(52px + 118px);
+}
+.touch-on .tut.pop {
+  animation: none;
+}
+.touch-on .tut ol {
+  display: flex;
+  gap: 3px;
+}
+.touch-on .tut li {
+  font-size: 0;
+  gap: 0;
+}
+.touch-on .tut .now {
+  font-size: 16px;
+}
+.touch-on .tut .how {
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.tuttitle {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translate(-50%, -20px) scale(0.9);
+  text-align: center;
+  color: #fff;
+  -webkit-text-stroke: 2px var(--ink);
+  paint-order: stroke;
+  text-shadow: 0 5px 0 var(--ink);
+  opacity: 0;
+  transition: opacity 0.4s, transform 0.4s;
+  pointer-events: none;
+  z-index: 31;
+}
+.tuttitle .big {
+  font-size: clamp(40px, 9vw, 86px);
+  color: var(--mustard);
+}
+.tuttitle small {
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  -webkit-text-stroke: 1px var(--ink);
+}
+.tuttitle.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+body.tut-naming .touch,
+body.tut-naming .tut {
+  display: none !important;
+}
+/* no Blinkbug yet (it's still in its cocoon) */
+body.tut-nobug .bugwidget,
+body.tut-nobug .buglocator,
+body.tut-nobug .tbtn[data-id='bug'],
+body.tut-nobug .tbtn[data-id='blink'] {
+  display: none !important;
+}
+/* the touch button the current step is about */
+.tbtn.tut-hi {
+  animation: tuthi 1s ease-in-out infinite;
+}
+@keyframes tuthi {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242, 193, 78, 0.9); }
+  50% { box-shadow: 0 0 0 12px rgba(242, 193, 78, 0); }
+}
+/* naming your first bug (card sits low so the new bug stays on show) */
+.overlay.tutname {
+  z-index: 40;
+  place-items: end center;
+  padding-bottom: calc(16px + var(--safe-b));
+  background: linear-gradient(to top, rgba(43, 34, 56, 0.55), rgba(43, 34, 56, 0) 55%);
+}
+.tutname .menu {
+  max-width: 460px;
+  text-align: center;
+}
+.tutname h2 {
+  font-size: 40px;
+  margin: 4px 0;
+  color: var(--mustard);
+}
+.tutname .tag {
+  font-size: 15px;
+  -webkit-text-stroke: 1px var(--ink);
+}
+.tutname .namerow {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.tutname .nm {
+  flex: 1;
+  min-width: 0;
+  font-size: 22px;
+  padding: 8px 12px;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.tutname .sp {
+  font-size: 13px;
+  opacity: 0.85;
+}
+.tutname .ok {
+  font-size: 20px;
+  margin-top: 6px;
+}
+.tut .esc {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tutname .ask {
+  font-weight: 800;
+  margin: 6px 0 0;
+}
+@media (max-height: 520px) {
+  .tutname .menu {
+    padding: 10px 16px 12px;
+  }
+  .tutname h2 {
+    font-size: 28px;
+    margin: 0;
+  }
+  .tutname .intro,
+  .tutname .sp {
+    display: none;
+  }
+  .tutname .namerow {
+    margin: 6px 0;
+  }
+  .tutname .nm {
+    font-size: 18px;
+    padding: 6px 10px;
+  }
+  .tutname .ok {
+    font-size: 17px;
+    margin-top: 2px;
+  }
+}

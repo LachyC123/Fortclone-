@@ -24,6 +24,7 @@ import { pick, rand } from './math';
 import { WEAPONS, AMMO_INFO, AmmoType } from '../combat/Weapons';
 import { CollisionWorld, ColFlags } from '../physics/Collision';
 import { Throwables } from '../combat/Throwables';
+import { Training } from '../tutorial/Training';
 import { geoStats } from '../render/GeoKit';
 import { Match } from './Match';
 import { Bubbles } from '../fx/Bubbles';
@@ -83,7 +84,9 @@ export class Game implements GameCtx {
   /** the battle royale in progress (null in the playground / on the title screen) */
   match: Match | null = null;
   matchCtl!: Match;
-  mode: 'none' | 'playground' | 'match' | 'net' = 'none';
+  mode: 'none' | 'playground' | 'match' | 'net' | 'training' = 'none';
+  /** first-play training on Launch Isle */
+  training: Training | null = null;
   /** your Blinkbug collection (saved locally) */
   collection: Collection = loadCollection();
   /** test hook: fixed camera for visual review */
@@ -470,6 +473,7 @@ export class Game implements GameCtx {
   teamSize = 1;
 
   startMatch(teamSize = this.teamSize) {
+    if (this.mode === 'training') this.leaveTraining();
     this.teamSize = teamSize;
     this.mode = 'match';
     this.match = this.matchCtl;
@@ -484,6 +488,7 @@ export class Game implements GameCtx {
   /** Practice: the respawning combat playground from Milestones 1–2. */
   startPlayground() {
     if (this.mode === 'match') this.leaveMatch();
+    if (this.mode === 'training') this.leaveTraining();
     this.mode = 'playground';
     this.play();
   }
@@ -510,8 +515,66 @@ export class Game implements GameCtx {
     this.respawnPlayer();
   }
 
+  /** has this player done (or skipped) the training yet? */
+  get trained() {
+    try {
+      return localStorage.getItem('rr.trained') === '1';
+    } catch {
+      return true;
+    }
+  }
+
+  /** Training on Launch Isle: everyone else steps aside, then a tick-list of the controls. */
+  startTraining() {
+    if (this.mode === 'match') this.leaveMatch();
+    if (this.training) this.leaveTraining();
+    this.mode = 'training';
+    for (const a of this.actors) {
+      if (a === this.player) continue;
+      a.parked = true;
+      a.alive = false;
+      a.rig.root.visible = false;
+      a.bug.root.visible = false;
+      a.motor.teleport(new THREE.Vector3(0, -500, 0));
+    }
+    const c = this.world.lobby.center;
+    const p = this.player;
+    p.spawn(new THREE.Vector3(c.x, c.y + 0.05, c.z + 5), 0);
+    p.weapons = [null, null, null];
+    p.equip(0, true);
+    for (const t of Object.keys(p.ammo) as AmmoType[]) p.ammo[t] = 0;
+    p.util = null;
+    p.healItem = null;
+    for (const pk of [...this.loot.pickups]) if (pk.pos.distanceTo(c) < 30) this.loot.remove(pk);
+    this.throwables.clear();
+    this.camRig.snapTo(p);
+    this.camRig.yaw = 0;
+    this.camRig.pitch = -0.12;
+    this.training = new Training(this, (then) => {
+      if (then === 'play') this.startMatch();
+      else this.goHome();
+    });
+    this.play();
+  }
+
+  private leaveTraining() {
+    this.training?.dispose();
+    this.training = null;
+    this.mode = 'none';
+    for (const pk of [...this.loot.pickups]) if (pk.pos.distanceTo(this.world.lobby.center) < 30) this.loot.remove(pk);
+    this.throwables.clear();
+    for (const a of this.actors) {
+      if (a === this.player) continue;
+      a.parked = false;
+      a.flight = 'none';
+      this.spawnBot(a);
+    }
+    this.respawnPlayer();
+  }
+
   goHome() {
     if (this.mode === 'match') this.leaveMatch();
+    if (this.mode === 'training') this.leaveTraining();
     this.mode = 'none';
     this.paused = true;
     this.input.enabled = false;
@@ -756,6 +819,10 @@ export class Game implements GameCtx {
     if (this.sounds.length) this.sounds = this.sounds.filter((s) => this.time - s.time < 1);
     if (this.net?.role === 'host') this.net.tick(dt);
     if (this.mode === 'match') return;
+    if (this.mode === 'training') {
+      this.training?.update(dt);
+      return;
+    }
 
     // playground flow: respawns & loot refresh
     if (this.respawnT > 0) {

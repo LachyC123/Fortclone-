@@ -22,8 +22,10 @@ export function buildLaunchIsle(k: Kit, world: World) {
   k.cyl(0, -0.62, 0, R - 0.4, R - 0.2, 0.08, PAL.grassDark, { segs: 36, batch: 'nocast' });
   k.cone(0, -9, 0, R - 0.5, 17, 0x8a7a6a, { segs: 16, pitch: Math.PI, batch: 'nocast' });
   k.cone(0, -3, 0, R - 0.3, 5, 0xb07a4f, { segs: 16, pitch: Math.PI, batch: 'nocast' });
-  k.collider(0, -0.5, 0, R * 1.4, 1, R * 1.4, 'grass');
-  k.collider(0, -0.5, 0, R * 1.4, 1, R * 1.4, 'grass', { yaw: Math.PI / 4 });
+  // two squares big enough that their overlap covers the whole disc (the boundary ring keeps
+  // everyone off the corners), so nothing thrown near the edge drops through the island
+  k.collider(0, -0.5, 0, R * 2 + 1, 1, R * 2 + 1, 'grass');
+  k.collider(0, -0.5, 0, R * 2 + 1, 1, R * 2 + 1, 'grass', { yaw: Math.PI / 4 });
   // boundary ring (no falling off while you wait)
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2;

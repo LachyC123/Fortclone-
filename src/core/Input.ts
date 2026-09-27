@@ -165,6 +165,12 @@ export class Input {
 
   /** Called once per frame before controllers read input. */
   poll() {
+    if (!this.enabled) {
+      // menus / cutscenes: typing in a text box must not walk your rascal around
+      this.s.moveX = this.s.moveY = 0;
+      this.s.sprint = false;
+      return;
+    }
     if (!this.s.touchActive) {
       const kx = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
       const ky = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);

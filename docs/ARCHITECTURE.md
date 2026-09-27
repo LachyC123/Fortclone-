@@ -346,8 +346,30 @@ explosions can damage enemy jammers. Webs come from the Tanglet trick; the Pewpe
 **Perks** (`combat/Perks.ts`): `Actor.perks` (max 2), applied through `applyPerks` (jump), `bugCdMul` (the
 Blinkbug nap), `takeDamage` (Thick Wool), reload rate, footstep loudness and `onKnockedSomeone` (Vampire
 Teeth). A new loot kind, `'perk'`, drops from floor spots (~6%), crates (~20%) and Loot Balloons, and
-rascals drop theirs when they're knocked out.
+rascals drop theirs when they're eliminated.
 
 **LAN**: every world object gets a `nid`; `Throwables.netState()` goes in each snapshot (`w`) and clients
 mirror it with `netApply` (interpolated), so thrown items, pads, chickens, bolts, pumpkins, jammers, traps
 and webs all show up for friends. Perks and slow ride along in each player's private packet.
+
+## 19. First-play training (`tutorial/Training.ts`)
+
+`Game.startTraining()` (mode `'training'`) parks every bot, puts you on Launch Isle, and creates a
+`Training`. PLAY starts it when `localStorage['rr.trained']` isn't set; TRAINING on the home screen always
+does. `Game.simulate` calls `training.update` instead of the playground loop.
+
+- **Props** are plain meshes plus colliders (disabled again on `dispose`): a weapon pedestal, three
+  targets (bullets reach them through a wrapped `world.onBulletHit`), a stump with a glowing cocoon, and a
+  4.6m rock with a spire. The rock is too tall to mantle; its "moss" (`mossCatch`) grabs a Blinkbug that
+  passes over the top so a lob is enough.
+- **Steps** are checked from game state (distance moved, camera yaw, `motor.sliding`, targets down,
+  `weapon.reloading`, `bug.state`, `blinks`, standing on the rock, util used, hp). Each step shows keyboard
+  or touch wording and pulses the matching touch button (`.tbtn.tut-hi`).
+- **Cutscenes** drive `game.debugCam`: an intro fly-in, then the hatch (the cocoon wobbles and pops, and a
+  stand-alone `Blinkbug` with a fake `BugOwner` hops about), the naming card (saved to the collection), and
+  the bug flying into your backpack. Until then `body.tut-nobug` hides the bug HUD and buttons.
+- **Skip**: the panel button (touch, or whenever the mouse is free) or *Skip training* in the pause menu.
+  Finishing or skipping sets `rr.trained`.
+
+Also fixed here: Launch Isle's floor colliders now cover the whole disc (before, a bug thrown near the edge
+could fall through the island).

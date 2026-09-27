@@ -87,6 +87,15 @@ as usual. The host's device runs the match, so the fastest device should host. I
 server, check everyone is on the same Wi-Fi and the computer's firewall allows port 8787 (`PORT=9000 npm run lan`
 to use another port).
 
+## Training (first play)
+
+The first time you press **PLAY** you get a short training lap on Launch Isle before your first match. It's a
+tick-list: walk, look, jump, slide, grab a gun, knock over three targets, reload. Then you find a glowing
+cocoon on an old stump, it **hatches into your first Blinkbug** and you give it a name. After that: throw it,
+blink to it, blink up onto a rock that's too tall to climb, throw a Fizz Bomb and drink a Fizzle Juice.
+**SKIP** is always there (on desktop press **Esc** and pick *Skip training*). Replay it any time from
+**TRAINING** on the home screen.
+
 ## A match
 
 1. **Launch Isle** (~14s): rascals pop in; shoot and blink all you like, nobody can get hurt.
@@ -129,10 +138,10 @@ Duplicates level a bug up (cosmetic). Collection is saved in the browser (`local
   home with a long nap, so no blinking in. Enemies can shoot it (45 HP) or blow it up.
 - **Snap Trap** (gadget): sits on the ground and arms after a moment. The first enemy to step on it takes
   25, is slowed hard for 2.5s and gets marked.
-- **Perks** are badges on the floor and in crates. You can carry two (a third swaps out the oldest), and you
-  lose them when you're knocked out:
+- **Perks** are badges on the floor and in crates. You can carry two (a third swaps out the oldest), and they
+  drop when you're eliminated:
   **Springy Socks** (jump higher), **Speedy Fingers** (reload faster), **Bug Snacks** (bug naps less),
-  **Thick Wool** (12% less damage), **Quiet Paws** (quiet footsteps), **Vampire Teeth** (heal 20 on a knock).
+  **Thick Wool** (12% less damage), **Quiet Paws** (quiet footsteps), **Vampire Teeth** (heal 20 when you knock or eliminate someone).
 
 ## Weapon fusion
 
@@ -163,6 +172,7 @@ node tools/tierprobe.mjs [low medium high]    # per-quality boot time, triangles
 node tools/squadtest.mjs                      # duos: knock, revive, sparks, nest rebuild, team wipe
 node tools/lantest.mjs                        # LAN: two browsers, room, join, move, fire, knock/revive, results, replay
 node tools/contenttest.mjs [--shots]          # new weapons, Bug Jammer, Snap Trap, Pewpew, Tanglet, perks
+node tools/tutorialtest.mjs [--mobile]        # first-play training: every step, hatch + naming, SKIP
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 
