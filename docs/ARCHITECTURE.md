@@ -441,3 +441,55 @@ it up. Anyone with a match played counts as trained (`Game.trained`).
   with loot (some with a crate), an outdoor zone name and a minimap label (`world.landmarks`).
 - Low pieces follow the slope through the frame's `h(lx, lz)`. Roads get lamp posts every ~22m, and the
   newer roads get a "PLACE →" signpost halfway along.
+
+## 23. The Burrow and Rift Relics
+
+**Economy** (`progression/Burrow.ts`): this is pure state and rules, saved as `rr.burrow`, so the cloud save
+mirrors it.
+- `BurrowState` holds glimmer, building levels, the pump tank `{stock, t}`, three incubator slots
+  `{r, end, dur}`, relic counts, finished sets, the hat, decor and the bazaar stock.
+- Everything runs on wall-clock timestamps. `pumpTick` tops the tank up from `t`, and incubators hold an
+  `end` time, so time passes while the game is closed.
+- A building's level is capped by the Hall's level. `costFor` grows with `level^1.7`.
+- Relic bonuses count only relics **on display**: `displayed()` takes the rarest first, up to the museum's
+  shelf count.
+- `matchGlimmer` / `warmIncubators` / `addRelic` are called from `Match.showSummary`.
+
+**Bug levels** (`progression/Bugs.ts`):
+- `OwnedBug` gained `level` and `spare`. Older saves convert "a level per 3 copies" into a level plus
+  spares.
+- `statsFor(species, level)` scales cooldown, window and throw speed. `Blinkbug.setLevel` applies it.
+- `Actor.setSpecies(sp, name, level)` sets the level for the player. Bots get
+  `1 + rand * (arenaIndex + 1.5)`. LAN clients send `bl` in `hello`.
+
+**The diorama** (`burrow/BurrowScene.ts`, `burrow/BurrowModels.ts`):
+- It's its own `THREE.Scene` and camera, drawn by the game's `WebGLRenderer` from the paused-frame branch
+  of `Game.frame` while `menus.burrow` is open, so there's no second GL context.
+- Every building has a procedural model per level. `sync()` rebuilds only what changed (keyed by level,
+  lock state and museum gems) with a construction poof.
+- Owned bugs are `Blinkbug`s with a fake owner whose dock wanders. A `RascalRig` with `Game.playerLook()`
+  idles and emotes by the Hall.
+- The camera orbits. When you select a building it glides to face that building's front, with
+  `setViewOffset` shifting it beside the panel. Trees on the camera→focus line shrink out of the way.
+
+**Screen** (`ui/BurrowScreen.ts`):
+- HTML over the canvas: top bar, projected status labels, the chip row, and a panel per building.
+- `tick()` re-renders the panel when its `stateKey` flips (an incubator finishing, say) and otherwise
+  just updates timers.
+- Hatching reuses `CollectionScreen.ceremony(rarity, host, {cozy})`. MY BUGS' cocoon button now opens the
+  first free incubator.
+
+**Relics in a match** (`progression/Relics.ts`, `loot/Loot.ts`, `core/Match.ts`):
+- `'relic'` is a loot kind: a gem with a gold ring and a tall beacon, drawn out to 160m.
+- `Match.spawnRelics()` drops five per match (four landmarks and one place), and supply balloon crates
+  carry one (`Crate.relic`).
+- `updateRelics()` does two things. Anyone walking over a relic picks it up (`Loot.canCarryRelic`, max 3;
+  bots also value them in `pickLoot`). People (`a.me`) standing at any nest for `BANK_TIME` bank them:
+  `Match.banked`, or for a LAN guest `onBank` → `{t:'RB'}` → `Match.bankNet`.
+- `Loot.dropInventory` spills relics you hadn't banked. Carriers get a spinning gem (`Actor.relicMark`).
+- Over the network: puppets learn the count from `rc` in actor state, your own ids from `rl`/`bk` in
+  private state, and hats from `ht` in the roster and a `LK` message after `hello`.
+
+**Hats**: `HatKind` gained party, pirate, wizard, crown and antenna, with colours in `HAT_COLOR`.
+`Game.playerLook()` puts the Burrow's hat on `LOOKS[0]`, and `Actor.setLook` rebuilds the rig between
+matches.

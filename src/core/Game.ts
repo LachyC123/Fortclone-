@@ -8,7 +8,7 @@ import { NavGrid } from '../world/NavGrid';
 import { Actor, Controller } from '../entities/Actor';
 import type { HostSession } from '../net/Host';
 import type { ClientSession } from '../net/Client';
-import { LOOKS } from '../entities/RascalRig';
+import { LOOKS, HAT_COLOR } from '../entities/RascalRig';
 import { Input } from './Input';
 import { CameraRig } from '../camera/CameraRig';
 import { PlayerController } from '../player/PlayerController';
@@ -28,6 +28,8 @@ import { Training } from '../tutorial/Training';
 import { geoStats } from '../render/GeoKit';
 import { loadProfile, Match } from './Match';
 import { loadTrophies, TrophyState } from '../progression/Trophies';
+import { BurrowState, loadBurrow, saveBurrow } from '../progression/Burrow';
+import type { RascalLook, HatKind } from '../entities/RascalRig';
 import { Bubbles } from '../fx/Bubbles';
 import { Birds } from '../fx/Birds';
 import type { EmoteKind } from '../entities/RascalRig';
@@ -92,6 +94,8 @@ export class Game implements GameCtx {
   collection: Collection = loadCollection();
   /** Trophy Road progress */
   trophies: TrophyState = loadTrophies();
+  /** your Burrow: glimmer, buildings, incubators, relics (saved) */
+  burrow: BurrowState = loadBurrow();
   /** test hook: fixed camera for visual review */
   debugCam: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
 
@@ -176,7 +180,8 @@ export class Game implements GameCtx {
 
   private createPlayer() {
     const own = this.collection.bugs.find((b) => b.species === this.collection.equipped)!;
-    const p = new Actor('You', LOOKS[0], this, SPECIES_BY_ID[own.species], own.name);
+    const p = new Actor('You', this.playerLook(), this, SPECIES_BY_ID[own.species], own.name);
+    p.bug.setLevel(own.level ?? 1);
     p.isLocal = true;
     p.me = {
       hud: this.hud,
@@ -462,7 +467,25 @@ export class Game implements GameCtx {
     if (!own) return;
     this.collection.equipped = speciesId;
     saveCollection(this.collection);
-    this.player.setSpecies(SPECIES_BY_ID[own.species], own.name);
+    this.player.setSpecies(SPECIES_BY_ID[own.species], own.name, own.level ?? 1);
+  }
+
+  /** GameCtx: someone scooped up a Rift Relic */
+  onRelic(a: Actor, id: string) {
+    if (this.match) this.matchCtl.onRelic(a, id);
+  }
+
+  /** your rascal's look: the classic outfit, plus any hat you've unlocked with a relic set */
+  playerLook(): RascalLook {
+    const hat = this.burrow.hat as HatKind;
+    return hat ? { ...LOOKS[0], hat, hatColor: HAT_COLOR[hat] ?? LOOKS[0].hatColor } : LOOKS[0];
+  }
+
+  /** put on a different hat (between matches) */
+  wearHat(hat: string) {
+    this.burrow.hat = hat;
+    saveBurrow(this.burrow);
+    if (this.mode === 'none') this.player.setLook(this.playerLook());
   }
 
   saveCollection() {
@@ -538,8 +561,12 @@ export class Game implements GameCtx {
     this.applySettings();
     this.matchCtl.profile = loadProfile();
     this.trophies = loadTrophies();
+    this.burrow = loadBurrow();
     const own = this.collection.bugs.find((b) => b.species === this.collection.equipped);
-    if (own && this.mode === 'none') this.player.setSpecies(SPECIES_BY_ID[own.species], own.name);
+    if (own && this.mode === 'none') {
+      this.player.setSpecies(SPECIES_BY_ID[own.species], own.name, own.level ?? 1);
+      this.player.setLook(this.playerLook());
+    }
     this.menus.refreshProfile();
   }
 
@@ -731,6 +758,12 @@ export class Game implements GameCtx {
       return;
     }
 
+    if (this.paused && this.menus.burrow?.isOpen) {
+      // your Burrow has its own little world
+      this.menus.burrow.tick(dt);
+      this.input.endFrame();
+      return;
+    }
     if (this.paused) {
       // attract mode: slow orbit around the square behind the title
       this.titleOrbit += dt * 0.08;

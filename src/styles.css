@@ -3541,3 +3541,917 @@ body.tut-nobug .tbtn[data-id='blink'] {
     display: none;
   }
 }
+
+/* ---------- rift relics in a match */
+.relicpill {
+  position: absolute;
+  top: calc(100px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%) scale(0.9);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 4px 8px;
+  font-size: 14px;
+  background: #1f3550;
+  color: #dff9ff;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  overflow: hidden;
+}
+.relicpill.show {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+.relicpill .gems {
+  display: flex;
+  gap: 2px;
+}
+.relicpill .gems svg {
+  animation: relicBob 1.4s ease-in-out infinite;
+}
+.relicpill .gems svg:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.relicpill .gems svg:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes relicBob {
+  50% {
+    transform: translateY(-3px) rotate(8deg);
+  }
+}
+.relicpill b {
+  color: #6ff7ff;
+}
+.relicpill .bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  display: none;
+}
+.relicpill.banking .bar {
+  display: block;
+}
+.relicpill .bar b {
+  display: block;
+  height: 100%;
+  background: #6ff7ff;
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.relicpill.banking {
+  background: #1d5a6e;
+  box-shadow: 0 4px 0 var(--ink), 0 0 18px rgba(111, 247, 255, 0.6);
+}
+
+/* ---------- summary: glimmer + relics */
+.glimrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 8px 0 2px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(111, 247, 255, 0.12);
+}
+.glimrow .gl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 22px;
+  color: #2b8fb3;
+}
+.glimrow .gl svg {
+  width: 24px;
+  height: 24px;
+}
+.glimrow .gain {
+  font-size: 20px;
+  color: #1e9e6a;
+}
+.glimrow small {
+  flex-basis: 100%;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.relicwin {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+}
+.relicwin .rw {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rc) 35%, #fff8e8), #fff8e8);
+  animation: relicIn 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.relicwin .rw span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.relicwin .rw b {
+  font-size: 17px;
+}
+.relicwin .rw small {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.relicwin .rw em {
+  font-style: normal;
+  color: #c2410c;
+  font-size: 13px;
+}
+@keyframes relicIn {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-4deg);
+  }
+}
+.relicloss {
+  font-size: 12px;
+  color: #a33;
+  margin: 2px 0 4px;
+}
+
+/* ======================================================================= THE BURROW */
+.burrowbtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px auto 0;
+  width: min(460px, 92vw);
+  padding: 6px 14px;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #d8f7ff, var(--paper));
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  pointer-events: auto;
+}
+.burrowbtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--ink);
+}
+.burrowbtn .ic svg {
+  width: 30px;
+  height: 30px;
+  color: #2b8fb3;
+}
+.burrowbtn .mid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.burrowbtn .mid b {
+  font-size: 18px;
+}
+.burrowbtn .mid small {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.burrowbtn .glim,
+.burrowui .glim,
+.gm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #1f7fa0;
+  white-space: nowrap;
+}
+.burrowbtn .glim {
+  font-size: 20px;
+}
+.burrowbtn .glim svg,
+.burrowui .glim svg {
+  width: 24px;
+  height: 24px;
+  color: #3fc6e0;
+}
+.gm svg {
+  width: 1.05em;
+  height: 1.05em;
+  color: #3fc6e0;
+  vertical-align: -0.15em;
+}
+.burrowbtn .badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 26px;
+  height: 26px;
+  line-height: 20px;
+  border-radius: 13px;
+  padding: 0 6px;
+  text-align: center;
+  font-weight: 800;
+  color: #fff;
+  background: var(--terra);
+  border: 3px solid var(--ink);
+  animation: playPulse 1.4s ease-in-out infinite;
+}
+
+.burrowui {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+  font-family: 'Nunito', system-ui, sans-serif;
+  color: var(--ink);
+}
+.burrowui.hidden {
+  display: none;
+}
+.burrowui > * {
+  pointer-events: auto;
+}
+.burrowui .blabels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.btop {
+  position: absolute;
+  top: calc(10px + var(--safe-t));
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.btop .back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 18px;
+  padding: 6px 14px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 var(--ink);
+}
+.btop .back svg {
+  width: 22px;
+  height: 22px;
+}
+.btop .bt {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  text-shadow: 0 2px 0 #fff;
+}
+.btop .bt b {
+  font-size: 24px;
+  color: var(--ink);
+}
+.btop .bt small {
+  font-size: 12px;
+  font-weight: 700;
+}
+.btop .glim {
+  padding: 4px 14px 4px 8px;
+  font-size: 24px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.blabel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  padding: 3px 10px;
+  font: 800 12px 'Nunito', sans-serif;
+  color: var(--ink);
+  background: rgba(255, 248, 232, 0.92);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--ink);
+}
+.blabel::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: var(--ink);
+  border-bottom: 0;
+}
+.blabel.locked,
+.blabel.dim {
+  opacity: 0.7;
+}
+.blabel.build {
+  background: #e4ffd8;
+}
+.blabel.hot,
+.blabel.up {
+  background: #fff1b8;
+}
+.blabel.ready {
+  background: #ffd1ea;
+  animation: playPulse 1s ease-in-out infinite;
+}
+.blabel.sel {
+  outline: 3px solid #ffe27a;
+}
+.bchips {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(8px + var(--safe-b));
+  display: flex;
+  gap: 8px;
+  padding: 4px 12px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.bchip {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--ink);
+  cursor: pointer;
+}
+.bchip .n {
+  font: 16px 'Lilita One', sans-serif;
+}
+.bchip small {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.7;
+}
+.bchip.on {
+  background: #ffe27a;
+}
+.bchip.locked {
+  opacity: 0.55;
+}
+.bchip .dot {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 20px;
+  height: 20px;
+  line-height: 15px;
+  padding: 0 4px;
+  border-radius: 10px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+  color: #fff;
+  background: #2aa84a;
+  border: 2px solid var(--ink);
+}
+.bchip .dot.ready {
+  background: var(--pink);
+}
+
+.bpanel {
+  position: absolute;
+  right: calc(12px + var(--safe-r));
+  top: calc(70px + var(--safe-t));
+  bottom: calc(80px + var(--safe-b));
+  width: min(400px, 44vw);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  overflow-y: auto;
+  background: var(--paper);
+  animation: panelIn 0.25s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.bpanel.hidden {
+  display: none;
+}
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+}
+.bpanel .phead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bpanel .phead b {
+  font-size: 24px;
+}
+.bpanel .phead .lvl {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #ffe27a;
+  vertical-align: 4px;
+}
+.bpanel .x {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+.bpanel .blurb {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+.bpanel h4 {
+  margin: 8px 0 6px;
+  font: 16px 'Lilita One', sans-serif;
+}
+.bpanel h4 small {
+  font: 600 11px 'Nunito', sans-serif;
+  opacity: 0.7;
+}
+.bpanel .btn {
+  font-size: 20px;
+  padding: 8px 18px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 var(--ink);
+}
+.bpanel .btn small {
+  display: block;
+  font-size: 14px;
+}
+.bpanel .btn[disabled] {
+  filter: grayscale(0.7);
+  opacity: 0.6;
+  cursor: default;
+}
+.bpanel .btn.small {
+  font-size: 14px;
+  padding: 4px 10px;
+}
+.bpanel .btn.small small {
+  font-size: 11px;
+}
+.bpanel .why {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #a33;
+  font-weight: 700;
+}
+.bpanel .lockmsg {
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(43, 34, 56, 0.08);
+  font-size: 14px;
+}
+.uprow {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 2px dashed rgba(43, 34, 56, 0.25);
+}
+.uprow .perk {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.uprow.maxed b {
+  color: #d98b1f;
+}
+.pumpinfo {
+  margin-bottom: 10px;
+}
+.pumpstock {
+  font-size: 26px;
+}
+.pumpbar,
+.incbar {
+  height: 14px;
+  margin: 6px 0;
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(43, 34, 56, 0.12);
+}
+.pumpbar i,
+.incbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #3fc6e0, #9ff4ff);
+  transition: width 0.3s;
+}
+.incbar i {
+  background: linear-gradient(90deg, #ff9a5b, #ffe27a);
+}
+.pumpinfo small,
+.incinfo {
+  display: block;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 8px;
+}
+.cocpicks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.cocpick,
+.offer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px;
+  font: inherit;
+  color: var(--ink);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rc) 30%, #fff), #fff);
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--ink);
+  cursor: pointer;
+}
+.cocpick small,
+.offer small {
+  font-size: 12px;
+  font-weight: 700;
+}
+.offer.sold {
+  opacity: 0.45;
+}
+.incbusy,
+.incready {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.incbusy > div {
+  flex: 1;
+}
+.incbusy .inctime {
+  font-size: 22px;
+}
+.incready {
+  flex-direction: column;
+  text-align: center;
+}
+.incready .coc {
+  width: 60px;
+  height: 78px;
+  animation: cocWob 0.5s ease-in-out infinite;
+}
+@keyframes cocWob {
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+.hatchbtn {
+  width: 100%;
+  background: var(--pink) !important;
+  animation: playPulse 1.2s ease-in-out infinite;
+}
+.hats,
+.decos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+}
+.hat,
+.deco {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.hat b,
+.deco b {
+  font-size: 13px;
+}
+.hat small,
+.deco small {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.hat.on {
+  background: #ffe27a;
+}
+.hat.lockedhat,
+.deco.owned {
+  opacity: 0.55;
+  cursor: default;
+}
+.deco[data-poor] {
+  opacity: 0.7;
+}
+.gymcap {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.gymrows {
+  display: grid;
+  gap: 6px;
+}
+.gymrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rc) 25%, #fff), #fff);
+}
+.gymrow .ic svg {
+  width: 26px;
+  height: 26px;
+}
+.gymrow .nm {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.gymrow .nm small {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.gymrow em {
+  font-style: normal;
+  font-weight: 900;
+  color: #d98b1f;
+}
+.mus .shelf {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.8;
+}
+.mus .bonuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+.mus .bonuses span {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 8px;
+  background: #dff9ff;
+  border: 2px solid #3fc6e0;
+}
+.rset {
+  margin-top: 8px;
+  padding: 8px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--sc) 22%, #fff), #fff);
+}
+.rset.done {
+  box-shadow: 0 0 0 3px var(--sc);
+}
+.rset .rsh {
+  display: flex;
+  flex-direction: column;
+}
+.rset .rsh small {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.rslots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.rslot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px;
+  font-weight: 900;
+  font-size: 20px;
+  color: rgba(43, 34, 56, 0.35);
+  border-radius: 8px;
+  background: rgba(43, 34, 56, 0.07);
+  text-align: center;
+}
+.rslot small {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.rslot.has {
+  background: rgba(255, 255, 255, 0.8);
+}
+.rslot.stored {
+  opacity: 0.6;
+}
+.offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+}
+.offer b {
+  font-size: 13px;
+  text-align: center;
+}
+.restock {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.glimfly {
+  position: fixed;
+  z-index: 60;
+  width: 22px;
+  height: 22px;
+  color: #3fc6e0;
+  pointer-events: none;
+  animation: glimFly 0.8s cubic-bezier(0.5, -0.4, 0.6, 1) forwards;
+}
+.glimfly svg {
+  width: 100%;
+  height: 100%;
+}
+@keyframes glimFly {
+  to {
+    transform: translate(var(--dx), var(--dy)) scale(0.6);
+    opacity: 0.2;
+  }
+}
+.hatch .cozy {
+  position: absolute;
+  z-index: 5;
+  top: calc(8px + var(--safe-t));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  font-size: 20px;
+  color: #fff;
+  background: #ff8a5b;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  white-space: nowrap;
+  animation: arenapop 0.6s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.burrowui .hatch {
+  position: fixed;
+  z-index: 40;
+}
+
+/* MY BUGS: training row */
+.trainrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.trainrow .copies {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.trainrow .copies i {
+  display: block;
+  height: 10px;
+  margin-top: 3px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(43, 34, 56, 0.12);
+}
+.trainrow .copies b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #7ee06a, #c6ff9a);
+}
+.trainrow .btn.train {
+  font-size: 16px;
+  padding: 6px 14px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 var(--ink);
+  background: #9dff8a;
+}
+.trainrow .btn.train small {
+  display: block;
+  font-size: 12px;
+}
+.trainrow .btn.off {
+  filter: grayscale(0.7);
+  opacity: 0.6;
+}
+.trainrow .why {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: #a33;
+  font-weight: 700;
+}
+.trainrow.maxed b {
+  color: #d98b1f;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  .bpanel {
+    left: calc(10px + var(--safe-l));
+    right: calc(10px + var(--safe-r));
+    top: auto;
+    width: auto;
+    bottom: calc(76px + var(--safe-b));
+    max-height: 52vh;
+    animation-name: panelUp;
+  }
+  @keyframes panelUp {
+    from {
+      opacity: 0;
+      transform: translateY(40px);
+    }
+  }
+  .btop .bt b {
+    font-size: 18px;
+  }
+  .btop .glim {
+    font-size: 18px;
+  }
+}
+@media (max-height: 500px) {
+  .bpanel {
+    top: calc(56px + var(--safe-t));
+    bottom: calc(66px + var(--safe-b));
+  }
+  .bchip {
+    padding: 3px 10px;
+  }
+  .bchip .n {
+    font-size: 13px;
+  }
+}
+/* short phone screens: trophy + burrow banners share a row */
+@media (max-height: 500px) {
+  .home .trophybtn,
+  .home .burrowbtn {
+    display: inline-flex;
+    width: min(280px, 31vw);
+    margin: 4px 3px 0;
+    padding: 3px 10px;
+    vertical-align: top;
+    min-height: 46px;
+  }
+  .home .trophybtn .go,
+  .home .burrowbtn .mid small {
+    display: none;
+  }
+  .home .burrowbtn .ic svg {
+    width: 24px;
+    height: 24px;
+  }
+  .home .burrowbtn .glim {
+    font-size: 17px;
+  }
+  .home .burrowbtn .mid b {
+    font-size: 16px;
+  }
+}
+
+/* narrow portrait phones: the home buttons fit on one or two rows */
+@media (max-width: 520px) {
+  .homebtns .btn {
+    font-size: 16px;
+    padding: 6px 12px;
+    border-width: 3px;
+    box-shadow: 0 4px 0 var(--ink);
+  }
+}

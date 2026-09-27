@@ -226,8 +226,17 @@ export function randomSpecies() {
   return SPECIES[0];
 }
 
-export function statsFor(sp: BugSpecies): BugStats {
-  return { ...BASE_BUG_STATS, ...sp.stats };
+/**
+ * Trained bugs (Bug Gym) get a little sharper per level: shorter naps, a longer blink window
+ * and a faster throw. Level 8 is roughly a sixth quicker — noticeable, never a different bug.
+ */
+export function statsFor(sp: BugSpecies, level = 1): BugStats {
+  const s = { ...BASE_BUG_STATS, ...sp.stats };
+  const k = Math.max(0, Math.min(7, level - 1));
+  s.cooldown *= 1 - 0.025 * k;
+  s.window += 0.2 * k;
+  s.throwSpeed *= 1 + 0.015 * k;
+  return s;
 }
 
 /* ------------------------------------------------------------------ names */
@@ -247,8 +256,12 @@ export function randomBugName(rng: () => number = Math.random): string {
 export interface OwnedBug {
   species: string;
   name: string;
-  /** duplicates hatched: every 3 copies bumps the level (cosmetic sparkle only) */
+  /** every copy ever hatched (including the first) */
   copies: number;
+  /** trained level (Bug Gym), 1..8 */
+  level?: number;
+  /** unspent duplicates, used up by training */
+  spare?: number;
 }
 
 export interface Collection {
@@ -269,6 +282,14 @@ export function loadCollection(): Collection {
         c.cocoons ??= [];
         c.seen ??= c.bugs.map((b) => b.species);
         if (!c.bugs.some((b) => b.species === c.equipped)) c.equipped = c.bugs[0].species;
+        // older saves levelled by copies (every 3): keep that level, the rest become spares
+        for (const b of c.bugs) {
+          if (b.level === undefined) {
+            b.level = Math.min(8, 1 + Math.floor((b.copies - 1) / 3));
+            b.spare = Math.max(0, b.copies - 1 - (b.level - 1) * 3);
+          }
+          b.spare ??= 0;
+        }
         return c;
       }
     }
@@ -276,7 +297,7 @@ export function loadCollection(): Collection {
     /* ignore */
   }
   // everybody starts with a Zippit of their very own, and one cocoon to crack open
-  return { bugs: [{ species: 'zippit', name: randomBugName(), copies: 1 }], equipped: 'zippit', cocoons: [{ rarity: 1 }], seen: ['zippit'] };
+  return { bugs: [{ species: 'zippit', name: randomBugName(), copies: 1, level: 1, spare: 0 }], equipped: 'zippit', cocoons: [{ rarity: 1 }], seen: ['zippit'] };
 }
 
 export function saveCollection(c: Collection) {
@@ -288,7 +309,7 @@ export function saveCollection(c: Collection) {
 }
 
 export function bugLevel(b: OwnedBug) {
-  return 1 + Math.floor((b.copies - 1) / 3);
+  return b.level ?? 1 + Math.floor((b.copies - 1) / 3);
 }
 
 /** Cocoon of a given rarity: mostly that tier, a real chance to jump one higher. */
@@ -306,9 +327,11 @@ export function hatch(c: Collection, cocoonRarity: RarityIndex, rng: () => numbe
   const species = pickFrom[Math.floor(rng() * pickFrom.length)];
   let owned = c.bugs.find((b) => b.species === species.id);
   const fresh = !owned;
-  if (owned) owned.copies++;
-  else {
-    owned = { species: species.id, name: randomBugName(rng), copies: 1 };
+  if (owned) {
+    owned.copies++;
+    owned.spare = (owned.spare ?? 0) + 1;
+  } else {
+    owned = { species: species.id, name: randomBugName(rng), copies: 1, level: 1, spare: 0 };
     c.bugs.push(owned);
   }
   if (!c.seen.includes(species.id)) c.seen.push(species.id);

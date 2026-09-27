@@ -4,7 +4,7 @@ import type { Actor, Controller, NetActorState } from '../entities/Actor';
 import type { GameCtx, HudEvents, Personal } from '../core/types';
 import type { Audio } from '../audio/Audio';
 import { audio } from '../audio/Audio';
-import { LOOKS } from '../entities/RascalRig';
+import { HatKind, HAT_COLOR, lookIndex } from '../entities/RascalRig';
 import { interactContext } from '../player/Interact';
 import { Link, Msg } from './Link';
 import { enc, tap } from './Codec';
@@ -101,7 +101,12 @@ export class HostSession {
     link.on('in', (m) => this.remoteBy(m.from as number)?.ctl.receive(m));
     link.on('hello', (m) => {
       const r = this.remoteBy(m.from as number);
-      if (r && typeof m.sp === 'string') r.actor.setSpecies(game.speciesById(m.sp as string), String(m.bn || 'Buzz'));
+      if (r && typeof m.sp === 'string') r.actor.setSpecies(game.speciesById(m.sp as string), String(m.bn || 'Buzz'), Number(m.bl) || 1);
+      // unlocked hats travel with you
+      const hat = String(m.hat || '') as HatKind;
+      if (r && hat && HAT_COLOR[hat]) r.actor.setLook({ ...r.actor.rig.look, hat, hatColor: HAT_COLOR[hat]! });
+      // everyone else's copy of this rascal gets the same bug and hat
+      if (r) this.link.send({ t: 'LK', id: r.actor.id, ht: r.actor.rig.look.hat, sp: r.actor.bug.species.id, bn: r.actor.bugName });
     });
     link.on('left', (m) => {
       const r = this.remoteBy(m.id as number);
@@ -176,7 +181,7 @@ export class HostSession {
     this.link.send({
       t: 'R',
       ts: g.matchCtl.teamSize,
-      a: g.actors.map((a) => ({ id: a.id, n: a.name, l: LOOKS.indexOf(a.rig.look), sp: a.bug.species.id, bn: a.bugName, tm: a.team, h: humans.get(a) ?? 0 })),
+      a: g.actors.map((a) => ({ id: a.id, n: a.name, l: lookIndex(a.rig.look), ht: a.rig.look.hat, sp: a.bug.species.id, bn: a.bugName, tm: a.team, h: humans.get(a) ?? 0 })),
     });
   }
 
@@ -187,6 +192,10 @@ export class HostSession {
 
   private install() {
     const g = this.game;
+    // relics a remote player sends home land on their device
+    g.matchCtl.onBank = (a, ids) => {
+      for (const [id, r] of this.remote) if (r.actor === a) this.link.send({ t: 'RB', to: id, ids });
+    };
     const muted = () => this.mute > 0;
     tap(g.fx as unknown as Record<string, unknown>, FX_METHODS, (n, a) => this.events.push(['f', n, enc(a)]), muted);
     tap(g.fx.soft as unknown as Record<string, unknown>, ['emit'], (_n, a) => this.events.push(['p', 0, enc(a)]), muted);
@@ -348,6 +357,7 @@ export class HostSession {
       yaw: r(a.bodyYaw), pitch: r(a.intent.aimPitch), f, hp: Math.round(a.hp), dh: Math.round(a.downHp), rk: r(a.reviveK),
       w: w ? `${w.def.id}:${w.rarity}` : '', em: a.emote ?? '', bs: BUGSTATES[b.state], bx: r(b.pos.x), by: r(b.pos.y), bz: r(b.pos.z),
       bt: a.bugout ? r(a.bugout.t) : undefined, bh: a.bugout ? Math.round(a.bugout.hp) : undefined,
+      rc: a.relics.length || undefined,
     };
   }
 
@@ -379,6 +389,8 @@ export class HostSession {
       he: a.healItem ? [a.healItem.id, a.healItem.count] : null,
       ht: Math.round(a.healT * 100) / 100,
       pk: a.perks,
+      rl: a.relics,
+      bk: Math.round(a.bankT * 100) / 100,
       sw: [Math.round(a.slowT * 100) / 100, a.slowK],
       bug: [Math.round(b.cooldown * 10) / 10, Math.round(b.cooldownMax * 10) / 10, Math.round(b.window * 10) / 10],
       st: [a.kills, Math.round(a.damageDealt), a.blinks, Math.round(a.distance), a.fusions, a.bestRarity, a.revives, a.placement],

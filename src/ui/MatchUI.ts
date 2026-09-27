@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
 import { xpForLevel } from '../core/Match';
+import { relicSvg } from '../progression/Relics';
+import { RARITY, RarityIndex } from '../render/Palette';
 
 export interface MatchSummary {
   difficulty: string;
@@ -38,6 +40,12 @@ export interface MatchSummary {
   nextArenaAt: number;
   newArena: string;
   rewardsWaiting: number;
+  glimmerParts: [string, number][];
+  glimmer: number;
+  glimmerBefore: number;
+  relics: { id: string; name: string; rarity: number; fresh: boolean; glimmer: number; set: string }[];
+  /** relics you were still carrying when you went down (dropped for someone else) */
+  lostRelics: number;
 }
 
 const h = (tag: string, cls = '', html = '') => {
@@ -70,6 +78,8 @@ export class MatchUI {
   private gloomTint = h('div', 'gloomtint');
   private knockEl = h('div', 'knockban', '<div class="t big">KNOCKED DOWN</div><div class="s">Crawl to cover — a teammate can pick you up</div><div class="bar"><i></i></div>');
   private specEl = h('div', 'specban');
+  private relicEl = h('div', 'relicpill panel');
+  private relicKey = '';
   private lastSec = -1;
   onPlayAgain: (() => void) | null = null;
   onHome: (() => void) | null = null;
@@ -87,13 +97,32 @@ export class MatchUI {
       c.style.animationDelay = `${(i % 5) * 0.04}s`;
       this.wipeEl.appendChild(c);
     }
-    this.root.append(this.knockEl, this.specEl, this.gloomTint, this.banner, this.sub, this.gloomEl, this.routeEl, this.jumpEl, this.bugEl, this.nestArrow, this.elimEl);
+    this.root.append(this.relicEl, this.knockEl, this.specEl, this.gloomTint, this.banner, this.sub, this.gloomEl, this.routeEl, this.jumpEl, this.bugEl, this.nestArrow, this.elimEl);
     document.body.append(this.root, this.wipeEl, this.summaryEl);
     this.hideAllBits();
   }
 
   private hideAllBits() {
-    for (const e of [this.banner, this.sub, this.gloomEl, this.jumpEl, this.routeEl, this.bugEl, this.nestArrow, this.elimEl]) e.classList.remove('show');
+    for (const e of [this.banner, this.sub, this.gloomEl, this.jumpEl, this.routeEl, this.bugEl, this.nestArrow, this.elimEl, this.relicEl]) e.classList.remove('show');
+  }
+
+  /** Rift Relics you're carrying: gems, how far the nearest nest is, and the send-home bar */
+  relicPouch(ids: string[], nestDist: number, bankK: number) {
+    const on = ids.length > 0;
+    this.relicEl.classList.toggle('show', on);
+    if (!on) {
+      this.relicKey = '';
+      return;
+    }
+    const key = `${ids.join(',')}|${bankK > 0 ? 'b' : Math.round(nestDist / 5)}`;
+    if (key !== this.relicKey) {
+      this.relicKey = key;
+      const gems = ids.map((id) => relicSvg(id, 22)).join('');
+      const txt = bankK > 0 ? '<b>SENDING HOME…</b>' : `Take ${ids.length > 1 ? 'them' : 'it'} to a <b>Rift Nest</b>${nestDist < 999 ? ` · ${Math.round(nestDist)}m` : ''}`;
+      this.relicEl.innerHTML = `<span class="gems">${gems}</span><span class="tx">${txt}</span><i class="bar"><b></b></i>`;
+    }
+    this.relicEl.classList.toggle('banking', bankK > 0);
+    (this.relicEl.querySelector('.bar b') as HTMLElement).style.transform = `scaleX(${Math.min(1, bankK)})`;
   }
 
   /** squads: you're down (bleed bar filled by knockedBleed) */
@@ -244,10 +273,13 @@ export class MatchUI {
       <div class="trophyrow" style="--ac:${s.arenaColor}"><span class="tr big">${ICONS.trophy}<b class="n">${s.trophiesBefore}</b></span><span class="gain big ${s.trophyGain < 0 ? 'neg' : ''}">${s.trophyGain >= 0 ? '+' : ''}${s.trophyGain}</span><div class="abar"><div class="fill" style="width:${Math.max(0, Math.min(100, ((s.trophiesBefore - s.arenaAt) / Math.max(1, s.nextArenaAt - s.arenaAt)) * 100))}%"></div><span>${s.arenaName}</span></div></div>
       ${s.newArena ? `<div class="newarena big">NEW ARENA: ${s.newArena.toUpperCase()}!</div>` : ''}
       ${s.rewardsWaiting ? `<div class="rewardswait">${s.rewardsWaiting} Trophy Road reward${s.rewardsWaiting > 1 ? 's' : ''} to claim!</div>` : ''}
+      <div class="glimrow"><span class="gl big">${ICONS.glimmer}<b class="n">${s.glimmerBefore}</b></span><span class="gain big">+${s.glimmer}</span><small>${s.glimmerParts.map(([k, v]) => `${k} +${v}`).join(' · ')}</small></div>
+      ${s.relics.length ? `<div class="relicwin">${s.relics.map((r, i) => `<div class="rw" style="--rc:${RARITY[r.rarity as RarityIndex].css};animation-delay:${0.8 + i * 0.25}s">${relicSvg(r.id, 30)}<span><b class="big">${r.name}</b><small>${r.fresh ? 'NEW! On display in your Burrow museum' : `Already had one · +${r.glimmer} glimmer`}</small>${r.set ? `<em class="big">${r.set}</em>` : ''}</span></div>`).join('')}</div>` : ''}
+      ${s.lostRelics ? `<div class="relicloss">You dropped ${s.lostRelics} relic${s.lostRelics > 1 ? 's' : ''} — send them home at a Rift Nest next time!</div>` : ''}
       <div class="xp"><div class="lv big">LV <span class="n">${s.startLevel}</span></div><div class="xpbar"><div class="fill"></div></div><div class="gain big">+${s.xp} XP</div></div>
       <div class="xplines">${lines}</div>
       <div class="diff">Bots: <b>${s.difficulty}</b> · change in Settings</div>
-      <div class="cocoonwin" style="--rc:${s.cocoonColor}"><span class="coc"></span><span><b class="big">+1 ${s.cocoon.toUpperCase()} COCOON</b><br><small>${s.bugName} can't wait to meet a new friend · hatch it in MY BUGS</small></span></div>
+      <div class="cocoonwin" style="--rc:${s.cocoonColor}"><span class="coc"></span><span><b class="big">+1 ${s.cocoon.toUpperCase()} COCOON</b><br><small>${s.bugName} can't wait to meet a new friend · pop it in an incubator in your BURROW</small></span></div>
       <div class="btns">${this.netClient ? '<div class="wait">The host can start the next match</div>' : '<button class="btn again">PLAY AGAIN</button>'}<button class="btn secondary home">${this.netClient || this.netRoom ? 'LEAVE ROOM' : 'HOME'}</button></div>
     </div>`;
     this.summaryEl.classList.remove('hidden');
@@ -289,6 +321,18 @@ export class MatchUI {
     };
     setTimeout(tstep, 500);
     if (s.newArena) setTimeout(() => audio.fanfare(), 900);
+    // glimmer counts up too
+    const gn = this.summaryEl.querySelector('.glimrow .n') as HTMLElement;
+    let gshown = s.glimmerBefore;
+    const gTarget = s.glimmerBefore + s.glimmer;
+    const gstep = () => {
+      if (gshown >= gTarget || this.summaryEl.classList.contains('hidden')) return;
+      gshown = Math.min(gTarget, gshown + Math.max(1, Math.ceil(s.glimmer / 30)));
+      gn.textContent = String(gshown);
+      setTimeout(gstep, 40);
+    };
+    setTimeout(gstep, 650);
+    if (s.relics.length) setTimeout(() => audio.fanfare(), 1100);
     this.summaryEl.querySelector('.again')?.addEventListener('click', () => {
       audio.uiTap();
       this.onPlayAgain?.();

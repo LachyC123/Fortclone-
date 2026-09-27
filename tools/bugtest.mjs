@@ -23,13 +23,24 @@ await page.screenshot({ path: `${out}/b-home${sfx}.png` });
 await page.click('.bugsbtn', { force: true });
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${out}/b-bugs${sfx}.png` });
+// the cocoon button takes you to the Burrow's first incubator: pop it in, rush it, hatch it
 await page.click('.cocoons.has', { force: true });
-await page.waitForTimeout(400);
+await page.waitForSelector('.burrowui:not(.hidden) .bpanel [data-act=incubate]');
+await page.click('.bpanel [data-act=incubate]', { force: true });
+await page.waitForTimeout(300);
+await page.click('.bpanel [data-act=rush]', { force: true });
+await page.waitForSelector('.bpanel [data-act=hatch]', { timeout: 10000 });
+await page.click('.bpanel [data-act=hatch]', { force: true });
+await page.waitForSelector('.hatch .cocoon');
 for (let i = 0; i < 3; i++) { await page.click('.hatch .cocoon', { force: true }); await page.waitForTimeout(250); }
 await page.waitForTimeout(1500);
 await page.screenshot({ path: `${out}/b-hatch${sfx}.png` });
 const eq = await page.$('.hatch .eq');
 await (eq ?? (await page.$('.hatch .ok'))).click({ force: true });
+await page.waitForTimeout(500);
+await page.click('.btop .back', { force: true });
+await page.waitForTimeout(300);
+await page.click('.bugsbtn', { force: true });
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${out}/b-bugs2${sfx}.png` });
 const log = [];

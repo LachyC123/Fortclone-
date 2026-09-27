@@ -2,6 +2,8 @@ import type { Game } from '../core/Game';
 import { audio } from '../audio/Audio';
 import { RARITY } from '../render/Palette';
 import { SPECIES, SPECIES_BY_ID, BugSpecies, bugLevel, hatch, saveCollection } from '../progression/Bugs';
+import { RarityIndex } from '../render/Palette';
+import { trainInfo, train } from '../progression/Burrow';
 import { BugPreview } from './BugPreview';
 import { ICONS } from './icons';
 
@@ -61,16 +63,17 @@ export class CollectionScreen {
           ${own
             ? `<input class="bname big" maxlength="18" value="${own.name.replace(/"/g, '')}" aria-label="Bug name">`
             : `<div class="bname big locked">???</div>`}
-          <div class="bsp"><span class="rar big">${r.name.toUpperCase()}</span> ${sp.name}${own ? ` · LV ${bugLevel(own)} <small>(${own.copies} hatched)</small>` : ''}</div>
+          <div class="bsp"><span class="rar big">${r.name.toUpperCase()}</span> ${sp.name}${own ? ` · LV ${bugLevel(own)}` : ''}</div>
           <div class="trick"><b>Trick:</b> ${own ? sp.trick : 'Hatch one to find out!'}</div>
           ${own ? `<div class="catch"><b>Catch:</b> ${sp.catch}</div><div class="flav">“${sp.flavour}”</div>` : ''}
+          ${own ? this.trainRow(own) : ''}
           ${own ? (c.equipped === sp.id ? '<button class="btn equip on" disabled>EQUIPPED</button>' : '<button class="btn equip">EQUIP</button>') : ''}
         </div>
         <div class="bright">
           <button class="cocoons ${cocoons ? 'has' : ''}" ${cocoons ? '' : 'disabled'}>
             <span class="coc" style="--rc:${cocoons ? RARITY[c.cocoons[0].rarity].css : '#aaa'}"></span>
-            <span class="t big">${cocoons ? `HATCH A COCOON <small>(${cocoons})</small>` : 'NO COCOONS'}</span>
-            <span class="s">${cocoons ? `Next: ${RARITY[c.cocoons[0].rarity].name} cocoon` : 'Earn them by playing matches!'}</span>
+            <span class="t big">${cocoons ? `COCOONS <small>(${cocoons})</small>` : 'NO COCOONS'}</span>
+            <span class="s">${cocoons ? 'Hatch them in your Burrow\'s incubators ›' : 'Earn them by playing matches!'}</span>
           </button>
           <div class="bgrid">${cards}</div>
         </div>
@@ -112,7 +115,29 @@ export class CollectionScreen {
         if (e.key === 'Enter') input.blur();
       });
     }
-    this.el.querySelector('.cocoons.has')?.addEventListener('click', () => this.hatchNext());
+    this.el.querySelector('.cocoons.has')?.addEventListener('click', () => {
+      audio.uiTap();
+      this.onIncubate?.();
+    });
+    this.el.querySelector('.train')?.addEventListener('click', () => {
+      if (own && train(this.game.burrow, own)) {
+        saveCollection(c);
+        if (c.equipped === own.species) this.game.equipBug(own.species);
+        audio.fuse();
+        this.preview.poke();
+        this.render();
+      }
+    });
+  }
+
+  /** Bug Gym training: spare copies + glimmer -> a level (a touch sharper) */
+  private trainRow(own: import('../progression/Bugs').OwnedBug) {
+    const t = trainInfo(this.game.burrow, own);
+    if (t.maxed) return '<div class="trainrow maxed"><b class="big">LV 8 · MAXED OUT!</b></div>';
+    const pct = Math.min(100, ((own.spare ?? 0) / t.need) * 100);
+    return `<div class="trainrow"><div class="copies"><span>Copies ${own.spare ?? 0}/${t.need}</span><i><b style="width:${pct}%"></b></i></div>
+      <button class="btn train ${t.ok ? '' : 'off'}" ${t.ok ? '' : 'disabled'}>TRAIN TO LV ${t.level + 1}<small>${ICONS.glimmer} ${t.cost}</small></button>
+      ${t.ok ? '' : `<small class="why">${t.reason}</small>`}</div>`;
   }
 
   private showLocked(sp: BugSpecies) {
@@ -120,16 +145,21 @@ export class CollectionScreen {
     this.preview.show({ ...sp, tint: 0x3a3048, belly: 0x2b2238, wing: 0x55486a });
   }
 
-  /** The cocoon ceremony: wobble, wobble, CRACK, reveal. */
-  private hatchNext() {
+  /** MY BUGS' old hatch button now sends you to the Burrow's incubators */
+  onIncubate: (() => void) | null = null;
+
+  /**
+   * The cocoon ceremony: wobble, wobble, CRACK, reveal. Used by the Burrow's incubators (and
+   * the collection). `cozy` = an incubator nudged it up a rarity on the way.
+   */
+  ceremony(rarity: RarityIndex, host: HTMLElement, opts: { cozy?: boolean; onDone?: () => void } = {}) {
     const c = this.game.collection;
-    const coc = c.cocoons.shift();
-    if (!coc) return;
+    const coc = { rarity };
     const res = hatch(c, coc.rarity);
     saveCollection(c);
     const r = RARITY[res.species.rarity];
-    const ov = h('div', 'hatch', `<div class="cocoon big" style="--rc:${RARITY[coc.rarity].css}"><span>TAP!</span></div><div class="reveal"></div>`);
-    this.el.appendChild(ov);
+    const ov = h('div', 'hatch', `${opts.cozy ? `<div class="cozy big">SO COZY! It grew into ${/^[AEIOU]/i.test(RARITY[rarity].name) ? 'an' : 'a'} ${RARITY[rarity].name.toUpperCase()} cocoon!</div>` : ''}<div class="cocoon big" style="--rc:${RARITY[coc.rarity].css}"><span>TAP!</span></div><div class="reveal"></div>`);
+    host.appendChild(ov);
     const cocoon = ov.querySelector('.cocoon') as HTMLElement;
     const reveal = ov.querySelector('.reveal') as HTMLElement;
     let taps = 0;
@@ -150,7 +180,7 @@ export class CollectionScreen {
       ov.classList.add('open');
       reveal.innerHTML = `<div class="stage2"></div><div class="rn big" style="color:${r.css}">${r.name.toUpperCase()}</div>
         <div class="sn big">${res.fresh ? 'NEW BUG!' : 'ANOTHER ONE!'} ${res.species.name}</div>
-        <div class="nm">${res.fresh ? `Say hi to <b>${res.owned.name}</b>` : `<b>${res.owned.name}</b> is now LV ${bugLevel(res.owned)} (${res.owned.copies} hatched)`}</div>
+        <div class="nm">${res.fresh ? `Say hi to <b>${res.owned.name}</b>` : `<b>${res.owned.name}</b> got a training buddy · ${res.owned.spare ?? 0} spare for the Bug Gym`}</div>
         <div class="tr">${res.species.trick}</div>
         <div class="btns"><button class="btn ok">NICE!</button>${res.fresh ? '<button class="btn secondary eq">EQUIP</button>' : ''}</div>`;
       reveal.querySelector('.stage2')!.appendChild(this.preview.canvas);
@@ -162,6 +192,7 @@ export class CollectionScreen {
         this.selected = res.species.id;
         ov.remove();
         this.render();
+        opts.onDone?.();
       };
       reveal.querySelector('.ok')!.addEventListener('click', () => done(false));
       reveal.querySelector('.eq')?.addEventListener('click', () => done(true));

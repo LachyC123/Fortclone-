@@ -111,6 +111,8 @@ export class Blinkbug {
 
   species: BugSpecies;
   stats: BugStats;
+  /** trained level (Bug Gym) */
+  level = 1;
   /** set when a sticky bug grabs a wall (blink lands you beside it) */
   stuckN: THREE.Vector3 | null = null;
   tint: number;
@@ -268,6 +270,12 @@ export class Blinkbug {
   }
 
   /** a happy wiggle (collection screen taps, hatching) */
+  /** trained bugs are a touch sharper (see statsFor) */
+  setLevel(level: number) {
+    this.level = Math.max(1, Math.min(8, Math.round(level)));
+    this.stats = statsFor(this.species, this.level);
+  }
+
   poke() {
     this.squashV += 9;
     this.excited = true;

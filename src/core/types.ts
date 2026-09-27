@@ -137,6 +137,8 @@ export interface GameCtx {
   sightClear(a: THREE.Vector3, b: THREE.Vector3): boolean;
   /** null in the free-play playground */
   match: MatchHooks | null;
+  /** someone scooped up a Rift Relic */
+  onRelic?(a: Actor, id: string): void;
 }
 
 export type MatchPhase = 'lobby' | 'barge' | 'live' | 'end';

@@ -1019,11 +1019,14 @@ export class BotController implements Controller {
         v = !me.util || me.util.id === p.defId ? (this.profile.archetype === 'chaotic' ? 14 : 6) : -99;
       } else if (p.kind === 'perk') {
         v = !me.hasPerk(p.defId as PerkId) && me.perks.length < 2 ? 16 : -99;
+      } else if (p.kind === 'relic') {
+        // shiny! (goblins can't resist)
+        v = me.relics.length < 3 ? (me.armed ? 20 : 6) + (goblin ? 12 : 0) : -99;
       }
       // presents are for the teammate they were thrown to
       if (p.giftFor && p.giftFor !== me && p.giftFor.alive && (p.giftUntil ?? 0) > ctx.time) continue;
       // leave the good stuff lying next to a human teammate for them (unless we've nothing to shoot with)
-      if (!dry && (p.kind === 'weapon' || p.kind === 'perk' || p.kind === 'heal') && this.nearHumanMate(me, ctx, p.pos, 5)) continue;
+      if (!dry && (p.kind === 'weapon' || p.kind === 'perk' || p.kind === 'heal' || p.kind === 'relic') && this.nearHumanMate(me, ctx, p.pos, 5)) continue;
       const score = v - d * 0.4 - this.lootRisk(me, ctx, p.pos);
       if (score > bestScore) {
         bestScore = score;

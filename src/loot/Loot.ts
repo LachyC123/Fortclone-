@@ -12,8 +12,28 @@ import { mergeToVertexColored } from '../render/Merge';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { G, detail } from '../render/Detail';
 import { PERKS, PERK_IDS, PerkId, buildPerkModel, MAX_PERKS } from '../combat/Perks';
+import { RELIC_BY_ID, SET_BY_ID } from '../progression/Relics';
 
-export type LootKind = 'weapon' | 'ammo' | 'heal' | 'util' | 'perk';
+/** how many Rift Relics a rascal can carry at once */
+export const MAX_RELICS = 3;
+
+/** A Rift Relic on the ground: a glowing gem in its set's colour, circled by a gold ring. */
+export function buildRelicModel(id: string): THREE.Object3D {
+  const def = RELIC_BY_ID[id];
+  const color = def ? SET_BY_ID[def.set].color : 0x6ff7ff;
+  const g = new THREE.Group();
+  const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.15, metalness: 0.2, flatShading: true }));
+  gem.scale.set(1, 1.45, 1);
+  gem.position.y = 0.32;
+  const ring = new THREE.Mesh(G.torus(0.3, 0.022, 6, 28), new THREE.MeshStandardMaterial({ color: 0xffc83d, roughness: 0.3, metalness: 0.6 }));
+  ring.position.y = 0.32;
+  ring.rotation.x = Math.PI / 2 - 0.35;
+  ring.name = 'ring';
+  g.add(gem, ring);
+  return g;
+}
+
+export type LootKind = 'weapon' | 'ammo' | 'heal' | 'util' | 'perk' | 'relic';
 
 export interface Pickup {
   id: number;
@@ -169,6 +189,8 @@ export interface Crate {
   t: number;
   /** Loot Balloon crate: guaranteed epic/mythic */
   rich?: boolean;
+  /** a Rift Relic tucked inside (supply balloons) */
+  relic?: string;
   /** stable id (LAN: host and clients agree on it) */
   id: number;
   /** LAN client: open it for show only — the host sends the loot that pops out */
@@ -294,6 +316,12 @@ export class LootSystem {
       g.add(mergeToVertexColored(tin));
       return g;
     }
+    if (kind === 'relic') {
+      const m = buildRelicModel(defId);
+      m.scale.setScalar(1.6);
+      g.add(m);
+      return g;
+    }
     if (kind === 'perk') {
       const m = buildPerkModel(defId as PerkId);
       m.scale.setScalar(1.5);
@@ -309,6 +337,7 @@ export class LootSystem {
   colorOf(p: { kind: LootKind; defId: string; rarity: RarityIndex }) {
     if (p.kind === 'ammo') return AMMO_INFO[p.defId as AmmoType].color;
     if (p.kind === 'perk') return PERKS[p.defId as PerkId].color;
+    if (p.kind === 'relic') return SET_BY_ID[RELIC_BY_ID[p.defId]?.set]?.color ?? 0x6ff7ff;
     return RARITY[p.rarity].color;
   }
 
@@ -320,14 +349,16 @@ export class LootSystem {
     const color = this.colorOf({ kind, defId, rarity });
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8 }));
     glow.rotation.x = -Math.PI / 2;
-    glow.scale.setScalar(kind === 'weapon' ? 2.4 + rarity * 0.35 : 1.4);
+    glow.scale.setScalar(kind === 'weapon' ? 2.4 + rarity * 0.35 : kind === 'relic' ? 2.6 : 1.4);
     root.add(glow);
+    // relics get a tall beacon you can spot from across the island
+    const bh = kind === 'relic' ? 14 : 2.6 + rarity * 0.5;
     const beam = new THREE.Mesh(
-      G.cylinder(0.06, 0.16, 2.6 + rarity * 0.5, 8, 1, true),
-      new THREE.MeshBasicMaterial({ map: beamTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.18 + rarity * 0.07, side: THREE.DoubleSide }),
+      G.cylinder(kind === 'relic' ? 0.12 : 0.06, kind === 'relic' ? 0.3 : 0.16, bh, 8, 1, true),
+      new THREE.MeshBasicMaterial({ map: beamTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: kind === 'relic' ? 0.5 : 0.18 + rarity * 0.07, side: THREE.DoubleSide }),
     );
-    beam.position.y = 1.3 + rarity * 0.2;
-    beam.visible = (kind === 'weapon' && rarity >= 1) || (kind !== 'ammo' && rarity >= 2);
+    beam.position.y = bh / 2;
+    beam.visible = kind === 'relic' || (kind === 'weapon' && rarity >= 1) || (kind !== 'ammo' && rarity >= 2);
     root.add(beam);
     root.position.copy(pos);
     this.scene.add(root);
@@ -379,6 +410,12 @@ export class LootSystem {
     if (a.util && a.util.count > 0) this.spawn('util', a.util.id, UTILS[a.util.id].rarity, a.util.count, base, toss());
     for (const id of a.perks) this.spawn('perk', id, PERKS[id].rarity, 1, base, toss());
     a.perks = [];
+    // relics you hadn't sent home yet spill out for someone else to grab
+    for (const id of a.relics) {
+      const p = this.spawn('relic', id, RELIC_BY_ID[id]?.rarity ?? 0, 1, base, toss());
+      p.lockUntil = performance.now() + 600;
+    }
+    a.relics = [];
     a.applyPerks();
     a.healItem = null;
     a.util = null;
@@ -391,7 +428,13 @@ export class LootSystem {
     if (p.kind === 'heal') return !a.healItem || (a.healItem.id === p.defId && a.healItem.count < HEALS[p.defId as HealId].maxStack);
     if (p.kind === 'util') return !a.util || (a.util.id === p.defId && a.util.count < UTILS[p.defId as UtilId].maxStack);
     if (p.kind === 'perk') return !a.hasPerk(p.defId as PerkId) && a.perks.length < MAX_PERKS;
+    // relics are picked up by the match (it knows who's allowed to carry what)
     return false;
+  }
+
+  /** can this rascal scoop up this relic right now? */
+  canCarryRelic(a: Actor, p: Pickup) {
+    return p.kind === 'relic' && a.alive && !a.downed && !a.bugout && a.flight === 'none' && a.relics.length < MAX_RELICS && p.settled && p.collectT < 0 && p.lockUntil < performance.now();
   }
 
   /** Best interactable pickup in front of the actor (for the contextual prompt). */
@@ -400,7 +443,7 @@ export class LootSystem {
     const eye = a.eyePos(_v2);
     for (const p of this.pickups) {
       if (p.collectT >= 0 || p.lockUntil > performance.now() || !p.settled) continue;
-      if (p.kind === 'ammo' || (p.kind !== 'weapon' && this.autoFor(a, p))) continue;
+      if (p.kind === 'ammo' || p.kind === 'relic' || (p.kind !== 'weapon' && this.autoFor(a, p))) continue;
       if (p.kind === 'perk' && a.hasPerk(p.defId as PerkId)) continue;
       const d = p.pos.distanceTo(a.motor.pos);
       if (d > maxDist || Math.abs(p.pos.y - a.motor.pos.y) > 1.6) continue;
@@ -459,6 +502,12 @@ export class LootSystem {
         const d = this.spawn('perk', dropped, PERKS[dropped].rarity, 1, _v.copy(a.motor.pos).setY(a.motor.pos.y + 1), new THREE.Vector3(Math.sin(a.bodyYaw) * -2, 4, Math.cos(a.bodyYaw) * -2));
         d.lockUntil = performance.now() + 900;
       }
+      p.amount = 0;
+    } else if (p.kind === 'relic') {
+      if (a.relics.length >= MAX_RELICS) return;
+      a.relics.push(p.defId);
+      ctx.fx.fuseBurst(_v2.copy(p.pos).setY(p.pos.y + 0.6), this.colorOf(p));
+      ctx.onRelic?.(a, p.defId);
       p.amount = 0;
     } else if (p.kind === 'ammo') {
       const got = a.addAmmo(p.defId as AmmoType, p.amount);
@@ -597,7 +646,11 @@ export class LootSystem {
           ctx.fx.lightFlash(top, 0xffd36b, 14, 0.45);
           c.opener?.me?.shake(0.3);
           c.opener?.me?.hud.xpPop('+10 CRATE', '#f2c14e');
-          if (!c.netOnly) this.spawnRolls(rollCrate(!!c.rich), top, true);
+          if (!c.netOnly) {
+            const rolls = rollCrate(!!c.rich);
+            if (c.relic) rolls.push({ kind: 'relic', defId: c.relic, rarity: RELIC_BY_ID[c.relic]?.rarity ?? 0, amount: 1 });
+            this.spawnRolls(rolls, top, true);
+          }
           ctx.emitSound({ pos: c.pos.clone(), loudness: 20, source: c.opener, kind: 'impact' });
         }
       }
@@ -652,10 +705,10 @@ export class LootSystem {
       }
       // distance cull (glow + beam + model are 3 draw calls per item)
       const camD = p.pos.distanceToSquared(ctx.camera.position);
-      p.root.visible = camD < (60 * detail.cull) ** 2;
+      p.root.visible = camD < (p.kind === 'relic' ? 160 : 60 * detail.cull) ** 2;
       p.glow.visible = camD < (30 * detail.cull) ** 2;
       if (!p.root.visible) continue;
-      p.beam.visible = camD > 3 * 3 && ((p.kind === 'weapon' && p.rarity >= 1) || (p.kind !== 'ammo' && p.rarity >= 2));
+      p.beam.visible = camD > 3 * 3 && (p.kind === 'relic' || (p.kind === 'weapon' && p.rarity >= 1) || (p.kind !== 'ammo' && p.rarity >= 2));
       const bob = p.settled ? Math.sin(p.t * 2.2) * 0.08 + 0.35 : 0;
       p.root.position.set(p.pos.x, p.pos.y, p.pos.z);
       p.model.position.y = bob;

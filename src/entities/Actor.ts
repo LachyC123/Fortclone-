@@ -17,6 +17,7 @@ import { BugSpecies, SPECIES_BY_ID, randomBugName } from '../progression/Bugs';
 import { islandRadius, groundHeight } from '../world/Terrain';
 import { detail } from '../render/Detail';
 import { PerkId, PERKS, MAX_PERKS } from '../combat/Perks';
+import { buildRelicModel } from '../loot/Loot';
 
 export interface Controller {
   update(actor: Actor, ctx: GameCtx, dt: number): void;
@@ -45,6 +46,8 @@ export interface NetActorState {
   rk: number;
   w: string;
   em: string;
+  /** relics carried */
+  rc?: number;
   bs: number;
   bx: number; by: number; bz: number;
   bt?: number;
@@ -122,6 +125,11 @@ export class Actor implements BugOwner {
   fusions = 0;
   /** perk badges pinned on this match (oldest first) */
   perks: PerkId[] = [];
+  /** Rift Relics carried (not sent home yet) */
+  relics: string[] = [];
+  /** seconds spent at a Rift Nest sending relics home */
+  bankT = 0;
+  private relicMark: THREE.Object3D | null = null;
   /** gloop / webs / snap traps: move slower for a while */
   slowT = 0;
   slowK = 1;
@@ -178,13 +186,29 @@ export class Actor implements BugOwner {
   }
 
   /** Swap in a different Blinkbug (equipped from the collection before a match). */
-  setSpecies(species: BugSpecies, name: string) {
+  setSpecies(species: BugSpecies, name: string, level = 1) {
     this.bugName = name;
-    if (this.bug.species.id === species.id) return;
-    this.ctx.scene.remove(this.bug.root);
-    this.bug = new Blinkbug(this.ctx.cw, this.ctx.fx, this, species);
-    this.ctx.scene.add(this.bug.root);
-    this.bug.root.position.copy(this.motor.pos);
+    if (this.bug.species.id !== species.id) {
+      this.ctx.scene.remove(this.bug.root);
+      this.bug = new Blinkbug(this.ctx.cw, this.ctx.fx, this, species);
+      this.ctx.scene.add(this.bug.root);
+      this.bug.root.position.copy(this.motor.pos);
+    }
+    this.bug.setLevel(level);
+  }
+
+  /** Rebuild the rascal with a new look (a new hat, between matches). */
+  setLook(look: RascalLook) {
+    const old = this.rig;
+    if (old.look.hat === look.hat && old.look.hatColor === look.hatColor) return;
+    this.rig = new RascalRig(look);
+    this.rig.root.position.copy(old.root.position);
+    this.rig.root.rotation.copy(old.root.rotation);
+    this.rig.root.visible = old.root.visible;
+    this.ctx.scene.remove(old.root);
+    this.ctx.scene.add(this.rig.root);
+    const w = this.weapon;
+    this.rig.setWeapon(w ? buildWeaponView(w.def, w.rarity) : null);
   }
 
   /* ----------------------------------------------------------------- BugOwner */
@@ -272,6 +296,8 @@ export class Actor implements BugOwner {
     this.slowT = 0;
     this.perks = [];
     this.applyPerks();
+    this.relics = [];
+    this.bankT = 0;
     this.rig.root.visible = true;
     this.rig.root.scale.setScalar(1);
     this.rig.root.rotation.set(0, yaw, 0);
@@ -554,6 +580,7 @@ export class Actor implements BugOwner {
   /** remove from the scene for good (lobby shrinking back to the playground crew) */
   dispose(ctx: GameCtx) {
     ctx.scene.remove(this.rig.root, this.bug.root);
+    if (this.relicMark) ctx.scene.remove(this.relicMark);
     this.alive = false;
     this.parked = true;
   }
@@ -707,6 +734,11 @@ export class Actor implements BugOwner {
     this.downed = !!(f & 2);
     const bug = !!(f & 4);
     this.out = !!(f & 2048);
+    // other rascals' relics: we only need how many (for the gem over their head)
+    if (!this.isLocal) {
+      const n = s.rc ?? 0;
+      if (n !== this.relics.length) this.relics = new Array(n).fill('shard');
+    }
     this.hp = s.hp;
     this.downHp = s.dh;
     this.reviveK = s.rk;
@@ -1612,6 +1644,20 @@ export class Actor implements BugOwner {
     const r = this.rig;
     r.root.position.copy(m.pos);
     r.root.rotation.y = this.bodyYaw;
+    // relic carriers wear a spinning gem over their head: everyone can see who's worth chasing
+    const carrying = this.relics.length > 0 && this.alive && !this.isLocal && r.root.visible;
+    if (carrying && !this.relicMark) {
+      this.relicMark = buildRelicModel(this.relics[0]);
+      this.relicMark.scale.setScalar(0.8);
+      this.ctx.scene.add(this.relicMark);
+    }
+    if (this.relicMark) {
+      this.relicMark.visible = carrying;
+      if (carrying) {
+        this.relicMark.position.set(m.pos.x, m.pos.y + 2.05 + Math.sin(time * 3) * 0.08, m.pos.z);
+        this.relicMark.rotation.y = time * 2.2;
+      }
+    }
     // level of detail: far rascals become a single baked mesh and skip animation entirely
     if (!this.isLocal) {
       const d2 = m.pos.distanceToSquared(this.ctx.camera.position);

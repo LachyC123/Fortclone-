@@ -779,6 +779,8 @@ export class HUD implements HudEvents {
 
   /** Loot Balloon landing spots (minimap stars) */
   balloons: THREE.Vector3[] = [];
+  /** Rift Relics lying on the island (drawn as little gems) */
+  relics: { pos: THREE.Vector3; color: string }[] = [];
   /** this match's hot drops (flame markers) */
   hotDrops: THREE.Vector3[] = [];
   /** Sky Barge route for the overview map (set by the match while it flies) */
@@ -857,6 +859,24 @@ export class HUD implements HudEvents {
       g.beginPath();
       g.arc(0, 3.5, 2.6, 0, Math.PI * 2);
       g.fill();
+      g.restore();
+    }
+    for (const r of this.relics) {
+      const u = U(r.pos.x), v = V(r.pos.z);
+      g.save();
+      g.translate(u, v);
+      g.rotate(-yaw);
+      g.fillStyle = r.color;
+      g.strokeStyle = '#2b2238';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(0, -7);
+      g.lineTo(5, -1);
+      g.lineTo(0, 7);
+      g.lineTo(-5, -1);
+      g.closePath();
+      g.fill();
+      g.stroke();
       g.restore();
     }
     for (const b of this.balloons) {

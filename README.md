@@ -96,6 +96,41 @@ below an arena you've reached. The **Trophy Road** (the banner on the home scree
 cocoons, titles to wear and new arenas. On AUTO difficulty your arena sets how sharp the bots are; in a
 LAN room the bots play at the **average** of everyone's trophies.
 
+## Your Burrow
+
+**MY BURROW** on the home screen is your own little floating island. Spin it by dragging and tap a
+building to open it. Everything is paid for with **glimmer**, which comes from every match (for showing
+up, placing well, eliminations and winning) and from your Glimmer Pump.
+
+| Building | What it does |
+| --- | --- |
+| Burrow Hall | Upgrading it unlocks new buildings and lets everything else level up. Buy decor and pick your hat here |
+| Glimmer Pump | Makes glimmer while you're away. The tank holds 3 hours, so collect it |
+| Incubators (up to 3) | Cocoons hatch here over time: from 1 min for Common up to 45 min for Mythic. Every match you play knocks 4 minutes off. A cozy cocoon can come out one rarity higher, and higher levels hatch faster and cozier. **HATCH NOW** skips the wait for a little glimmer |
+| Bug Gym | Train a bug with duplicate copies + glimmer. Each level gives a shorter nap, a longer blink window and a faster throw (LV 8 ≈ a sixth quicker). The gym's level caps how far bugs can go |
+| Relic Museum | Shows off your Rift Relics. Each relic on display boosts the Burrow; upgrades add shelves |
+| Bug Bazaar | Sells cocoons (and a relic from LV 2). Restocks every 3 hours |
+
+Your bugs fly around the island and your rascal hangs out by the Hall door. Bots bring trained bugs too,
+and they get sharper in higher arenas.
+
+## Rift Relics
+
+Each match hides a few **Rift Relics**: glowing gems with a tall beam of light, usually out at the
+in-between landmarks, plus one in every supply balloon. They show as diamonds on the minimap.
+
+- Walk over one to pick it up. You can carry three.
+- Stand on any **Rift Nest** for a moment to **send them home**.
+- Relics you haven't sent home drop when you're knocked out, and anyone can grab them. Rascals carrying
+  relics have a gem floating over their heads, so bots with relics are worth hunting. Win the match and
+  you keep whatever you're holding.
+
+There are 20 relics in 5 sets: Picnic Pals, Pirate Stash, Wizard's Attic, Royal Vault and Rift Oddities.
+Each one gives a small Burrow bonus (faster pump, quicker incubation, cozier cocoons, cheaper training or
+bazaar, more glimmer per match). Finish a set for a big glimmer prize and a **hat**: Party Hat, Pirate Hat,
+Wizard Hat, Tiny Crown or Bug Antennae. You wear it in matches, and friends see it on LAN. Repeat relics
+turn into glimmer.
+
 ## Saving
 
 Progress (bugs, trophies, titles, settings, training done) is saved in the browser. On the claude.ai page
@@ -119,7 +154,8 @@ blink to it, blink up onto a rock that's too tall to climb, throw a Fizz Bomb an
    Standing in it hurts, more each phase.
 4. **Bugout**: when you're knocked out (not in the last phases) you pilot your Blinkbug for 22s. Reach a
    glowing **Rift Nest** to be rebuilt with 40 HP and a pistol. Enemies can swat the bug. One use per match.
-5. **Summary**: placement, stats, XP, and a **cocoon** (better placement = rarer cocoon). PLAY AGAIN is one tap.
+5. **Summary**: placement, stats, XP, trophies, **glimmer**, any **relics** you sent home, and a **cocoon**
+   (better placement = rarer cocoon). PLAY AGAIN is one tap.
 
 ## Blinkbugs (MY BUGS)
 
@@ -140,7 +176,8 @@ stronger. Hatch cocoons from matches, rename your bugs, equip one before you PLA
 | Glimmerwing | Epic | flies far and flat | longer nap, barely bounces |
 | Nimbus | Mythic | marks rascals near the landed bug | glows, longer nap |
 
-Duplicates level a bug up (cosmetic). Collection is saved in the browser (`localStorage`).
+Duplicates become training copies for the **Bug Gym** in your Burrow (see below). Cocoons hatch in the
+Burrow's incubators.
 
 ## Bot teammates
 
@@ -206,6 +243,9 @@ node tools/juiceshots.mjs                     # screenshots: combo damage number
 node tools/trophytest.mjs [--mobile]          # trophy banner, road screen & claiming, trophies from a won match
 node tools/savetest.mjs                       # saves survive a wiped browser via a (fake) claude.ai cloud store
 node tools/landmarkshots.mjs [--only=pond]    # drone shots of the in-between landmarks
+node tools/burrowtest.mjs [--mobile|--portrait] # the Burrow: build, pump, incubate/rush/hatch, train, bazaar, decor, hats, relic -> nest -> museum
+node tools/relicshots.mjs [--mobile]          # screenshots: relic on the ground, carrying, sending home, a bot carrying one
+node tools/homeshot.mjs                       # the home screen on phone landscape / portrait / small
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

@@ -8,7 +8,11 @@ import { mergeToVertexColored } from '../render/Merge';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { G } from '../render/Detail';
 
-export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf';
+export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf' | 'party' | 'pirate' | 'wizard' | 'crown' | 'antenna';
+
+/** colours for the hats you unlock with relic sets */
+export const HAT_COLOR: Partial<Record<HatKind, number>> = { party: 0xf28fad, pirate: 0x3a2e4a, wizard: 0x5b4bff, crown: 0xffc83d, antenna: 0x6ff7ff };
+const GOGGLE_HATS: HatKind[] = ['beanie', 'aviator', 'hood', 'leaf'];
 
 export interface RascalLook {
   skin: number;
@@ -32,6 +36,11 @@ export const LOOKS: RascalLook[] = [
   { skin: 0x8d5a3c, outfit: 0x7cc35a, accent: PAL.cream, pants: 0x5e3b27, boots: 0x3b2a22, pack: 0xd9774f, packAccent: 0x8a5a3b, scarf: PAL.lavender, hat: 'leaf', hatColor: 0x5aa347, goggles: 0xfff08a },
   { skin: 0xffe0c8, outfit: 0xf2c14e, accent: PAL.teal, pants: 0x2f3a4a, boots: 0x6b3a2a, pack: 0x3fc6c0, packAccent: 0x2a7a70, scarf: PAL.terracotta, hat: 'hood', hatColor: 0xf28fad, goggles: 0x9fe8ff },
 ];
+
+/** which base outfit a look is (hats can be swapped on top of it) */
+export function lookIndex(look: RascalLook) {
+  return LOOKS.findIndex((l) => l.outfit === look.outfit && l.skin === look.skin);
+}
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -432,8 +441,62 @@ export class RascalRig {
         add(this.hat, G.capsule(0.014, 0.1, 3, 6), this.m(PAL.brownDark, 0.7), 0, 0.33, 0);
         break;
       }
+      case 'party': {
+        add(this.hat, lathe([[0.001, 0.56], [0.04, 0.52], [0.17, 0.22], [0.25, 0.04], [0.26, 0.0]], 24), hatM, 0, 0.02, 0.02);
+        const stripe = this.m(PAL.mustard, 0.6);
+        add(this.hat, G.torus(0.2, 0.022, 6, 22), stripe, 0, 0.17, 0.02, Math.PI / 2);
+        add(this.hat, G.torus(0.115, 0.02, 6, 18), stripe, 0, 0.35, 0.02, Math.PI / 2);
+        add(this.hat, deform(G.ico(0.07, 2), (v) => v.multiplyScalar(1 + Math.sin(v.y * 80) * 0.08)), this.m(0x6ff7ff, 0.9), 0, 0.6, 0.02);
+        add(this.hat, G.torus(0.26, 0.03, 8, 26), this.m(0xffffff, 0.9), 0, 0.02, 0.02, Math.PI / 2);
+        break;
+      }
+      case 'pirate': {
+        add(this.hat, lathe([[0.001, 0.27], [0.18, 0.25], [0.26, 0.14], [0.28, 0.02]], 24), hatM, 0, 0.02, 0.02);
+        // tricorn brim: a wide disc whose edge curls up
+        const brim = deform(G.cylinder(0.46, 0.46, 0.035, 30, 1), (v) => {
+          const r = Math.hypot(v.x, v.z);
+          const a = Math.atan2(v.z, v.x);
+          v.y += Math.max(0, r - 0.26) * (0.7 + 0.5 * Math.cos(a * 3 + Math.PI / 2));
+        });
+        add(this.hat, brim, hatM, 0, 0.05, 0.02);
+        add(this.hat, G.torus(0.275, 0.018, 6, 26), this.m(0xffc83d, 0.35), 0, 0.07, 0.02, Math.PI / 2);
+        add(this.hat, softSphere(0.05, 1, 1, 0.6), this.m(0xffffff, 0.6), 0, 0.16, -0.26, -0.3);
+        for (const sx of [-1, 1]) add(this.hat, G.capsule(0.012, 0.06, 3, 6), this.m(0xffffff, 0.6), sx * 0.025, 0.1, -0.27, 0, 0, sx * 0.8);
+        break;
+      }
+      case 'wizard': {
+        add(this.hat, deform(lathe([[0.001, 0.78], [0.05, 0.64], [0.14, 0.34], [0.22, 0.1], [0.25, 0.0]], 24), (v) => (v.z += v.y * v.y * 0.55)), hatM, 0, 0.03, 0.02);
+        add(this.hat, deform(G.cylinder(0.44, 0.44, 0.03, 30, 1), (v) => (v.y -= Math.max(0, Math.hypot(v.x, v.z) - 0.3) * 0.25)), hatM, 0, 0.04, 0.02);
+        const star = this.m(0xffe27a, 0.4);
+        for (const [x, y, z] of [[0.12, 0.22, -0.18], [-0.1, 0.36, -0.1], [0.04, 0.5, 0.02]] as const) add(this.hat, G.ico(0.035, 0), star, x, y, z);
+        add(this.hat, G.torus(0.24, 0.022, 6, 24), this.m(0xffe27a, 0.4), 0, 0.07, 0.02, Math.PI / 2);
+        break;
+      }
+      case 'crown': {
+        const gold = this.m(0xffc83d, 0.3);
+        add(this.hat, G.cylinder(0.2, 0.19, 0.1, 22, 1, true), gold, 0, 0.1, 0.03);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * TAU;
+          add(this.hat, G.cone(0.045, 0.13, 8), gold, Math.sin(a) * 0.19, 0.2, 0.03 + Math.cos(a) * 0.19);
+          add(this.hat, G.sphere(0.022, 8, 6), gold, Math.sin(a) * 0.19, 0.28, 0.03 + Math.cos(a) * 0.19);
+        }
+        const gems = [0xff5c7a, 0x6ff7ff, 0x9dff8a];
+        for (let i = 0; i < 3; i++) {
+          const a = Math.PI + (i - 1) * 0.7;
+          add(this.hat, G.ico(0.03, 1), this.m(gems[i], 0.15), Math.sin(a) * 0.205, 0.1, 0.03 + Math.cos(a) * 0.205);
+        }
+        break;
+      }
+      case 'antenna': {
+        add(this.hat, G.torus(0.29, 0.03, 8, 28), this.m(0x2b2238, 0.6), 0, 0.02, 0.02, Math.PI / 2 + 0.2);
+        for (const sx of [-1, 1]) {
+          add(this.hat, deform(G.capsule(0.016, 0.34, 4, 8), (v) => (v.x += sx * (v.y + 0.17) * (v.y + 0.17) * 1.4)), this.m(0x2b2238, 0.6), sx * 0.12, 0.2, -0.06, -0.25, 0, -sx * 0.25);
+          add(this.hat, G.sphere(0.055, 12, 10), hatM, sx * 0.3, 0.4, -0.14);
+        }
+        break;
+      }
     }
-    if (L.hat !== 'pot') {
+    if (GOGGLE_HATS.includes(L.hat)) {
       const gy = L.hat === 'hood' ? 0.1 : 0.1;
       add(this.hat, G.torus(0.298, 0.022, 6, 30), this.m(0x3b2a22, 0.8), 0, gy - 0.02, 0.01, Math.PI / 2 + 0.3);
       for (const sx of [-1, 1]) {

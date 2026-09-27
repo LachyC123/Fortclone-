@@ -16,6 +16,8 @@ import { toyMaterial } from '../render/Materials';
 import { ISLAND_R, groundHeight, islandRadius } from '../world/Terrain';
 import { randomBugName, randomSpecies, cocoonForPlacement, saveCollection } from '../progression/Bugs';
 import { POIS, POI_BY_ID, POI } from '../world/Heightmap';
+import { RELIC_BY_ID, SET_BY_ID, rollRelic } from '../progression/Relics';
+import { addRelic, earn, matchGlimmer, warmIncubators } from '../progression/Burrow';
 
 export const MATCH_SIZE = 24;
 /** seconds a dropped spark waits on the ground for a teammate */
@@ -29,6 +31,8 @@ export interface Spark extends SparkInfo {
   rebuildK: number;
 }
 const LOBBY_TIME = 14;
+/** seconds standing at a Rift Nest to send your relics home */
+const BANK_TIME = 1.5;
 
 interface Profile {
   level: number;
@@ -325,6 +329,9 @@ export class Match implements MatchHooks {
     this.ui.hideSummary();
     g.resetWorldForMatch();
     g.throwables.clear();
+    this.banked = [];
+    this.bankedNet = [];
+    this.spawnRelics();
     // make sure we have a full lobby of rascals
     while (g.actors.length < MATCH_SIZE) g.createBot();
     const L = g.world.lobby;
@@ -343,7 +350,9 @@ export class Match implements MatchHooks {
       a.weaponDamage = {};
       a.placement = 0;
       if (!a.me) {
-        a.setSpecies(randomSpecies(), randomBugName());
+        // bots train their bugs too: sharper bugs in higher arenas
+        const ai = arenaIndex(this.roomTrophies ?? g.trophies.trophies);
+        a.setSpecies(randomSpecies(), randomBugName(), 1 + Math.floor(Math.random() * (ai + 1.5)));
         // skill mix around your rating: some rookies, mostly regulars, a few aces
         const br = a.controller as { setSkill?: (s: number) => void } | null;
         const r = this.botSkillBase();
@@ -628,6 +637,7 @@ export class Match implements MatchHooks {
 
     this.direct(dt);
     this.updateBalloons(dt);
+    if (this.phase === 'live' || this.phase === 'barge') this.updateRelics(dt);
 
     if (this.phase === 'live' || this.phase === 'barge') {
       // the Gloom hurts
@@ -865,6 +875,8 @@ export class Match implements MatchHooks {
           // touchdown: the crate stays, the balloon floats off
           b.crate = this.g.loot.placeCrate(b.land.clone(), Math.random() * 6);
           b.crate.rich = true;
+          // every supply balloon carries a Rift Relic
+          b.crate.relic = rollRelic(this.g.burrow.relics).id;
           b.group.children.slice(6, 8).forEach((m) => (m.visible = false));
           this.g.fx.sparkBurst(b.land.clone().setY(b.land.y + 1), 0xffd36b, 30);
           this.g.fx.ring(b.land.clone().setY(b.land.y + 0.2), 0xffd36b, 0.3, 6, 0.6);
@@ -901,6 +913,102 @@ export class Match implements MatchHooks {
     }
     const alive = this.g.actors.filter((a) => a.alive && !a.parked);
     return alive.length ? alive[0] : null;
+  }
+
+  /* ------------------------------------------------------------------ rift relics */
+
+  /** relics you sent home this match: they're yours whatever happens next */
+  banked: string[] = [];
+  /** LAN client: relics the host says we sent home */
+  bankedNet: string[] = [];
+  /** LAN host: tell a remote player their relics made it home */
+  onBank: ((a: Actor, ids: string[]) => void) | null = null;
+
+  /** a few relics out in the in-between places (landmarks), one at a big named spot */
+  private spawnRelics() {
+    const g = this.g;
+    const spots: THREE.Vector3[] = [...g.world.landmarks]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 4)
+      .map((l) => new THREE.Vector3(l.x, 0, l.z));
+    const poi = pick(POIS);
+    spots.push(new THREE.Vector3(poi.x, 0, poi.z));
+    for (const s of spots) {
+      const x = s.x + rand(-3, 3), z = s.z + rand(-3, 3);
+      const r = rollRelic(g.burrow.relics);
+      g.loot.spawn('relic', r.id, r.rarity, 1, new THREE.Vector3(x, groundHeight(x, z) + 3, z), new THREE.Vector3(0, -1, 0));
+    }
+  }
+
+  /** the nest you're standing at, if any (used or not: sending relics home doesn't wear it out) */
+  private nestAt(pos: THREE.Vector3) {
+    return this.g.world.nests.find((n) => Math.hypot(n.pos.x - pos.x, n.pos.z - pos.z) < 3.2 && Math.abs(n.pos.y - pos.y) < 2.5) ?? null;
+  }
+
+  private updateRelics(dt: number) {
+    const g = this.g;
+    // anyone who walks over a relic scoops it up (three at most)
+    for (const p of g.loot.pickups) {
+      if (p.kind !== 'relic') continue;
+      for (const a of g.actors) {
+        if (a.parked || !g.loot.canCarryRelic(a, p)) continue;
+        if (Math.hypot(p.pos.x - a.motor.pos.x, p.pos.z - a.motor.pos.z) < 1.5 && Math.abs(p.pos.y - a.motor.pos.y) < 1.8) {
+          g.loot.collect(a, p, g);
+          break;
+        }
+      }
+    }
+    // people (not bots) send them home by standing at a Rift Nest for a moment
+    for (const a of g.actors) {
+      if (!a.me || !a.relics.length || !a.alive || a.downed || a.bugout || a.flight !== 'none' || !this.nestAt(a.motor.pos)) {
+        a.bankT = 0;
+        continue;
+      }
+      a.bankT += dt;
+      if (a.bankT >= BANK_TIME) this.bank(a);
+    }
+    const p = g.player;
+    let nd = Infinity;
+    if (p.relics.length) for (const n of g.world.nests) nd = Math.min(nd, n.pos.distanceTo(p.motor.pos));
+    this.ui.relicPouch(p.alive ? p.relics : [], nd, p.bankT / BANK_TIME);
+    g.hud.relics = g.loot.pickups.filter((q) => q.kind === 'relic' && q.collectT < 0).map((q) => ({ pos: q.pos, color: SET_BY_ID[RELIC_BY_ID[q.defId]?.set]?.css ?? '#6ff7ff' }));
+  }
+
+  private bank(a: Actor) {
+    const g = this.g;
+    const ids = a.relics.splice(0);
+    a.bankT = 0;
+    const at = a.motor.pos.clone().setY(a.motor.pos.y + 1.2);
+    g.fx.fuseBurst(at, 0x6ff7ff);
+    g.fx.ring(at, 0x6ff7ff, 0.3, 4, 0.5, undefined, true);
+    audio.fanfare();
+    if (a === g.player) {
+      this.banked.push(...ids);
+      g.hud.bigToast(ids.length > 1 ? `${ids.length} RELICS SENT HOME!` : `${RELIC_BY_ID[ids[0]]?.name.toUpperCase() ?? 'RELIC'} SENT HOME!`, '#6ff7ff');
+      g.shake(0.2);
+    } else this.onBank?.(a, ids);
+  }
+
+  /** someone picked up a relic: tell them (and the whole lobby, if it's a rare one) */
+  onRelic(a: Actor, id: string) {
+    const def = RELIC_BY_ID[id];
+    if (!def) return;
+    const set = SET_BY_ID[def.set];
+    if (a.me) {
+      const have = a === this.g.player && this.g.burrow.relics[id];
+      a.me.hud.bigToast(`RELIC! ${def.name.toUpperCase()}${have ? '' : ' · NEW'}`, set.css);
+      a.me.hud.toast('Carry it to a Rift Nest to send it home', '#6ff7ff');
+      a.me.sfx.fuse();
+    }
+    if (def.rarity >= 3 && a !== this.g.player) this.g.announce.toast(`${a.name} grabbed a ${RARITY[def.rarity].name} relic!`, set.css);
+  }
+
+  /** LAN client: the host says our relics made it home */
+  bankNet(ids: string[]) {
+    this.bankedNet.push(...ids);
+    const g = this.g;
+    g.hud.bigToast(ids.length > 1 ? `${ids.length} RELICS SENT HOME!` : `${RELIC_BY_ID[ids[0]]?.name.toUpperCase() ?? 'RELIC'} SENT HOME!`, '#6ff7ff');
+    audio.fanfare();
   }
 
   /** LAN client: forget the last match's result flags */
@@ -969,6 +1077,24 @@ export class Match implements MatchHooks {
     const cocoon = cocoonForPlacement(place24, MATCH_SIZE, p.kills);
     this.g.collection.cocoons.push({ rarity: cocoon });
     saveCollection(this.g.collection);
+    // the Burrow: glimmer for the match, warm incubators, and any relics that made it home
+    const bur = this.g.burrow;
+    const glimmerParts = matchGlimmer(bur, place24, p.kills, this.won);
+    const glimmer = glimmerParts.reduce((a, b) => a + b[1], 0);
+    const glimmerBefore = bur.glimmer;
+    earn(bur, glimmer);
+    warmIncubators(bur);
+    // winners keep whatever they're still carrying
+    const home = [...this.banked, ...this.bankedNet, ...(this.won ? p.relics : [])];
+    if (this.won) p.relics = [];
+    this.banked = [];
+    this.bankedNet = [];
+    const relics = home.map((id) => {
+      const res = addRelic(bur, id);
+      const def = RELIC_BY_ID[id];
+      return { id, name: def?.name ?? id, rarity: def?.rarity ?? 0, fresh: res.fresh, glimmer: res.glimmer, set: res.set ? `${res.set.name} complete! ${res.set.hatName} unlocked` : '' };
+    });
+    const lostRelics = this.won ? 0 : p.relics.length;
     const summary: MatchSummary = {
       difficulty: this.difficultyLabel(),
       cocoon: RARITY[cocoon].name,
@@ -1003,6 +1129,11 @@ export class Match implements MatchHooks {
       nextArenaAt: nextArena?.at ?? arena.at + 500,
       newArena: res.newArena >= 0 ? ARENAS[res.newArena].name : '',
       rewardsWaiting: unclaimed(tr).length,
+      glimmerParts,
+      glimmer,
+      glimmerBefore,
+      relics,
+      lostRelics,
     };
     this.ui.showSummary(summary);
   }

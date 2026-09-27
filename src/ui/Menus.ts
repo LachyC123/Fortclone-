@@ -5,6 +5,8 @@ import { ICONS } from './icons';
 import { CollectionScreen } from './Collection';
 import { LanScreen } from './LanScreen';
 import { TrophyRoadScreen, nextReward } from './TrophyRoad';
+import { BurrowScreen } from './BurrowScreen';
+import { INCUBATORS } from '../progression/Burrow';
 import { arenaFor, unclaimed, ROAD } from '../progression/Trophies';
 
 const ROAD_ATS = ROAD.map((r) => r.at);
@@ -60,6 +62,7 @@ export class Menus {
   collection!: CollectionScreen;
   lan!: LanScreen;
   road!: TrophyRoadScreen;
+  burrow!: BurrowScreen;
 
   constructor(private game: Game) {
     this.title.innerHTML = `<div class="title home">
@@ -67,6 +70,7 @@ export class Menus {
       <div class="tagline">DROP. BLINK. GRAB. RUN.</div>
       <div class="profile big"></div>
       <button class="trophybtn"></button>
+      <button class="burrowbtn"></button>
       <div class="modepick"><button data-n="1">SOLO</button><button data-n="2">DUOS</button><button data-n="3">TRIOS</button><button data-n="4">SQUADS</button></div>
       <div class="modehint"></div>
       <div class="playrow"><button class="btn play">PLAY</button><button class="btn secondary friends">WITH FRIENDS<small>same Wi-Fi</small></button></div>
@@ -84,6 +88,7 @@ export class Menus {
       <kbd>G</kbd> hold/release to throw a utility · <kbd>H</kbd> heal · <kbd>X</kbd> drop gun · <kbd>1-3</kbd> weapons · <kbd>Esc</kbd> pause<br>
       Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!<br>
       Knocked out? Your <b>Blinkbug</b> carries your spark to a <b>Rift Nest</b> — once per match. Stay out of <b>THE GLOOM</b>.<br>
+      <b>Rift Relics</b> are glowing gems with a tall beam — grab one and stand on a <b>Rift Nest</b> to send it home to your <b>Burrow</b> (drop it if you're knocked out!).<br>
       <b>Duos / Trios / Squads:</b> at 0 HP you're <b>knocked down</b> — a teammate holds <kbd>F</kbd> to pick you up. Fully out? Your spark drops: a teammate grabs it and rebuilds you at a <b>Rift Nest</b>.</div></div>`;
     // solo / duos / trios / squads (your teammates are bots until you play with friends)
     const hints = ['', 'Every rascal for themselves', 'You + 1 bot teammate · 12 teams', 'You + 2 bot teammates · 8 teams', 'You + 3 bot teammates · 6 teams'];
@@ -156,6 +161,25 @@ export class Menus {
       audio.uiTap();
       this.title.classList.add('hidden');
       this.collection.open();
+    };
+    this.burrow = new BurrowScreen(this.game, this.collection);
+    this.burrow.onClose = () => {
+      this.refreshProfile();
+      this.title.classList.remove('hidden');
+    };
+    const openBurrow = (focus: import('../progression/Burrow').BuildingId | null = null) => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.burrow.open(focus);
+    };
+    this.title.querySelector('.burrowbtn')!.addEventListener('click', () => openBurrow());
+    // MY BUGS' cocoon button: straight to the first free (or ready) incubator
+    this.collection.onIncubate = () => {
+      this.collection.el.classList.add('hidden');
+      const b = this.game.burrow;
+      const slot = [0, 1, 2].find((i) => b.lv[INCUBATORS[i]] && !b.inc[i]) ?? [0, 1, 2].find((i) => b.lv[INCUBATORS[i]]) ?? 0;
+      openBurrow(INCUBATORS[slot]);
     };
     this.title.querySelector('.bugsbtn')!.addEventListener('click', openBugs);
     this.title.querySelector('.mybug')!.addEventListener('click', openBugs);
@@ -247,6 +271,9 @@ export class Menus {
     const tb = this.title.querySelector('.trophybtn') as HTMLElement;
     tb.style.setProperty('--ac', arena.color);
     tb.innerHTML = `<span class="tr big">${ICONS.trophy}${tr.trophies}</span><span class="mid"><b class="big">${arena.name}</b><span class="bar"><i style="width:${pct}%"></i></span><small>${next ? `next reward at ${next.at}` : 'road complete!'}</small></span><span class="go big">TROPHY ROAD ›</span>${waiting ? `<span class="badge">${waiting}</span>` : ''}`;
+    // the Burrow: glimmer + how many things are waiting there
+    const todo = BurrowScreen.todo(this.game);
+    (this.title.querySelector('.burrowbtn') as HTMLElement).innerHTML = `<span class="ic">${ICONS.home}</span><span class="mid"><b class="big">MY BURROW</b><small>build · hatch · train · relics</small></span><span class="glim big">${ICONS.glimmer}${Math.floor(this.game.burrow.glimmer).toLocaleString()}</span>${todo ? `<span class="badge">${todo}</span>` : ''}`;
     const c = this.game.collection;
     const own = c.bugs.find((b) => b.species === c.equipped)!;
     const sp = SPECIES_BY_ID[own.species];

@@ -4,7 +4,14 @@ import type { PerkId } from '../combat/Perks';
 import type { Game } from '../core/Game';
 import { Actor, NetActorState } from '../entities/Actor';
 import type { SparkInfo } from '../core/types';
-import { LOOKS, EmoteKind } from '../entities/RascalRig';
+import { LOOKS, EmoteKind, HAT_COLOR, HatKind, RascalLook } from '../entities/RascalRig';
+import { RELIC_BY_ID, SET_BY_ID } from '../progression/Relics';
+
+/** a base outfit wearing someone's unlocked hat */
+function withHat(look: RascalLook, hat: string): RascalLook {
+  const h = hat as HatKind;
+  return HAT_COLOR[h] ? { ...look, hat: h, hatColor: HAT_COLOR[h]! } : look;
+}
 import { WeaponInstance, WEAPONS, buildWeaponView, AmmoType } from '../combat/Weapons';
 import { audio } from '../audio/Audio';
 import { RarityIndex } from '../render/Palette';
@@ -73,6 +80,13 @@ export class ClientSession {
     link.on('R', (m) => this.onRoster(m));
     link.on('S', (m) => this.onSnap(m));
     link.on('P', (m) => this.onPrivate(m));
+    link.on('RB', (m) => game.matchCtl.bankNet((m.ids as string[]) ?? []));
+    link.on('LK', (m) => {
+      const a = this.byId.get(m.id as number);
+      if (!a || a === this.me) return;
+      a.setSpecies(game.speciesById(String(m.sp)), String(m.bn || 'Buzz'));
+      a.setLook(withHat(a.rig.look, String(m.ht)));
+    });
   }
 
   /** a fresh match: forget the old puppets and wait for the host's roster */
@@ -94,11 +108,11 @@ export class ClientSession {
     const g = this.game;
     this.teamSize = (m.ts as number) || 1;
     g.matchCtl.teamSize = this.teamSize;
-    const list = m.a as { id: number; n: string; l: number; sp: string; bn: string; tm: number; h: number }[];
+    const list = m.a as { id: number; n: string; l: number; ht?: string; sp: string; bn: string; tm: number; h: number }[];
     g.clearActorsForNet();
     this.byId.clear();
     for (const d of list) {
-      const a = new Actor(d.n, LOOKS[Math.max(0, d.l)] ?? LOOKS[1], g, g.speciesById(d.sp), d.bn);
+      const a = new Actor(d.n, withHat(LOOKS[Math.max(0, d.l)] ?? LOOKS[1], d.ht ?? ''), g, g.speciesById(d.sp), d.bn);
       a.team = d.tm;
       a.controller = null;
       if (d.h === this.myId) {
@@ -110,7 +124,11 @@ export class ClientSession {
     }
     // tell the host which bug you brought
     const own = g.collection.bugs.find((b) => b.species === g.collection.equipped);
-    if (own) this.link.send({ t: 'hello', sp: own.species, bn: own.name });
+    if (own) this.link.send({ t: 'hello', sp: own.species, bn: own.name, bl: own.level ?? 1, hat: g.burrow.hat });
+    if (this.me) {
+      this.me.bug.setLevel(own?.level ?? 1);
+      this.me.setLook(g.playerLook());
+    }
   }
 
   private onSnap(m: Msg) {
@@ -191,6 +209,8 @@ export class ClientSession {
     me.healItem = he ? { id: he[0], count: he[1] } : null;
     me.healT = p.ht as number;
     me.perks = (p.pk as PerkId[]) ?? [];
+    me.relics = (p.rl as string[]) ?? [];
+    me.bankT = (p.bk as number) ?? 0;
     me.applyPerks();
     const sw = p.sw as [number, number] | undefined;
     if (sw) [me.slowT, me.slowK] = sw;
@@ -471,6 +491,7 @@ export class ClientSession {
     }
     g.hud.hotDrops = m.hot.map((h) => new THREE.Vector3(h.v[0], h.v[1], h.v[2]));
     g.hud.balloons = m.bal.map((x) => new THREE.Vector3(x[3], x[4], x[5]));
+    g.hud.relics = g.loot.pickups.filter((q) => q.kind === 'relic' && q.collectT < 0).map((q) => ({ pos: q.pos, color: SET_BY_ID[RELIC_BY_ID[q.defId]?.set]?.css ?? '#6ff7ff' }));
 
     // --- your UI
     if (m.ph !== this.lastPhase) {
@@ -510,6 +531,9 @@ export class ClientSession {
         }
         ui.bugout(me.bugout.t, me.bugout.hp / 30, best, bd, g.camera);
       } else ui.bugout(-1, 0, null, 0, g.camera);
+      let nd = Infinity;
+      if (me.relics.length) for (const n of g.world.nests) nd = Math.min(nd, n.pos.distanceTo(me.motor.pos));
+      ui.relicPouch(me.alive ? me.relics : [], nd, me.bankT / 1.5);
       if (me.out && !this.result && this.teamSize > 1) ui.spectating(this.spectate()?.name ?? '', true);
       else if (!me.out) ui.spectating('', false);
     }

@@ -37,6 +37,8 @@ export const ICONS = {
   stickypop: svg('<circle cx="24" cy="28" r="12" fill="currentColor" fill-opacity="0.35"/><path d="M24 16V8"/><circle cx="24" cy="7" r="3" fill="currentColor"/><path d="M18 24l3 3M27 30l3 3"/>'),
   crate: svg('<rect x="6" y="16" width="36" height="24" rx="4" fill="currentColor" fill-opacity="0.3"/><path d="M6 22h36M22 22v8h4v-8"/><path d="M10 16l4-8h20l4 8"/>'),
   pause: svg('<path d="M17 12v24M31 12v24"/>'),
+  glimmer: svg('<path d="M24 4l9 12-9 28-9-28z" fill="currentColor" fill-opacity="0.45"/><path d="M15 16h18M24 4l-3 12 3 28 3-28z"/><path d="M40 8l2 4 4 2-4 2-2 4-2-4-4-2 4-2z" fill="currentColor" stroke-width="2"/>'),
+  home: svg('<path d="M6 24L24 8l18 16"/><path d="M11 20v20h26V20"/><path d="M20 40V29h8v11" fill="currentColor" fill-opacity="0.3"/>'),
   trophy: svg('<path d="M14 8h20v10a10 10 0 0 1-20 0z" fill="currentColor" fill-opacity="0.35"/><path d="M14 11H7c0 6 3 9 8 9M34 11h7c0 6-3 9-8 9M24 28v7M16 41h16M19 35h10v6H19z"/>'),
   skull: svg('<path d="M24 6c-9 0-15 6-15 14 0 5 3 8 5 10v6h20v-6c2-2 5-5 5-10 0-8-6-14-15-14z"/><circle cx="18" cy="22" r="3" fill="currentColor"/><circle cx="30" cy="22" r="3" fill="currentColor"/>'),
   people: svg('<circle cx="17" cy="16" r="6"/><circle cx="33" cy="18" r="5"/><path d="M6 40c1-8 6-12 11-12s10 4 11 12M29 40c0-6 2-10 6-10s7 3 8 10"/>'),
