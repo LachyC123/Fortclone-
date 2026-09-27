@@ -4896,3 +4896,41 @@ body:not(.touch-on) .emotepick {
   flex-shrink: 0;
   min-height: 96px;
 }
+/* summary tiles: bars span the tile, text stays inside */
+.sumcard .rewards .rw {
+  align-items: stretch;
+  text-align: left;
+}
+.sumcard .rewards .rw .val {
+  justify-content: flex-start;
+}
+.sumcard .rewards .rw .abar,
+.sumcard .rewards .rw .xpbar {
+  width: 100%;
+  margin: 0;
+}
+.sumcard .rewards .rw small {
+  max-width: 100%;
+  flex-basis: auto;
+  margin: 0;
+}
+/* bugout: compact banner on phones */
+.touch-on .bugout {
+  top: calc(52px + var(--safe-t));
+  width: min(300px, 60vw);
+  padding: 4px 10px 6px;
+}
+.touch-on .bugout .ttl {
+  font-size: 20px;
+}
+.touch-on .bugout .bar {
+  height: 8px;
+  margin: 2px 0 3px;
+  border-width: 2px;
+}
+.touch-on .bugout .row {
+  font-size: 11px;
+}
+.touch-on .bugout .tm {
+  font-size: 16px;
+}

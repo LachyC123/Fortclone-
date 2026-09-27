@@ -277,7 +277,7 @@ export class MatchUI {
       <div class="stats" title="${more}">${rows.map(([k, v]) => `<div class="st"><span>${k}</span><b class="big">${v}</b></div>`).join('')}</div>
       <div class="rewards">
         <div class="rw trophyrow" style="--ac:${s.arenaColor}"><span class="lbl">TROPHIES</span><div class="val"><span class="tr big">${ICONS.trophy}<b class="n">${s.trophiesBefore}</b></span><span class="gain big ${s.trophyGain < 0 ? 'neg' : ''}">${s.trophyGain >= 0 ? '+' : ''}${s.trophyGain}</span></div><div class="abar"><div class="fill" style="width:${arenaPct}%"></div><span>${s.arenaName}</span></div></div>
-        <div class="rw glimrow" title="${breakdown(s.glimmerParts)}"><span class="lbl">GLIMMER</span><div class="val"><span class="gl big">${ICONS.glimmer}<b class="n">${s.glimmerBefore}</b></span><span class="gain big">+${s.glimmer}</span></div><small>${breakdown(s.glimmerParts)}</small></div>
+        <div class="rw glimrow" title="${breakdown(s.glimmerParts)}"><span class="lbl">GLIMMER</span><div class="val"><span class="gl big">${ICONS.glimmer}<b class="n">${s.glimmerBefore}</b></span><span class="gain big">+${s.glimmer}</span></div><small>Spend it in your Burrow</small></div>
         <div class="rw xp" title="${breakdown(s.xpParts)}"><span class="lbl">LEVEL</span><div class="val"><span class="lv big">LV <span class="n">${s.startLevel}</span></span><span class="gain big">+${s.xp.toLocaleString()} XP</span></div><div class="xpbar"><div class="fill"></div></div></div>
         <div class="rw cocoonwin" style="--rc:${s.cocoonColor}"><span class="lbl">NEW COCOON</span><div class="val"><span class="coc"></span><b class="big">${s.cocoon}</b></div><small>Hatch it in your Burrow</small></div>
       </div>
