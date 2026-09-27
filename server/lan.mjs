@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
 
 const PORT = Number(process.env.PORT) || 8787;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -260,4 +261,11 @@ server.listen(PORT, '0.0.0.0', () => {
   for (const ip of ips) console.log(`  → open  http://${ip}:${PORT}  on every phone / computer on this Wi-Fi`);
   console.log(`  → (this computer: http://localhost:${PORT})\n`);
   if (!fs.existsSync(path.join(ROOT, 'index.html'))) console.log('  ! dist/ is missing — run `npm run build` first\n');
+  console.log('  Keep this window open while you play. Press Ctrl+C to stop.\n');
+  // open the game on this computer straight away (set NO_OPEN=1 to skip)
+  if (!process.env.NO_OPEN) {
+    const url = `http://localhost:${PORT}`;
+    const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+    exec(cmd, () => {});
+  }
 });
