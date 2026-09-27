@@ -186,6 +186,29 @@ export class HostSession {
   }
 
   /* ------------------------------------------------------------------ recording */
+  /** where friends can see things from: their rascal / bug, and their teammates (for spectating) */
+  private eyes: THREE.Vector3[] = [];
+  private eyesT = -1;
+  private relevant(p: unknown) {
+    const v = p as { x?: number; y?: number; z?: number } | null;
+    if (!v || typeof v.x !== 'number' || typeof v.z !== 'number') return true;
+    const g = this.game;
+    if (this.eyesT !== g.time) {
+      this.eyesT = g.time;
+      this.eyes.length = 0;
+      for (const r of this.remote.values()) {
+        const a = r.actor;
+        this.eyes.push(a.motor.pos, a.bug.pos);
+        for (const o of g.actors) if (o !== a && o.team === a.team && !o.out) this.eyes.push(o.motor.pos);
+      }
+    }
+    for (const e of this.eyes) {
+      const dx = e.x - v.x, dz = e.z - (v.z as number);
+      if (dx * dx + dz * dz < 70 * 70) return true;
+    }
+    return false;
+  }
+
   private rec(e: unknown[]) {
     if (this.mute === 0) this.events.push(e);
   }
@@ -197,9 +220,11 @@ export class HostSession {
       for (const [id, r] of this.remote) if (r.actor === a) this.link.send({ t: 'RB', to: id, ids });
     };
     const muted = () => this.mute > 0;
-    tap(g.fx as unknown as Record<string, unknown>, FX_METHODS, (n, a) => this.events.push(['f', n, enc(a)]), muted);
-    tap(g.fx.soft as unknown as Record<string, unknown>, ['emit'], (_n, a) => this.events.push(['p', 0, enc(a)]), muted);
-    tap(g.fx.glow as unknown as Record<string, unknown>, ['emit'], (_n, a) => this.events.push(['p', 1, enc(a)]), muted);
+    // effects far from every friend (and whoever they're watching) aren't worth sending
+    const near = (a: unknown[]) => this.relevant(a[0]);
+    tap(g.fx as unknown as Record<string, unknown>, FX_METHODS, (n, a) => near(a) && this.events.push(['f', n, enc(a)]), muted);
+    tap(g.fx.soft as unknown as Record<string, unknown>, ['emit'], (_n, a) => near(a) && this.events.push(['p', 0, enc(a)]), muted);
+    tap(g.fx.glow as unknown as Record<string, unknown>, ['emit'], (_n, a) => near(a) && this.events.push(['p', 1, enc(a)]), muted);
     // world-space sounds (first argument is a position); personal ones go through each player's channel
     const names = Object.getOwnPropertyNames(Object.getPrototypeOf(audio)).filter((n) => !AUDIO_SKIP.has(n));
     const orig = tap(audio as unknown as Record<string, unknown>, names, (n, a) => {

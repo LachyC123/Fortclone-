@@ -56,6 +56,16 @@ await A.click('.lanroom .start');
 await A.waitForFunction(() => window.__game.net && window.__game.match, null, { timeout: 30000 });
 await A.evaluate(() => { window.__game.freeze = true; });
 const hostStep = (sec) => A.evaluate((sec) => { const g = window.__game; for (let i = 0; i < Math.round(sec * 30); i++) g.debugStep(1, 1 / 30); }, sec);
+await A.evaluate(() => {
+  // byte breakdown of the host's snapshots
+  const n = window.__game.net; const send = n.link.send.bind(n.link);
+  window.__nb = { n: 0 };
+  n.link.send = (m) => {
+    if (m.t === 'S') { window.__nb.n++; for (const k of Object.keys(m)) window.__nb[k] = (window.__nb[k] ?? 0) + JSON.stringify(m[k] ?? null).length;
+      for (const e of m.ev ?? []) { const key = 'ev:' + e[0] + (e[0] === 'f' ? ':' + e[1] : ''); window.__nb[key] = (window.__nb[key] ?? 0) + JSON.stringify(e).length; } }
+    send(m);
+  };
+});
 for (let i = 0; i < 6; i++) { await hostStep(0.5); await B.waitForTimeout(250); }
 log.push('host: ' + (await A.evaluate(() => {
   const g = window.__game;
@@ -169,8 +179,9 @@ for (let i = 0; i < 20 && !replay.startsWith('ok'); i++) {
 log.push('play again (friend): ' + replay);
 log.push('after replay host: ' + (await A.evaluate(() => `phase=${window.__game.match.phase} actors=${window.__game.actors.length} remote=${window.__game.net.remote.size} hostName=${window.__game.player.name}`)));
 await A.screenshot({ path: 'tools/out/lan-host.png', timeout: 120000 });
+log.push('snapshot bytes: ' + (await A.evaluate(() => { const b = window.__nb; return Object.entries(b).sort((x, y) => y[1] - x[1]).slice(0, 18).map(([k, v]) => `${k}=${k === 'n' ? v : Math.round(v / b.n)}`).join(' '); })));
 console.log(log.join('\n'));
-console.log('SERVER:', serverLog.trim().split('\n').slice(-6).join('\n'));
+console.log('SERVER:', serverLog.trim().split('\n').slice(-30).join('\n'));
 console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
 await browser.close();
 server.kill();

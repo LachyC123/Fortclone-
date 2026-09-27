@@ -217,6 +217,7 @@ function handle(c, m, raw) {
       // game traffic: clients -> host (tagged with who sent it); host -> one client or everyone
       if (c === room.host) {
         const txt = raw.toString('utf8');
+        if (STATS) STATS[m.t] = (STATS[m.t] ?? 0) + txt.length;
         if (m.to) room.members.get(m.to)?.send(txt);
         else for (const x of room.members.values()) if (x !== c) x.send(txt);
       } else {
@@ -255,6 +256,15 @@ function leave(c) {
 }
 
 /* ------------------------------------------------------------------ go */
+// LAN_STATS=1: print how many bytes the host sends per second, by message type
+const STATS = process.env.LAN_STATS ? {} : null;
+if (STATS)
+  setInterval(() => {
+    const tot = Object.values(STATS).reduce((a, b) => a + b, 0);
+    if (tot) console.log(`  host out: ${(tot / 5 / 1024).toFixed(1)} KB/s ` + Object.entries(STATS).map(([k, v]) => `${k}=${(v / 5 / 1024).toFixed(1)}`).join(' '));
+    for (const k of Object.keys(STATS)) delete STATS[k];
+  }, 5000);
+
 server.listen(PORT, '0.0.0.0', () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
   console.log('\n  RIFT RASCALS — LAN server running\n');
