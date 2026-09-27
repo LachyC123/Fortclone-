@@ -865,7 +865,8 @@ export class HUD implements HudEvents {
     }
     for (const o of others) {
       if (!o.alive || o === p || (this.squad && o.team === p.team)) continue;
-      if (o.pingT > 0 && o.pingedBy === p) {
+      // pings: your own (Nimbus, Snap Traps) and enemies your teammates called out
+      if (o.pingT > 0 && o.pingedBy && (o.pingedBy === p || o.pingedBy.team === p.team)) {
         g.fillStyle = '#ffe27a';
         g.strokeStyle = '#2b2238';
         g.lineWidth = 2;

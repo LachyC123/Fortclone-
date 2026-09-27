@@ -490,6 +490,7 @@ export class Actor implements BugOwner {
       if (!by.me) by.say('UP YOU GET!', '#9dff8a', 1.4, true);
     }
     this.me?.hud.bigToast('BACK ON YOUR FEET!', '#9dff8a');
+    if (!this.me && by && by !== this) this.say(['THANKS!', 'ty!!', 'phew! thx', 'owe you one'][Math.floor(Math.random() * 4)], '#9dff8a', 1.6, true);
     by?.me?.hud.toast(`You picked up ${this.name}`, '#9dff8a');
   }
 

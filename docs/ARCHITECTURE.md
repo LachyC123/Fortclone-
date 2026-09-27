@@ -373,3 +373,25 @@ does. `Game.simulate` calls `training.update` instead of the playground loop.
 
 Also fixed here: Launch Isle's floor colliders now cover the whole disc (before, a bug thrown near the edge
 could fall through the island).
+
+## 20. Bot smartness pass (`ai/BotBrain.ts`)
+
+- **No more dithering**: the Gloom used to be checked separately from the state choice. That meant a bot
+  could flip between "head for the zone" and "go get that loot" every think tick, throwing its path away
+  each time. Unarmed bots near each other were the worst hit and just circled. Now `zoneUrgency` feeds
+  into the same decision as everything else, with a new `rotate` state that keeps one goal. Loot counts as
+  "on the way" if it's inside the safe circle. Unarmed flee-or-grab is decided every ~2s, like
+  fight-or-flight.
+- **Unarmed sense**: loot closer to a visible gunman than to us, or out in the Gloom, scores lower
+  (`lootRisk`). With a gunman within 14m and nothing grabbable on our side (`lootNearSafe`), back off.
+- **Squads** (`squadThink`):
+  - Revives happen under fire only when the downed mate is close and covered (line of sight blocked, or
+    the shooter quiet or reloading, or the mate bleeding out). Otherwise the bot smokes the gap with a
+    Fizz Bomb or fights first.
+  - `shareGear` tosses a spare gun and ammo, ammo for the gun in hand, or a heal (humans first), walking
+    over first via `deliverTo` if needed. `toss` lobs a real pickup, tagged `giftFor`/`giftUntil` so
+    nobody else takes it and it isn't thrown twice.
+  - `spot` marks enemies (`pingT`/`pingedBy`, shown on teammates' minimaps), toasts a direction and
+    distance to the human, and shares awareness with the other bots (`intel`).
+  - `pickLoot` leaves weapons, perks and heals lying next to a human teammate alone.
+- **Everyone**: tactical reload when there's no target in view; a thank-you bubble when revived.

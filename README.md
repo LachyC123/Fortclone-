@@ -128,6 +128,18 @@ stronger. Hatch cocoons from matches, rename your bugs, equip one before you PLA
 
 Duplicates level a bug up (cosmetic). Collection is saved in the browser (`localStorage`).
 
+## Bot teammates
+
+Bots on your team (and bots on each other's teams) look after their squad:
+- **Revives**: straight away when it's quiet. Under fire they fight first, or smoke you with a Fizz Bomb,
+  and pick you up once you're covered or the shooter is reloading (sooner if you're bleeding out).
+- **Sharing**: if you've got nothing to shoot with they throw you their spare gun and some bullets. They
+  also throw ammo for the gun in your hands when you're running dry, and a heal when you're hurt with none.
+  If you're a way off they walk over ("COMING WITH SUPPLIES!"). Anything thrown to you is left for you.
+- **Call-outs**: enemies they see are marked on your minimap, with a toast like "Socks: enemy NORTH, 17m".
+- **Manners**: they leave guns, perks and heals lying next to you for you to take, and they say thanks
+  when you pick them up.
+
 ## Weird weapons, gadgets and perks
 
 - **Zapcoil** (auto): every hit arcs on to the nearest other enemy within 7m for 60% damage.
@@ -173,6 +185,8 @@ node tools/squadtest.mjs                      # duos: knock, revive, sparks, nes
 node tools/lantest.mjs                        # LAN: two browsers, room, join, move, fire, knock/revive, results, replay
 node tools/contenttest.mjs [--shots]          # new weapons, Bug Jammer, Snap Trap, Pewpew, Tanglet, perks
 node tools/tutorialtest.mjs [--mobile]        # first-play training: every step, hatch + naming, SKIP
+node tools/squadai.mjs                        # bot teammates: throw you a gun/ammo/heal, call out enemies, revive under fire
+node tools/botdiag.mjs                        # unarmed bots after landing: do they go somewhere (no dithering)?
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

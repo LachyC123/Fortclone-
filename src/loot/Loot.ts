@@ -33,6 +33,9 @@ export interface Pickup {
   collector: Actor | null;
   lockUntil: number;
   mag: number;
+  /** thrown to a teammate: others leave it alone until giftUntil (game time) */
+  giftFor?: Actor | null;
+  giftUntil?: number;
 }
 
 export interface LootRoll {
