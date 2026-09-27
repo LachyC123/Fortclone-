@@ -2,7 +2,7 @@ import { Input } from '../core/Input';
 import { ICONS } from './icons';
 import { audio } from '../audio/Audio';
 
-type BtnId = 'fire' | 'jump' | 'crouch' | 'reload' | 'ads' | 'bug' | 'blink' | 'interact' | 'pause';
+type BtnId = 'fire' | 'jump' | 'crouch' | 'reload' | 'ads' | 'bug' | 'blink' | 'interact' | 'pause' | 'util' | 'heal';
 
 interface Btn {
   id: BtnId;
@@ -53,6 +53,8 @@ export class TouchControls {
       ['bug', ICONS.throwBug, 262, 178, 'bug', true],
       ['blink', ICONS.blink, 348, 108, 'blink', false],
       ['interact', ICONS.interact, 262, 300, 'interact', false],
+      ['util', ICONS.utility, 150, 322, 'small item', true],
+      ['heal', ICONS.heal, 58, 282, 'small item', false],
     ];
     for (const [id, icon, r, b, cls, look] of def) {
       const el = document.createElement('div');
@@ -254,9 +256,20 @@ export class TouchControls {
         break;
       case 'interact':
         if (down) s.interactPressed = true;
+        s.interactHeld = down;
         break;
       case 'blink':
         if (down) s.blinkPressed = true;
+        break;
+      case 'util':
+        if (down) s.utilHeld = true;
+        else if (s.utilHeld) {
+          s.utilHeld = false;
+          s.utilReleased = true;
+        }
+        break;
+      case 'heal':
+        if (down) s.healPressed = true;
         break;
       case 'bug':
         if (down) s.throwHeld = true;
@@ -269,8 +282,24 @@ export class TouchControls {
   }
 
   /** Per-frame visual state for Blinkbug buttons and contextual interact. */
-  updateVisuals(bug: { ready: boolean; canBlink: boolean; cooldown: number; cooldownMax: number; window: number }, windowMax: number, interact: boolean) {
+  private itemSig = '';
+  updateVisuals(bug: { ready: boolean; canBlink: boolean; cooldown: number; cooldownMax: number; window: number }, windowMax: number, interact: boolean, p?: { util: { id: string; count: number } | null; healItem: { id: string; count: number } | null; healT: number }) {
     if (!this.active) return;
+    if (p) {
+      const sig = `${p.util?.id}${p.util?.count}|${p.healItem?.id}${p.healItem?.count}`;
+      if (sig !== this.itemSig) {
+        this.itemSig = sig;
+        for (const [id, st, fb] of [
+          ['util', p.util, ICONS.utility],
+          ['heal', p.healItem, ICONS.heal],
+        ] as [BtnId, { id: string; count: number } | null, string][]) {
+          const el = this.btns.get(id)!.el;
+          el.innerHTML = (st ? (ICONS as Record<string, string>)[st.id] : fb) + (st && st.count > 1 ? `<span class="cdtext">x${st.count}</span>` : '');
+          el.classList.toggle('disabled', !st);
+        }
+      }
+      this.btns.get('heal')!.el.classList.toggle('ready', p.healT >= 0);
+    }
     const bb = this.btns.get('bug')!.el;
     const bl = this.btns.get('blink')!.el;
     const cdBug = bb.querySelector('.cd') as HTMLDivElement;

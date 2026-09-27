@@ -101,8 +101,23 @@ BotController (brain) ───────────────────�
 - Quality presets (pixel ratio, shadows, shadow map size, particle budget, draw distance) + automatic
   downgrade when FPS stays low.
 - Bot thinking throttled by distance; steering is cheap; nav grid baked once.
-- Planned (M3/M7): character LOD (merged impostor rig for distant bots), animation update throttling
-  for far actors, texture-free UI already.
+- **Milestone 7 tiers** (`render/Detail.ts`, `QUALITY_PRESETS`), baked at boot from the quality setting:
+  `model` scales every character/bug/weapon/pickup segment count through `G.*` (rascal 49k → 24k tris on
+  medium, 18k on low); `lite` builds the world with plain boxes, fewer cylinder/sphere/cone segments and
+  detail-0 icosahedra (world geometry 1.01M → 0.66M tris); `cull` scales how far pickups, glows, crates,
+  doors, signs, kickables and butterflies are drawn. Small solid props (< 1.1m) go to their own chunked
+  batch drawn to `smallDist`; small foliage bits to the no-shadow detail batch; only the top tier lets
+  small props and interiors cast shadows; rascal shadows and full-rig LOD range shrink on lower tiers.
+  Fog closes in with the draw distance. Measured with `tools/tierprobe.mjs` (live match, four spots):
+  | tier | on-screen tris | draw calls |
+  |---|---|---|
+  | low | 0.36M | ~240 |
+  | medium | 0.50M | ~375 |
+  | high | 0.94M | ~510 |
+- Boot: terrain path colouring rasterises a distance field around each road instead of testing every
+  vertex against every segment (654ms → ~150ms); world build ~2.2s (low/medium) / ~2.7s (high) on the
+  dev box, nav bake ~0.65s.
+- HUD writes text/HTML/styles only when the value changes (`setText`/`setHtml`/`setStyle`).
 
 ## 8. Folder structure
 
@@ -134,3 +149,347 @@ boots, pillowy backpack with straps, a draped scarf, hats tipped back so faces a
 Animation is fully procedural: gait phase from distance travelled, blended ground/air/slide poses,
 two-bone IK for weapon hands, squash & stretch, springs for backpack/scarf/hat, hit flash and
 reactions, throw, reload and equip animations.
+
+## 10. Match flow (`core/Match.ts`, `ui/MatchUI.ts`)
+
+`Match` implements `MatchHooks` (in `core/types.ts`), the only thing actors and bots know about the match:
+`phase`, the `SkyBarge`, `canDrop`, `allowBugout`, `onOut`, `onRevive`, `dropTargetFor`, `safeCenter/safeRadius`
+and `gloomOutside`. `GameCtx.match` is `null` in the playground, so every system degrades to M1/M2 behaviour.
+
+- **lobby** — Launch Isle (`world/LaunchIsle.ts`) sits 175m off the island at y=40. Bots are pre-created and
+  "join" with a poof over the first seconds. Damage is disabled; anyone falling off is put back.
+- **barge** — `world/SkyBarge.ts` flies a straight line across the island; riders are pinned to deck spots
+  (`riderWorld`). `Actor.flight` goes `barge → dive → glide → none` (`Motor.flyStep` handles airborne physics).
+  Bots pick a drop target (loot/crate spot) and jump when the barge stops getting closer to it.
+- **live** — `world/Gloom.ts` runs five wait/shrink phases (shader wall, ground ring, motes, lightning).
+  Damage ticks once per second outside. Bots rotate early (cautious) or late (aggressive) via `zoneRun`, and
+  `wanderGoal` samples inside the next circle.
+- **bugout** — `Actor.eliminate` asks `allowBugout`; if granted the Blinkbug enters the `piloted` state with a
+  timer and 30 HP (`Combat.raycastActors` can hit it). Reaching an unused Rift Nest (`Cottages.buildNest`)
+  calls `reviveAt`. Bots can target and shoot bugouts.
+- **end** — placement is `remaining + 1` at the moment you go out. XP/level and wins persist in `rr.profile`;
+  a cocoon is added to the bug collection.
+
+## 11. Blinkbug species (`progression/Bugs.ts`)
+
+A species is data: `ability`, stat overrides (`throwSpeed`, `gravity`, `restitution`, `window`, `cooldown`,
+`sticky`) and look flags. `Blinkbug` takes a species; `simulateBug` and `Blinkbug.throwVelocity` take the
+bug's stats so the aiming arc, bots and gameplay agree. Arrival tricks live in `Actor.bugAbility`; ongoing ones
+(Wisp shimmer via `RascalRig.setGhost`, Nimbus pings) in `Actor.updateBugTricks`. `ui/Collection.ts` +
+`ui/BugPreview.ts` (a tiny separate WebGL turntable) implement MY BUGS and the cocoon hatch.
+
+Crowd LOD: in the lobby and on the barge, non-local rascals swap to their single-mesh LOD beyond ~7m.
+
+## 12. The island (`world/Heightmap.ts`, `world/Island.ts`, `world/pois/*`)
+
+- **One height function** (`terrainHeight`) = rolling noise + hills + ridges, with roads cutting passes,
+  level pads under each place (the manor's pad is raised 7.5m), the stream valley and the cove lagoon.
+  It is sampled once into a 1m grid; `ground(x, z)` interpolates with the same triangle split as the render
+  mesh, so the mesh, collision and prop placement agree exactly.
+- **`HeightfieldCollider`** extends `OBB` (one-sided, only solid from above), so the motor, bullets, bot line
+  of sight, Blinkbug and nav bake treat the ground like any other collider. Raycasts sphere-trace using a
+  slope bound, then bisect.
+- Places are builders in `world/pois/`; `pois/common.ts` has ground-aware helpers (`on`, `cottage`, `outcrop`,
+  `woods`, `groundLine`, `ropeBridge`, `stilt`, loot/crate helpers). `World.settleLoot` nudges any loot spot
+  that ended up inside furniture or rock to the nearest clear spot.
+- Sightlines are broken on purpose: hills/ridges between places, copses (canopies block sight), outcrops,
+  hedgerows and stone walls, crates and stalls.
+- Scale knobs: nav grid half-size `ISLAND_R + 6` (cells outside the rim are skipped), Gloom phases
+  (150 → 72 → 44 → 24 → 10 → 0.5), world chunks 40m (solid/foliage) / 56m / 72m, distance culling for
+  butterflies, kickables, signs, crates and loot, fog thinned with altitude for the Sky Barge view.
+
+## 13. Bot skill, pacing and personality (Milestone 5)
+
+**Aim model** (`BotBrain.setSkill`, `perceivedPos`, `aim`): bots aim at where the target was `lag` seconds
+ago plus a partial lead from its old velocity (`lead`), so direction changes beat them like they beat
+people. A smooth random "hand wobble" (`noise1`) scales with skill, distance, target lateral speed and the
+bot's own movement; reaction time, first-shot error, tracking rate, turn speed and headshot choice (per
+burst) all come from skill. Archetype shifts style (snipers steadier, chaotic twitchier). Bots hold fire
+beyond ~1.3× their gun's useful range. Measured with `tools/balance.mjs --duel` against a strafing player:
+Rookie ~25–40% hits, Regular ~40–55%, Ace ~50–70%.
+
+**Difficulty**: `Profile.rating` (0..1, saved) moves after each match (wins/top-5 up, early exits down);
+each lobby gets ~30% Rookies (rating−0.3), ~52% Regulars (≈rating) and ~18% Aces (rating+0.3).
+Settings → Bot difficulty overrides with Easy/Normal/Hard.
+
+**Pacing director** (`Match.direct`): target curve `1 + 22·(1 − t/400)^1.4` rascals left, t = seconds since
+landing. Ahead of schedule → smaller `engageRange` (bots ignore far targets and drop far fights); behind →
+larger range and `hunt` (bots go find the nearest rascal). The first 90s are loot-first. Landings are spread
+over all six places and the wilds; guns and ammo are guaranteed on the ground everywhere. Gloom phases sum
+to ~6.7 min. `tools/balance.mjs --br` prints the curve.
+
+**Bot robustness fixes found by the harness**: one-way "hop down" nav links (roofs, ledges, caps), no-path
+straight-line fallback and escape hops, waypoint-below handling, unreachable-loot memory keyed to the real
+cause, ammo-aware loot values (empty guns worthless unless ammo is next to them; dry bots chase ammo),
+empty-gun bots loot instead of posturing, glide never gets stuck on steep rock.
+
+**Personality**: `fx/Bubbles.ts` speech bubbles ("!", "?", "HA!", "EEK!", "...") via `Actor.say`; procedural
+emotes in `RascalRig` (`dance`, `wave`, `laugh`, `flex`) via `Actor.startEmote` (cancelled by moving, firing
+or damage); bots emote in the lobby and after a clear kill; kill-streak callouts (double/triple, blink kill,
+long shot, clutch, first bonk). **Loot Balloons** (`Match.spawnBalloon`) drift into the safe zone at ~1:55
+and ~4:05 after landing with a rich crate (epic/mythic), a light beam and a minimap star; bots treat the
+landing spot as a `hotspot`.
+
+## 14. Juice and third-party behaviour (Milestone 6)
+
+**Time control** (`Game.hitStop`, `Game.slowMo`): applied to the real-time frame only (never to
+`debugStep`, so tests stay deterministic). Kill by you → 90ms freeze-frame at 3% speed plus an FOV punch;
+your headshot → 35ms; you knocked out → 1.1s slow-mo easing back; victory → 1.3s slow-mo.
+
+**KO tumble** (`Actor.updateKO`/`koPoof`): on elimination the rig is launched along the hit direction,
+spinning with squash-and-stretch and orbiting stars (`FX.koStars`), bounces once and pops into the
+confetti burst after 0.62s. Falling off the island skips straight to the poof.
+
+**World reactions**: `FX.casing` (instanced brass/red shells with bounce and a throttled tink for nearby
+shooters), `FX.leaves` (bullets that pass through a canopy — found with a `BlocksSight` ray — shake out
+leaves), water splash in `FX.landBurst`, `FX.bolt` lightning with distance-delayed `audio.thunder` in the
+Gloom. `fx/Birds.ts`: ~14 flocks (one instanced mesh, 72 birds max) peck and hop on open ground; running
+within 9m (not crouched), coming within 3.5m, or any gunshot/explosion in earshot sends them up with a
+feather puff and wing-flap audio; they settle somewhere else 20s later. Only flocks within 90m animate.
+
+**UI**: ammo counter kicks per shot and pops on reload (low/empty colours), kill and alive pills bump,
+`HUD.koFlash` whites out and desaturates the canvas for a beat. Victory lap (`Match` `celebrateT`): fanfare,
+confetti cannons every 0.55s around the winner, `CameraRig.cinematic` orbit and an auto dance, then the
+summary. (Also fixed: `checkWin` re-armed every frame, which kept postponing the victory summary.)
+
+**Third-party behaviour** (`BotBrain.onDamaged`, fight-or-flight): bots keep a decaying `threat` score per
+attacker. Getting shot by someone other than the current target makes one decision, with hysteresis
+(switch only if the newcomer's threat clearly exceeds the current target's, or it's a fresh ambush while
+hurt) and a 2.6s lock; attention snaps to the shooter instead of sweeping. Every 2s a pinched bot (hit by
+a third party recently and under 60hp) decides to flee (~70%); flight runs away from the threat-weighted
+sum of attackers, or sideways out of a crossfire, and within 16m it's a fighting retreat (eyes and gun on
+the threat). `tools/thirdparty.mjs` measures turns, target flips and reaction.
+
+**Blinkbug escape window**: a knocked-out rascal's bug gets `grace` 2.4s (bullets fizzle with a ring and a
+chirp, sparkles) and an upward burst; bots drop a graced bug as a target and ~60% of the time ignore it for
+5–9s.
+
+## 15. The bigger island (peninsulas, homesteads, Hot Drops)
+
+**Shape**: `islandRadius(angle)` adds five Gaussian lobes (`LOBES`: angle, +33–35m, width 0.34 rad) between
+the original places, so the coast reaches ~137m (`ISLAND_MAX` = 140 bounds the heightfield, nav grid and
+minimap; `ISLAND_R` = 100 is still the round core used for the barge's jump window). Each lobe carries a POI
+at r≈107 with a level pad (checked to keep ≥7m of land round every pad). New roads join each one to the
+network. Everything that asked "is this on the island?" already used `islandRadius`, so cliffs, the boundary
+ring, the underside, glide updrafts and nav all follow the new coast. The terrain mesh drops triangles that
+are entirely over the sea (the square grid is ~2× the land).
+
+**Buildings** (`world/Homes.ts`): `townhouse` (2–3 storeys, stairs alternate back/front walls, optional
+shopfront, terrace mode without side windows), `cabin` (log courses, porch, optional loft), `shed`, `barn`,
+`tower` (N levels, one flight per level; tops: battlements, lookout, windmill with turning sails, clock with
+four faces), `pavilion`, `signPost`. Places: `pois/Puddleby.ts`, `Tickerton.ts`, `SnoozyPines.ts`,
+`Saltwhistle.ts`, `RumpusFair.ts` (laid out in `placeFrame`, whose +z faces the island centre), and
+`pois/Homesteads.ts` (~20 lone buildings on flat, clear ground away from roads, places, the stream and each
+other — it queries the collision world, so it runs last).
+
+**Keeping it cheap**: furniture/fittings go through `Kit.beginInterior()/endInterior()` into an *interior*
+batch (18m chunks, drawn only within ~46m). Doors (one merged mesh each) are hidden beyond 62m, Rift Nest
+sparkles beyond 130m. Moving parts (sails, Ferris wheel, carousel, clock hands) are single merged
+vertex-coloured meshes via `spinMesh`. Net: live-match triangles went *down* (~1.22M → ~1.0–1.4M depending
+on where you stand), draw calls up ~15%. World build ~3.0s, nav bake ~0.6s on the dev box.
+
+**Landing spread**: `Match.dropArea` shuffles every place (Buttonbury twice) plus wild landings each match,
+but only hands out places within 72m of the barge route (`routeDist`); glide reach was raised a little
+(dive 20 m/s, glide 12.5 m/s at −4.8 m/s) so ~90m is reachable from a late jump.
+
+**Hot Drops** (`Match.pickHotDrops`): at barge time two reachable places (not last match's) get a rich crate,
+three rare-to-mythic guns with ammo, an orange sky beam and a pulsing flame on the minimap; ~28% of bots
+aim for them. Cleared with the balloons.
+
+## 16. Squads (`core/Match.ts`, `entities/Actor.ts`)
+
+`Actor.team` groups players (solo: everyone their own team). With teammates alive, lethal damage **knocks**
+instead (`canGoDown`): the rascal crawls, bleeds out over ~36s, and a teammate holds interact for `REVIVE_TIME`
+(4s) to get them up with 30 HP. Fully out rascals drop a **spark** (90s on the ground); a teammate carries it
+to an unused Rift Nest and holds for 3s to rebuild them. A team is out when nobody is standing, downed or
+carried as a spark (`teamsLeft()`); the match ends at one team. Per-player feedback goes through
+`Actor.me: Personal` (HUD, sfx, shake, hit-stop, slow-mo), while `ctx.announce` is for everyone.
+
+## 17. LAN rooms (`server/lan.mjs`, `net/*`, `ui/LanScreen.ts`)
+
+**Server**: `server/lan.mjs` is a zero-dependency Node script serving `dist/` over HTTP with a tiny WebSocket
+relay on `/ws`. It holds rooms (`create`/`join`/`team`/`name`/`mode`/`start`), max 8 people; after START it only
+forwards: host messages with `to` go to one client, other host messages to all, and every client message goes
+to the host with `from` stamped on. `npm run lan` builds and runs it and prints the Wi-Fi addresses.
+
+**Host-authoritative**: the host's browser runs the normal simulation (`HostSession`). Each remote player is
+an ordinary `Actor` driven by a `RemoteController` fed from input packets sent every client frame (axes/aim held, button edges
+accumulated so a tap is never lost). The host sends:
+- a 20Hz snapshot: per actor a compact `NetActorState` (position, yaw, pitch, hp, bitflags, weapon, bug);
+- the fx/audio/loot/crate calls made during the tick, recorded by `net/Codec.tap` wrapping those methods;
+- per remote player, a private packet: their inventory, ammo, bug cooldowns, stats and a queue of their
+  `Personal` events (hitmarkers, toasts, camera shake…), plus their result when they win or their team is out.
+
+**Clients** (`ClientSession`) never simulate the world: they render everyone 100ms in the past (interpolating
+between snapshots), replay recorded events at their snapshot time, and predict only their own movement
+(corrected softly toward the host). Loot and crates mirror by id. The gloom, the barge and the match clock come
+from the snapshot. The summary's PLAY AGAIN is host-only, and it restarts everyone.
+
+`tools/lantest.mjs` runs the real server with two browsers and checks join, teams, movement, firing, effects,
+knock/revive, results and replay.
+
+## 18. Weird weapons, gadgets, bug tricks and perks
+
+**Weapons** (`combat/Weapons.ts`): `WeaponDef.chain` (Zapcoil: `Combat.chainZap` arcs to the nearest enemy
+near the victim with line of sight) and `projectile.style / explode / slow` (Boomkin pumpkins call
+`Throwables.explode`; Gloop blobs call `Actor.slow`). Projectile aim now uses the distance to what's under the
+crosshair (actors included) and adds the ballistic angle, so lobbed weapons land on target (bots too).
+
+**Slow** (`Actor.slow(k, t)`): the strongest slow wins; `moveMul` multiplies motor speed. Used by gloop,
+Tanglet webs and Snap Traps.
+
+**Throwables** gained `jammers`, `traps` and `webs`. Jammers check every enemy Blinkbug that is out and call
+`Blinkbug.jam()` (recall with a longer nap). `shootProps` replaces `shootChickens`: bullets, bolts and
+explosions can damage enemy jammers. Webs come from the Tanglet trick; the Pewpew turret lives in
+`Actor.turretTick` (range 15, line of sight from 0.45m above the bug, skips knocked rascals).
+
+**Perks** (`combat/Perks.ts`): `Actor.perks` (max 2), applied through `applyPerks` (jump), `bugCdMul` (the
+Blinkbug nap), `takeDamage` (Thick Wool), reload rate, footstep loudness and `onKnockedSomeone` (Vampire
+Teeth). A new loot kind, `'perk'`, drops from floor spots (~6%), crates (~20%) and Loot Balloons, and
+rascals drop theirs when they're eliminated.
+
+**LAN**: every world object gets a `nid`; `Throwables.netState()` goes in each snapshot (`w`) and clients
+mirror it with `netApply` (interpolated), so thrown items, pads, chickens, bolts, pumpkins, jammers, traps
+and webs all show up for friends. Perks and slow ride along in each player's private packet.
+
+## 19. First-play training (`tutorial/Training.ts`)
+
+`Game.startTraining()` (mode `'training'`) parks every bot, puts you on Launch Isle, and creates a
+`Training`. PLAY starts it when `localStorage['rr.trained']` isn't set; TRAINING on the home screen always
+does. `Game.simulate` calls `training.update` instead of the playground loop.
+
+- **Props** are plain meshes plus colliders (disabled again on `dispose`): a weapon pedestal, three
+  targets (bullets reach them through a wrapped `world.onBulletHit`), a stump with a glowing cocoon, and a
+  4.6m rock with a spire. The rock is too tall to mantle; its "moss" (`mossCatch`) grabs a Blinkbug that
+  passes over the top so a lob is enough.
+- **Steps** are checked from game state (distance moved, camera yaw, `motor.sliding`, targets down,
+  `weapon.reloading`, `bug.state`, `blinks`, standing on the rock, util used, hp). Each step shows keyboard
+  or touch wording and pulses the matching touch button (`.tbtn.tut-hi`).
+- **Cutscenes** drive `game.debugCam`: an intro fly-in, then the hatch (the cocoon wobbles and pops, and a
+  stand-alone `Blinkbug` with a fake `BugOwner` hops about), the naming card (saved to the collection), and
+  the bug flying into your backpack. Until then `body.tut-nobug` hides the bug HUD and buttons.
+- **Skip**: the panel button (touch, or whenever the mouse is free) or *Skip training* in the pause menu.
+  Finishing or skipping sets `rr.trained`.
+
+Also fixed here: Launch Isle's floor colliders now cover the whole disc (before, a bug thrown near the edge
+could fall through the island).
+
+## 20. Bot smartness pass (`ai/BotBrain.ts`)
+
+- **No more dithering**: the Gloom used to be checked separately from the state choice. That meant a bot
+  could flip between "head for the zone" and "go get that loot" every think tick, throwing its path away
+  each time. Unarmed bots near each other were the worst hit and just circled. Now `zoneUrgency` feeds
+  into the same decision as everything else, with a new `rotate` state that keeps one goal. Loot counts as
+  "on the way" if it's inside the safe circle. Unarmed flee-or-grab is decided every ~2s, like
+  fight-or-flight.
+- **Unarmed sense**: loot closer to a visible gunman than to us, or out in the Gloom, scores lower
+  (`lootRisk`). With a gunman within 14m and nothing grabbable on our side (`lootNearSafe`), back off.
+- **Squads** (`squadThink`):
+  - Revives happen under fire only when the downed mate is close and covered (line of sight blocked, or
+    the shooter quiet or reloading, or the mate bleeding out). Otherwise the bot smokes the gap with a
+    Fizz Bomb or fights first.
+  - `shareGear` tosses a spare gun and ammo, ammo for the gun in hand, or a heal (humans first), walking
+    over first via `deliverTo` if needed. `toss` lobs a real pickup, tagged `giftFor`/`giftUntil` so
+    nobody else takes it and it isn't thrown twice.
+  - `spot` marks enemies (`pingT`/`pingedBy`, shown on teammates' minimaps), toasts a direction and
+    distance to the human, and shares awareness with the other bots (`intel`).
+  - `pickLoot` leaves weapons, perks and heals lying next to a human teammate alone.
+- **Everyone**: tactical reload when there's no target in view; a thank-you bubble when revived.
+
+## 21. Bots that fight and heal, plus juice
+
+- **No polite standoffs**: pacing may still let a *distant* passer-by go, but never within 16m. Before,
+  two bots investigating the same noise could stand a metre apart ignoring each other; now 62% of those
+  close encounters dropped to under 30%, and the rest are bots busy fighting someone else
+  (`tools/botidle.mjs`).
+- **Healing**: bots heal when they haven't been hit for 2s and no enemy is close (a far-off one no longer
+  blocks it). Hurt bots with no heals go looking for the nearest one. Squad bots say "NEED HEALS!" (with a
+  toast to you) and teammates can toss them one. Match setup now scatters consumables at every place
+  (there used to be about 3 heals on the whole island).
+- **Juice**: `ParticlePool.sizeMul` (1.2 soft / 1.3 glow). Bigger muzzle blooms, thicker tracers, and
+  impacts with a spark pop. Hits get a flash and shock ring, eliminations a rising sparkle column and
+  triple ring, and explosions, blinks, pickups and crates are all bigger. Epic and mythic pickups get a
+  burst.
+- **HUD**: damage numbers on the same target stack into one growing total (orange at 50, big pink at
+  100). Hitmarker pitch climbs through a burst of hits. Kills give a gold edge flash and +XP pops, and
+  streaks (DOUBLE BONK! → TRIPLE TROUBLE! → RAMPAGE! → UNSTOPPABLE!) get the announcer banner with its
+  own sting. Streaks of 3 or more add a beat of slow motion.
+
+## 22. Saves, Trophy Road, landmarks
+
+**Saves** (`core/Save.ts`): `installSave()` wraps `Storage` so `rr.*` keys still work when storage throws
+(there's an in-memory copy), and stamps every change. On claude.ai, `connectCloudSave()` uses the page's
+`db` + `user` capabilities to mirror the `rr.*` keys into `data/users/<id>/save` (private to the player).
+The newer copy wins on load. Boot waits up to 1.5s for it; if it arrives later, `Game.reloadSave()` picks
+it up. Anyone with a match played counts as trained (`Game.trained`).
+
+**Trophy Road** (`progression/Trophies.ts`, `ui/TrophyRoad.ts`):
+- `trophyDelta(place24, kills)`, where `place24` is placement scaled to 24 so every mode feels the same.
+- `applyMatch` never drops you below the gate of an arena you've reached.
+- Arenas carry a bot skill: `Match.botSkillBase()` blends it with the adaptive rating on AUTO, or uses the
+  LAN room's average trophies. Members send `tr` when they create or join, the server relays it in the
+  roster, and `HostSession` averages it.
+- The road screen fills a gold line up to your trophies between milestones, and rewards (cocoons, titles,
+  arenas) are claimed there.
+
+**Landmarks** (`world/pois/Landmarks.ts`):
+- `planLandmarks()` runs first in `buildIsland`. It picks flat-enough sites clear of places, roads, the
+  stream, the lagoon and the Wilds' fixed fields and barns, and reserves them (`common.reserved`, which
+  `busy()` honours) so woods, outcrops and homesteads grow round them.
+- `buildLandmarks()` runs last. It builds about 13 set pieces from ten kinds (camps, ruins, balloon wreck,
+  stone-edged pond, orchards, lumber camp, standing stones, picnic spot, scout post, pumpkin patch), each
+  with loot (some with a crate), an outdoor zone name and a minimap label (`world.landmarks`).
+- Low pieces follow the slope through the frame's `h(lx, lz)`. Roads get lamp posts every ~22m, and the
+  newer roads get a "PLACE →" signpost halfway along.
+
+## 23. The Burrow and Rift Relics
+
+**Economy** (`progression/Burrow.ts`): this is pure state and rules, saved as `rr.burrow`, so the cloud save
+mirrors it.
+- `BurrowState` holds glimmer, building levels, the pump tank `{stock, t}`, three incubator slots
+  `{r, end, dur}`, relic counts, finished sets, the hat, decor and the bazaar stock.
+- Everything runs on wall-clock timestamps. `pumpTick` tops the tank up from `t`, and incubators hold an
+  `end` time, so time passes while the game is closed.
+- A building's level is capped by the Hall's level. `costFor` grows with `level^1.7`.
+- Relic bonuses count only relics **on display**: `displayed()` takes the rarest first, up to the museum's
+  shelf count.
+- `matchGlimmer` / `warmIncubators` / `addRelic` are called from `Match.showSummary`.
+
+**Bug levels** (`progression/Bugs.ts`):
+- `OwnedBug` gained `level` and `spare`. Older saves convert "a level per 3 copies" into a level plus
+  spares.
+- `statsFor(species, level)` scales cooldown, window and throw speed. `Blinkbug.setLevel` applies it.
+- `Actor.setSpecies(sp, name, level)` sets the level for the player. Bots get
+  `1 + rand * (arenaIndex + 1.5)`. LAN clients send `bl` in `hello`.
+
+**The diorama** (`burrow/BurrowScene.ts`, `burrow/BurrowModels.ts`):
+- It's its own `THREE.Scene` and camera, drawn by the game's `WebGLRenderer` from the paused-frame branch
+  of `Game.frame` while `menus.burrow` is open, so there's no second GL context.
+- Every building has a procedural model per level. `sync()` rebuilds only what changed (keyed by level,
+  lock state and museum gems) with a construction poof.
+- Owned bugs are `Blinkbug`s with a fake owner whose dock wanders. A `RascalRig` with `Game.playerLook()`
+  idles and emotes by the Hall.
+- The camera orbits. When you select a building it glides to face that building's front, with
+  `setViewOffset` shifting it beside the panel. Trees on the camera→focus line shrink out of the way.
+
+**Screen** (`ui/BurrowScreen.ts`):
+- HTML over the canvas: top bar, projected status labels, the chip row, and a panel per building.
+- `tick()` re-renders the panel when its `stateKey` flips (an incubator finishing, say) and otherwise
+  just updates timers.
+- Hatching reuses `CollectionScreen.ceremony(rarity, host, {cozy})`. MY BUGS' cocoon button now opens the
+  first free incubator.
+
+**Relics in a match** (`progression/Relics.ts`, `loot/Loot.ts`, `core/Match.ts`):
+- `'relic'` is a loot kind: a gem with a gold ring and a tall beacon, drawn out to 160m.
+- `Match.spawnRelics()` drops five per match (four landmarks and one place), and supply balloon crates
+  carry one (`Crate.relic`).
+- `updateRelics()` does two things. Anyone walking over a relic picks it up (`Loot.canCarryRelic`, max 3;
+  bots also value them in `pickLoot`). People (`a.me`) standing at any nest for `BANK_TIME` bank them:
+  `Match.banked`, or for a LAN guest `onBank` → `{t:'RB'}` → `Match.bankNet`.
+- `Loot.dropInventory` spills relics you hadn't banked. Carriers get a spinning gem (`Actor.relicMark`).
+- Over the network: puppets learn the count from `rc` in actor state, your own ids from `rl`/`bk` in
+  private state, and hats from `ht` in the roster and a `LK` message after `hello`.
+
+**Hats**: `HatKind` gained party, pirate, wizard, crown and antenna, with colours in `HAT_COLOR`.
+`Game.playerLook()` puts the Burrow's hat on `LOOKS[0]`, and `Actor.setLook` rebuilds the rig between
+matches.

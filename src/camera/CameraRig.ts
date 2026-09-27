@@ -57,6 +57,14 @@ export class CameraRig {
     this.trauma = Math.min(1, this.trauma + amount);
   }
 
+  /** a quick FOV kick (kills, big hits) */
+  punch(deg: number) {
+    this.fovPunch += deg;
+  }
+
+  /** victory orbit: the camera swings round the winner by itself */
+  cinematic = false;
+
   land(impact: number) {
     this.landDipV -= Math.min(4, impact * 0.22);
   }
@@ -83,7 +91,8 @@ export class CameraRig {
     this.recoilYaw -= this.recoilYaw * rec;
 
     // pivot follows the head, lower while crouching/sliding
-    const h = m.sliding ? 0.95 : m.crouching ? 1.1 : 1.45;
+    const h = a.bugout ? 0.95 : m.sliding ? 0.95 : m.crouching ? 1.1 : 1.45;
+    const fl = a.flight;
     _pivot.set(m.pos.x, m.pos.y + h, m.pos.z);
     this.blinkT = Math.max(0, this.blinkT - dt);
     if (this.blinkT <= 0) this.followLambda = damp(this.followLambda, 40, 3, dt);
@@ -95,11 +104,17 @@ export class CameraRig {
     this.landDipV += (-this.landDip * 120 - this.landDipV * 12) * dt;
     this.landDip += this.landDipV * dt;
 
+    if (this.cinematic) {
+      this.yaw += dt * 0.55;
+      this.pitch = damp(this.pitch, -0.28, 2, dt);
+      adsFov = null;
+    }
     const ads = adsFov !== null;
-    const targetDist = ads ? 1.7 : m.sprinting ? 3.8 : 3.3;
-    const targetShoulder = ads ? 0.72 : 0.8;
-    this.dist = damp(this.dist, targetDist, 10, dt);
-    this.shoulder = damp(this.shoulder, targetShoulder, 10, dt);
+    // pulled way back on the barge and in the sky so you can pick a landing spot
+    const targetDist = this.cinematic ? 4.8 : fl === 'barge' ? 7.5 : fl === 'dive' ? 6.5 : fl === 'glide' ? 5.2 : a.bugout ? 2.6 : ads ? 1.7 : m.sprinting ? 3.8 : 3.3;
+    const targetShoulder = this.cinematic ? 0 : fl !== 'none' ? 0 : a.bugout ? 0.3 : ads ? 0.72 : 0.8;
+    this.dist = damp(this.dist, targetDist, fl !== 'none' ? 3 : 10, dt);
+    this.shoulder = damp(this.shoulder, targetShoulder, 6, dt);
 
     dirFromYawPitch(this.yaw, this.pitch, _fwd);
     _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -126,7 +141,7 @@ export class CameraRig {
 
     // FOV
     this.fovPunch = damp(this.fovPunch, 0, 6, dt);
-    const targetFov = ads ? adsFov! : m.sliding ? this.baseFov + 9 : m.sprinting ? this.baseFov + 6 : this.baseFov;
+    const targetFov = fl === 'dive' ? this.baseFov + 14 : ads ? adsFov! : m.sliding ? this.baseFov + 9 : m.sprinting ? this.baseFov + 6 : this.baseFov;
     this.fov = damp(this.fov, targetFov, ads ? 14 : 7, dt);
     const f = this.fov + this.fovPunch;
     if (Math.abs(this.cam.fov - f) > 0.01) {

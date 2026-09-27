@@ -5,10 +5,13 @@ import { DoorSpec, WallStyle, wall, floor, stairs, gableRoof, shade } from './Bu
 import * as P from './Props';
 import { PAL } from '../render/Palette';
 import { ColFlags } from '../physics/Collision';
-import { buildTerrain, buildSkyRocks, islandRadius, STREAM_X } from './Terrain';
+import { buildTerrain, buildSkyRocks, STREAM_X } from './Terrain';
+import { STREAM_Z0, STREAM_Z1, ground } from './Heightmap';
 import { makeSign } from './Signs';
 import { Rng } from '../core/math';
 import { toyMaterial } from '../render/Materials';
+import { buildCottage, buildNest, CottageSpec } from './Cottages';
+import { buildLaunchIsle } from './LaunchIsle';
 
 /**
  * MILESTONE 1 — "The Combat Playground": one polished corner of Buttonbury on a floating island.
@@ -21,6 +24,7 @@ import { toyMaterial } from '../render/Materials';
  */
 
 const rng = new Rng(1337);
+const reserved: [number, number, number, number][] = [];
 
 const HOUSE: WallStyle = { outer: PAL.cream, inner: 0xe9d3a8, trim: PAL.brown, surface: 'wood', beams: PAL.brownDark, plinth: PAL.stoneDark };
 const HOUSE_UP: WallStyle = { outer: PAL.cream, inner: 0xcfe3e8, trim: PAL.brown, surface: 'wood', beams: PAL.brownDark };
@@ -40,7 +44,9 @@ export function buildVillageBlock(k: Kit, world: World, doors: DoorSpec[]) {
     [[13, 6], [26, 10], [36, 12]],
     [[0, -10], [0, -30], [4, -40]],
   ];
+  const tt = performance.now();
   buildTerrain(k, paths);
+  if (location.search.includes('timing')) console.log(`[t]   terrain ${(performance.now() - tt).toFixed(0)}ms`);
   buildSkyRocks(k);
   buildSquare(k, world);
   buildHouse(k, world, doors, -12, -17);
@@ -50,29 +56,64 @@ export function buildVillageBlock(k: Kit, world: World, doors: DoorSpec[]) {
   buildWindmill(k, world, -18, 28);
   buildStream(k, world);
   buildFarm(k, world);
+  // the wider village: enterable cottages around the square (seeded variety)
+  const cottages: CottageSpec[] = [
+    { name: 'Nutmeg Cottage', sub: 'mind the cat', x: 25, z: -17, yaw: -Math.PI / 2, w: 7, d: 6, floors: 2, wall: 0xf3e3c3, roof: PAL.roofTeal, shutters: PAL.terracotta, seed: 11 },
+    { name: 'The Crooked Kettle', sub: 'tea, mostly', x: -2, z: -34, yaw: 0, w: 8, d: 6, floors: 2, wall: 0xcfe3e8, roof: PAL.roofRed, shutters: PAL.mustard, seed: 12 },
+    { name: 'Moss Lodge', sub: 'wipe your feet', x: -19, z: -33, yaw: 0, w: 6.5, d: 5.5, floors: 1, wall: 0xd8e8c0, roof: PAL.roofPurple, shutters: PAL.teal, seed: 13 },
+    { name: 'Pip & Dot', sub: 'repairs (ish)', x: 17, z: 31, yaw: Math.PI, w: 7.5, d: 6, floors: 2, wall: 0xf7d0bd, roof: PAL.roofBlue, shutters: PAL.teal, seed: 14 },
+    { name: 'Button Hut', sub: 'no refunds', x: -10, z: 37, yaw: Math.PI, w: 6, d: 5, floors: 1, wall: 0xfff1d8, roof: PAL.roofTeal, shutters: PAL.pink, seed: 15 },
+    { name: 'Grove Cabin', sub: 'ssh, mushrooms sleeping', x: -38, z: 15, yaw: Math.PI / 2, w: 6, d: 5.5, floors: 1, wall: 0xc9a878, roof: PAL.roofRed, shutters: PAL.mustard, seed: 16 },
+  ];
+  for (const c of cottages) {
+    buildCottage(k, world, doors, c);
+    const r = Math.max(c.w, c.d) / 2 + 2.5;
+    reserved.push([c.x - r, c.z - r, c.x + r, c.z + r]);
+    // loot inside (and upstairs)
+    const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+    const at = (lx: number, ly: number, lz: number) => new THREE.Vector3(c.x + lx * cs + lz * sn, ly, c.z - lx * sn + lz * cs);
+    world.lootSpots.push({ pos: at(0.6, 0.05, 0.4), kind: 'weapon', rarity: 0 });
+    world.lootSpots.push({ pos: at(-1.2, 0.05, -0.6), kind: 'ammo', rarity: 0 });
+    if (c.floors === 2) world.lootSpots.push({ pos: at(0.4, 3.05, 0.6), kind: 'weapon', rarity: 0 });
+  }
+  // Rift Nests (bug-revive stations)
+  for (const [x, z] of [[-35, -21], [31, -6], [7, 39]] as [number, number][]) {
+    buildNest(k, world, x, z);
+    reserved.push([x - 4, z - 4, x + 4, z + 4]);
+  }
+  buildLaunchIsle(k, world);
   buildNature(k, world);
 
   world.playerSpawns.push({ pos: new THREE.Vector3(0, 0.05, 27), yaw: 0 });
   world.botSpawns.push(new THREE.Vector3(9, 0.05, -28), new THREE.Vector3(33, 0.05, 0), new THREE.Vector3(-37, 0.05, 6), new THREE.Vector3(-4, 0.05, -30));
 
-  // loot
-  const L = (x: number, y: number, z: number, kind: 'weapon' | 'ammo', rarity: 0 | 1 | 2 | 3 | 4 = 0, secret = false) => world.lootSpots.push({ pos: new THREE.Vector3(x, y, z), kind, rarity, secret });
-  L(0, 0.05, 22.5, 'weapon', 0);
-  L(2.2, 0.05, 21.5, 'ammo');
-  L(-1.8, 0.05, 20.5, 'ammo');
-  L(-14.5, 0.05, -15.5, 'weapon', 1); // house living room
-  L(-9, 0.05, -18.5, 'ammo'); // kitchen
-  L(-14.5, 3.25, -14.8, 'ammo'); // bedroom
-  L(-13, 6.15, -17, 'weapon', 2, true); // secret attic
-  L(-11, 6.15, -17.5, 'ammo', 0, true);
-  L(11, 0.05, -18.5, 'weapon', 0); // bakery
-  L(8.5, 0.05, -14.5, 'ammo');
-  L(20, 7.05, 1.9, 'weapon', 3, true); // tower balcony
-  L(21.5, 7.05, 6.2, 'ammo');
-  L(-19, 0.05, 10, 'ammo'); // shed
-  L(-37, 0.05, -12, 'ammo', 0, true); // blinkbug nest
-  L(5, 0.05, 6.5, 'ammo'); // market
-  L(30, 0.05, 12, 'weapon', 0); // farm
+  // loot: floor spots roll from the loot tables; secret spots hold Rascal Crates
+  const L = (x: number, y: number, z: number, kind: 'weapon' | 'any' = 'any') => world.lootSpots.push({ pos: new THREE.Vector3(x, y, z), kind: kind === 'weapon' ? 'weapon' : 'ammo', rarity: 0 });
+  const C = (x: number, y: number, z: number, yaw = 0) => world.crateSpots.push({ pos: new THREE.Vector3(x, y, z), yaw });
+  L(0, 0.05, 22.5, 'weapon'); // right in front of spawn: something to shoot within seconds
+  L(2.2, 0.05, 21.5);
+  L(-1.8, 0.05, 20.5);
+  L(-14.5, 0.05, -15.5, 'weapon'); // house living room
+  L(-9, 0.05, -18.5); // kitchen
+  L(-14.5, 3.25, -14.8); // bedroom
+  L(-10.5, 3.25, -18.8, 'weapon'); // landing
+  L(11, 0.05, -15.2, 'weapon'); // bakery floor
+  L(8.5, 0.05, -14.5);
+  L(-19, 0.05, 10.8); // shed
+  L(5, 0.05, 6.5); // market
+  L(-5, 0.05, 6.5, 'weapon');
+  L(30, 0.05, 12, 'weapon'); // farm
+  L(-30.5, 0.05, 3); // bridge
+  L(-17, 0.05, 24, 'weapon'); // windmill
+  L(14, 0.05, 0);
+  L(-11, 0.05, 1);
+  C(-13, 6.12, -17, 0); // secret attic (get in through the gable window)
+  C(20, 7.02, 1.9, 0); // Old Tock balcony (blink only)
+  C(-35.2, 0.02, -12, 0.4); // blinkbug nest in the grove
+  C(9, 0.02, -18.6, 0); // bakery back
+  C(-18.5, 0.02, 9.3, Math.PI / 2); // toolshed
+  C(31, 0.02, 1, 0.3); // farm
+  C(-2, 0.02, -6.2, 0.2); // town square
 
   world.addZone('Pickle House', -17, -21, -7, -13, -1, 9, true);
   world.addZone('Crumb & Co.', 7, -20, 15, -13, -1, 6, true);
@@ -496,18 +537,18 @@ function buildWindmill(k: Kit, world: World, cx: number, cz: number) {
 
 function buildStream(k: Kit, world: World) {
   const X = STREAM_X;
-  const edgeZ = (sign: number) => {
-    // find where the island edge crosses the stream
-    for (let z = 30; z < 60; z += 0.25) {
-      const a = Math.atan2(sign * z, X);
-      if (Math.hypot(X, z) > islandRadius(a)) return z - 0.3;
-    }
-    return 40;
-  };
-  const zn = edgeZ(-1), zs = edgeZ(1);
+  // the stream now runs from a rocky spring north of the village down into Crash Cove
+  const zn = -STREAM_Z0, zs = STREAM_Z1;
   world.addWater(X, -0.32, (zs - zn) / 2, 3.6, zs + zn);
-  world.addWaterfall(X, -0.4, -zn, 2.6);
-  world.addWaterfall(X, -0.4, zs, 2.6);
+  // the spring: a mossy boulder pile with a little cascade
+  const sy = ground(X, STREAM_Z0 - 2);
+  k.ico(X, sy + 1.2, STREAM_Z0 - 2.4, 2.2, PAL.stoneDark, { detail: 0, sy: 0.9, col: 'stone' });
+  k.ico(X - 2.2, sy + 0.7, STREAM_Z0 - 1.2, 1.4, PAL.stone, { detail: 0, col: 'stone' });
+  k.ico(X + 2.1, sy + 0.6, STREAM_Z0 - 1.5, 1.2, PAL.stone, { detail: 0, col: 'stone' });
+  k.ico(X, sy + 2.7, STREAM_Z0 - 2.6, 0.8, PAL.leafDark, { batch: 'foliage', wind: 0.2, detail: 0 });
+  const fall = world.addWaterfall(X, sy + 1.6, STREAM_Z0 - 0.4, 1.4);
+  fall.scale.y = 0.14;
+  fall.position.y = sy + 0.7;
   // pebbles & reeds on the banks
   for (let i = 0; i < 40; i++) {
     const z = rng.range(-zn + 2, zs - 2);
@@ -578,7 +619,8 @@ function buildNature(k: Kit, world: World) {
     (x > -4 && x < 4 && z > 12 && z < 40) || // spawn path
     (x > 26 && x < 38 && z > 11 && z < 24) || // farm
     (x > -22 && x < -14 && z > 23 && z < 33) || // windmill
-    Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 3;
+    reserved.some(([x0, z0, x1, z1]) => x > x0 && x < x1 && z > z0 && z < z1) ||
+    Math.hypot(x, z) > 42;
   let placed = 0;
   for (let i = 0; i < 400 && placed < 58; i++) {
     const x = rng.range(-44, 44), z = rng.range(-44, 44);
@@ -600,15 +642,17 @@ function buildNature(k: Kit, world: World) {
   for (let i = 0, n = 0; i < 1400 && n < 650; i++) {
     const x = rng.range(-44, 44), z = rng.range(-44, 44);
     if ((x > -13.5 && x < 13.5 && z > -10.5 && z < 10.8) || Math.abs(x - STREAM_X) < 1.4) continue;
-    if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 1) continue;
+    if (reserved.some(([x0, z0, x1, z1]) => x > x0 + 1.5 && x < x1 - 1.5 && z > z0 + 1.5 && z < z1 - 1.5)) continue;
+    if (Math.hypot(x, z) > 43) continue;
     n++;
     const c = rng.pick([PAL.grass, PAL.grassLight, PAL.grassDark]);
-    for (let b = 0; b < 3; b++) k.cone(x + rng.range(-0.15, 0.15), 0.18, z + rng.range(-0.15, 0.15), 0.06, rng.range(0.3, 0.5), c, { batch: 'foliage', wind: 1, segs: 3, yaw: rng.range(0, 6) });
+    for (let b = 0; b < 3; b++) k.cone(x + rng.range(-0.15, 0.15), 0.18, z + rng.range(-0.15, 0.15), 0.06, rng.range(0.3, 0.5), c, { batch: 'detail', wind: 1, segs: 3, yaw: rng.range(0, 6) });
   }
   // west grove: giant mushrooms (a taste of Wobblewood) + the Blinkbug nest secret
   for (let i = 0; i < 9; i++) {
     const x = rng.range(-43, -33), z = rng.range(-25, 25);
-    if (Math.hypot(x, z) > islandRadius(Math.atan2(z, x)) - 3) continue;
+    if (Math.hypot(x, z) > 42) continue;
+    if (reserved.some(([x0, z0, x1, z1]) => x > x0 && x < x1 && z > z0 && z < z1)) continue;
     P.mushroom(k, x, z, rng.range(0.8, 2.6), rng.pick([PAL.terracotta, PAL.lavender, PAL.mustard]));
   }
   k.push(-37, 0, -12, 0);

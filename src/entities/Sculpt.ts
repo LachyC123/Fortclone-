@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { G } from '../render/Detail';
 
 /**
  * Procedural "sculpting" helpers for characters. Instead of stacking primitives we build
@@ -17,7 +18,7 @@ export function smoothProfile(p: Profile, samples = 28): THREE.Vector2[] {
 }
 
 export function lathe(p: Profile, segs = 22, samples = 28, scaleZ = 1): THREE.BufferGeometry {
-  const g = new THREE.LatheGeometry(smoothProfile(p, samples), segs);
+  const g = G.lathe(smoothProfile(p, samples), segs);
   if (scaleZ !== 1) g.scale(1, 1, scaleZ);
   g.computeVertexNormals();
   return g;
@@ -160,7 +161,7 @@ export function skinnedTube(o: {
 /** Tube along a curve (scarf wraps, straps). */
 export function curveTube(points: THREE.Vector3[], radius: number, radial = 8, segs = 24, flatten = 1) {
   const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
-  const g = new THREE.TubeGeometry(curve, segs, radius, radial, false);
+  const g = G.tube(curve, segs, radius, radial, false);
   if (flatten !== 1) {
     // flatten into a ribbon-ish strap along the local normal by squashing toward the curve
     const pos = g.getAttribute('position') as THREE.BufferAttribute;

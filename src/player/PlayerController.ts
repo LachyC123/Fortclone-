@@ -7,7 +7,10 @@ import { Blinkbug, BUG, simulateBug } from '../entities/Blinkbug';
 import { PAL } from '../render/Palette';
 import { angleDelta, clamp, dirFromYawPitch } from '../core/math';
 import { ColFlags } from '../physics/Collision';
-import type { Pickup } from '../loot/Loot';
+import type { Pickup, Crate } from '../loot/Loot';
+import { UTILS, ITEM_COLOR } from '../combat/Items';
+import { simulateThrow, throwVelocity, THROW } from '../combat/Throwables';
+import { interactContext, SquadContext } from './Interact';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -27,6 +30,11 @@ export class PlayerController implements Controller {
   private arcDots: THREE.InstancedMesh;
   private arcRing: THREE.Mesh;
   contextPickup: Pickup | null = null;
+  contextCrate: Crate | null = null;
+  /** squads: revive / grab a spark / rebuild at a nest (wins over loot prompts) */
+  contextSquad: SquadContext = null;
+  /** LAN client: produce intent & prompts only; the host performs the actions */
+  remote = false;
   settings: PlayerSettings = { aimAssist: true, autoFire: false };
   autoFireActive = false;
   private autoFireT = 0;
@@ -81,6 +89,10 @@ export class PlayerController implements Controller {
     it.blink = s.blinkPressed;
     it.throwAim = s.throwHeld;
     it.throwRelease = s.throwReleased;
+    it.utilAim = s.utilHeld;
+    it.utilRelease = s.utilReleased;
+    it.heal = s.healPressed;
+    it.drop = s.dropPressed;
 
     // auto-fire (optional): shoot when the crosshair rests on an enemy
     this.autoFireActive = false;
@@ -102,22 +114,58 @@ export class PlayerController implements Controller {
     it.aimYaw = cam.yaw;
     it.aimPitch = cam.pitch;
 
-    // contextual pickup
-    this.contextPickup = ctx.loot.bestFor(a);
-    if (s.interactPressed && this.contextPickup) ctx.loot.collect(a, this.contextPickup, ctx);
+    // interact: revive / spark / rebuild / loot / crates (a LAN client only shows prompts — the host acts)
+    const ic = interactContext(a, ctx, s.interactPressed, s.interactHeld, !this.remote);
+    this.contextSquad = ic.squad;
+    this.contextPickup = ic.pickup;
+    this.contextCrate = ic.crate;
 
     this.updateArc(a, ctx);
   }
 
   /** Throw preview: simulate the exact bug physics and draw dots + a landing ring. */
   private updateArc(a: Actor, ctx: GameCtx) {
+    const dotMat = this.arcDots.material as THREE.MeshBasicMaterial;
+    const ringMat = this.arcRing.material as THREE.MeshBasicMaterial;
+    if (a.utilAiming && a.util) {
+      // utility arc: same idea, the item's own physics
+      const def = UTILS[a.util.id];
+      const pos = _p.copy(a.eyePos(_v)).setY(a.motor.pos.y + 1.2);
+      const vel = throwVelocity(def, a.intent.aimDir, _vel);
+      vel.x += a.motor.vel.x * 0.5;
+      vel.z += a.motor.vel.z * 0.5;
+      const m = new THREE.Matrix4();
+      let n = 0;
+      let lastN: THREE.Vector3 | null = null;
+      for (let i = 0; i < 360 && n < 40; i++) {
+        const r = simulateThrow(ctx, def, pos, vel, THROW.step, (nn) => (lastN = nn.clone()));
+        if (i % 5 === 0 && i > 8) {
+          const sc = 1 - (n / 40) * 0.4 + Math.sin(performance.now() * 0.01 - n * 0.6) * 0.18;
+          m.makeScale(sc, sc, sc).setPosition(pos);
+          this.arcDots.setMatrixAt(n++, m);
+        }
+        if (r.settled || ((def.sticky || def.id === 'gust') && r.hit)) break;
+      }
+      this.arcDots.count = n;
+      this.arcDots.instanceMatrix.needsUpdate = true;
+      dotMat.color.setHex(0xffffff).lerp(new THREE.Color(ITEM_COLOR[def.id]), 0.6);
+      ringMat.color.setHex(ITEM_COLOR[def.id]);
+      this.arcRing.visible = true;
+      this.arcRing.position.copy(pos);
+      const nrm = lastN ?? _v2.set(0, 1, 0);
+      this.arcRing.quaternion.setFromUnitVectors(_v.set(0, 0, 1), nrm);
+      const big = def.id === 'fizzbomb' ? 5.5 : def.id === 'gust' ? 6 : def.id === 'stickypop' ? 4.5 : 1.5;
+      this.arcRing.scale.setScalar(big * (1 + Math.sin(performance.now() * 0.012) * 0.05) * 1.8);
+      return;
+    }
+    dotMat.color.setHex(0xc8ffff);
     if (!a.throwAiming) {
       this.arcDots.count = 0;
       this.arcRing.visible = false;
       return;
     }
     const pos = _p.copy(a.eyePos(_v)).setY(a.motor.pos.y + 1.1);
-    const vel = Blinkbug.throwVelocity(a.intent.aimDir, _vel);
+    const vel = Blinkbug.throwVelocity(a.intent.aimDir, _vel, a.bug.stats.throwSpeed);
     vel.x += a.motor.vel.x * 0.5;
     vel.z += a.motor.vel.z * 0.5;
     const m = new THREE.Matrix4();
@@ -126,7 +174,7 @@ export class PlayerController implements Controller {
     const dt = BUG.step;
     let lastN: THREE.Vector3 | null = null;
     for (let i = 0; i < 360 && n < 40; i++) {
-      settled = simulateBug(ctx.cw, pos, vel, dt, (nn) => (lastN = nn.clone()));
+      settled = simulateBug(ctx.cw, pos, vel, dt, (nn) => (lastN = nn.clone()), a.bug.stats);
       if (i % 5 === 0 && i > 8) {
         const s = 1 - (n / 40) * 0.4 + Math.sin(performance.now() * 0.01 - n * 0.6) * 0.18;
         m.makeScale(s, s, s).setPosition(pos);
@@ -160,7 +208,7 @@ export class PlayerController implements Controller {
       const dir = tp.clone().sub(camPos).normalize();
       const ang = Math.acos(clamp(dir.dot(fwd), -1, 1));
       if (ang > 0.09) continue;
-      if (!ctx.cw.lineClear(camPos, tp, ColFlags.BlocksBullets)) continue;
+      if (!ctx.cw.lineClear(camPos, tp, ColFlags.BlocksBullets) || ctx.throwables.smokeBlocks(camPos, tp)) continue;
       if (!best || ang < best.angle) best = { yaw: Math.atan2(-dir.x, -dir.z), pitch: Math.asin(dir.y), angle: ang, visible: true };
     }
     return best;

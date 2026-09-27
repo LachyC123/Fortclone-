@@ -4,8 +4,15 @@ import { PAL } from '../render/Palette';
 import { clamp, damp, lerp, TAU } from '../core/math';
 import { WeaponView } from '../combat/Weapons';
 import { skinnedTube, bindTwoBone, finalizeBinds, deform, lathe, curveTube } from './Sculpt';
+import { mergeToVertexColored } from '../render/Merge';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { G } from '../render/Detail';
 
-export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf';
+export type HatKind = 'beanie' | 'aviator' | 'pot' | 'hood' | 'leaf' | 'party' | 'pirate' | 'wizard' | 'crown' | 'antenna';
+
+/** colours for the hats you unlock with relic sets */
+export const HAT_COLOR: Partial<Record<HatKind, number>> = { party: 0xf28fad, pirate: 0x3a2e4a, wizard: 0x5b4bff, crown: 0xffc83d, antenna: 0x6ff7ff };
+const GOGGLE_HATS: HatKind[] = ['beanie', 'aviator', 'hood', 'leaf'];
 
 export interface RascalLook {
   skin: number;
@@ -29,6 +36,11 @@ export const LOOKS: RascalLook[] = [
   { skin: 0x8d5a3c, outfit: 0x7cc35a, accent: PAL.cream, pants: 0x5e3b27, boots: 0x3b2a22, pack: 0xd9774f, packAccent: 0x8a5a3b, scarf: PAL.lavender, hat: 'leaf', hatColor: 0x5aa347, goggles: 0xfff08a },
   { skin: 0xffe0c8, outfit: 0xf2c14e, accent: PAL.teal, pants: 0x2f3a4a, boots: 0x6b3a2a, pack: 0x3fc6c0, packAccent: 0x2a7a70, scarf: PAL.terracotta, hat: 'hood', hatColor: 0xf28fad, goggles: 0x9fe8ff },
 ];
+
+/** which base outfit a look is (hats can be swapped on top of it) */
+export function lookIndex(look: RascalLook) {
+  return LOOKS.findIndex((l) => l.outfit === look.outfit && l.skin === look.skin);
+}
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -56,10 +68,10 @@ function mat(hex: number, rough = 0.62, emissive = 0x000000) {
 }
 
 function rbox(w: number, h: number, d: number, r: number) {
-  return new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
+  return G.rbox(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
 }
 function capsule(r: number, len: number) {
-  const g = new THREE.CapsuleGeometry(r, len, 4, 10);
+  const g = G.capsule(r, len, 4, 10);
   g.translate(0, -len / 2 - r * 0.3, 0);
   return g;
 }
@@ -82,7 +94,16 @@ export interface AnimInput {
   ads: boolean;
   reloadK: number; // -1 none, else 0..1
   healing: boolean;
+  diving?: boolean;
+  gliding?: boolean;
+  onBarge?: boolean;
+  /** an emote in progress */
+  emote?: EmoteKind | null;
+  /** knocked down: crawling on the ground */
+  downed?: boolean;
 }
+
+export type EmoteKind = 'dance' | 'wave' | 'laugh' | 'flex';
 
 /**
  * Procedurally animated "toy" character. No skeleton assets: a hierarchy of chunky rounded parts
@@ -250,7 +271,7 @@ export class RascalRig {
       });
       binds.push(bindTwoBone(lg, body, this.hips, leg.position, leg, knee));
       // sculpted boot: bulbous toe, flat sole, fold-over cuff
-      const boot = deform(new THREE.SphereGeometry(0.1, 20, 14), (v) => {
+      const boot = deform(G.sphere(0.1, 20, 14), (v) => {
         v.z *= v.z < 0 ? 1.55 : 1.05;
         v.x *= 0.95 + (v.z < 0 ? -v.z * 0.6 : 0);
         v.y *= 0.8;
@@ -258,8 +279,8 @@ export class RascalRig {
         if (v.z < -0.05) v.y += (-v.z - 0.05) * 0.25; // upturned toe
       });
       add(knee, boot, boots, 0, -0.215, -0.04);
-      add(knee, deform(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 20), (v) => (v.z *= v.z < 0 ? 1.55 : 1.05)), ink, 0, -0.265, -0.04);
-      add(knee, new THREE.TorusGeometry(0.068, 0.028, 8, 18), this.m(shadeHex(L.boots, 1.35), 0.8), 0, -0.155, 0, Math.PI / 2);
+      add(knee, deform(G.cylinder(0.1, 0.1, 0.03, 20), (v) => (v.z *= v.z < 0 ? 1.55 : 1.05)), ink, 0, -0.265, -0.04);
+      add(knee, G.torus(0.068, 0.028, 8, 18), this.m(shadeHex(L.boots, 1.35), 0.8), 0, -0.155, 0, Math.PI / 2);
     }
 
     // ---------------- arms: skinned sleeves -> cuffs -> forearms, with mitten hands
@@ -282,17 +303,17 @@ export class RascalRig {
       });
       binds.push(bindTwoBone(ag, body, this.torso, arm.position, arm, elbow));
       // mitten with a thumb
-      const mit = deform(new THREE.SphereGeometry(0.075, 16, 12), (v) => {
+      const mit = deform(G.sphere(0.075, 16, 12), (v) => {
         v.y *= 1.2;
         v.z *= 0.85;
         if (v.y < 0) v.x *= 1 + -v.y * 1.2;
       });
       add(hand, mit, glove, 0, -0.035, 0);
-      add(hand, new THREE.CapsuleGeometry(0.028, 0.045, 4, 8), glove, -sx * 0.055, -0.01, -0.035, 0.5, 0, -sx * 0.7);
+      add(hand, G.capsule(0.028, 0.045, 4, 8), glove, -sx * 0.055, -0.01, -0.035, 0.5, 0, -sx * 0.7);
     }
 
     // ---------------- scarf: soft wrap with a knot and two fluttering tails
-    const wrap = deform(new THREE.TorusGeometry(0.155, 0.06, 10, 28), (v) => {
+    const wrap = deform(G.torus(0.155, 0.06, 10, 28), (v) => {
       v.z += Math.sin(Math.atan2(v.y, v.x) * 3) * 0.008;
     });
     add(this.torso, wrap, scarf, 0, 0.47, 0.01, Math.PI / 2 - 0.12);
@@ -309,7 +330,7 @@ export class RascalRig {
     this.pack.position.set(0, 0.22, 0.2);
     this.torso.add(this.pack);
     const puff = (w: number, h: number, d: number, r: number, amt: number) =>
-      deform(new RoundedBoxGeometry(w, h, d, 4, r), (v) => {
+      deform(G.rbox(w, h, d, 4, r), (v) => {
         const k = 1 - Math.max(Math.abs(v.x) / (w / 2), Math.abs(v.y) / (h / 2), Math.abs(v.z) / (d / 2));
         const f = 1 + amt * Math.sqrt(Math.max(0, k));
         v.x *= f;
@@ -319,9 +340,9 @@ export class RascalRig {
     add(this.pack, puff(0.3, 0.19, 0.08, 0.05, 0.12), packA, 0, -0.08, 0.25); // front pocket
     add(this.pack, puff(0.36, 0.14, 0.22, 0.06, 0.06), packA, 0, 0.24, 0.1, -0.12); // flap
     add(this.pack, softSphere(0.03, 1, 1.4, 0.6), metal, 0, 0.17, 0.215); // clasp
-    add(this.pack, new THREE.CapsuleGeometry(0.075, 0.4, 6, 12), this.m(PAL.terracottaDark, 0.85), 0, -0.26, 0.12, 0, 0, Math.PI / 2); // bedroll
-    for (const bx of [-0.12, 0.12]) add(this.pack, new THREE.TorusGeometry(0.078, 0.012, 6, 14), packA, bx, -0.26, 0.12, 0, Math.PI / 2);
-    add(this.pack, new THREE.CapsuleGeometry(0.035, 0.1, 4, 8), this.m(0x9fdcf0, 0.25), 0.25, 0.04, 0.1); // bottle
+    add(this.pack, G.capsule(0.075, 0.4, 6, 12), this.m(PAL.terracottaDark, 0.85), 0, -0.26, 0.12, 0, 0, Math.PI / 2); // bedroll
+    for (const bx of [-0.12, 0.12]) add(this.pack, G.torus(0.078, 0.012, 6, 14), packA, bx, -0.26, 0.12, 0, Math.PI / 2);
+    add(this.pack, G.capsule(0.035, 0.1, 4, 8), this.m(0x9fdcf0, 0.25), 0.25, 0.04, 0.1); // bottle
     add(this.pack, softSphere(0.04, 1, 1, 1), this.m(PAL.pink, 0.6), -0.25, 0.14, 0.15); // charm
     for (const bx of [-1, 1]) {
       const strap = curveTube([new THREE.Vector3(bx * 0.12, 0.12, -0.19), new THREE.Vector3(bx * 0.14, 0.32, -0.2), new THREE.Vector3(bx * 0.15, 0.47, -0.06), new THREE.Vector3(bx * 0.14, 0.46, 0.14), new THREE.Vector3(bx * 0.12, 0.38, 0.22)], 0.022, 6, 16);
@@ -333,7 +354,7 @@ export class RascalRig {
     // ---------------- head: soft egg with chubby cheeks
     this.head.position.y = 0.47;
     this.torso.add(this.head);
-    const headGeo = deform(new THREE.SphereGeometry(0.27, 36, 28), (v) => {
+    const headGeo = deform(G.sphere(0.27, 36, 28), (v) => {
       v.y *= 0.93;
       const low = Math.max(0, Math.min(1, (0.05 - v.y) / 0.25));
       v.x *= 1 + 0.09 * low; // cheeks
@@ -347,12 +368,12 @@ export class RascalRig {
       g.position.set(x, 0.225, -0.232);
       g.rotation.y = -x * 1.6;
       this.head.add(g);
-      const w = add(g, new THREE.SphereGeometry(0.052, 16, 12), sclera);
+      const w = add(g, G.sphere(0.052, 16, 12), sclera);
       w.scale.set(0.85, 1.12, 0.5);
-      const pu = add(g, new THREE.SphereGeometry(0.036, 14, 10), ink, 0, -0.004, -0.018);
+      const pu = add(g, G.sphere(0.036, 14, 10), ink, 0, -0.004, -0.018);
       pu.scale.set(0.85, 1.12, 0.55);
-      add(g, new THREE.SphereGeometry(0.011, 8, 6), white, 0.012, 0.018, -0.04);
-      add(g, new THREE.SphereGeometry(0.006, 6, 4), white, -0.01, -0.016, -0.038);
+      add(g, G.sphere(0.011, 8, 6), white, 0.012, 0.018, -0.04);
+      add(g, G.sphere(0.006, 6, 4), white, -0.01, -0.016, -0.038);
       return g;
     };
     this.eyeL = mkEye(-0.092);
@@ -371,18 +392,18 @@ export class RascalRig {
     add(this.head, softSphere(0.05, 1, 0.55, 0.35), blush, -0.165, 0.14, -0.2, 0, 0.55);
     add(this.head, softSphere(0.05, 1, 0.55, 0.35), blush, 0.165, 0.14, -0.2, 0, -0.55);
     add(this.head, softSphere(0.038, 1.1, 0.9, 0.8), this.m(shadeHex(L.skin, 0.93), 0.5), 0, 0.165, -0.262); // button nose
-    this.mouth = add(this.head, new THREE.TorusGeometry(0.036, 0.011, 6, 14, Math.PI), ink, 0, 0.1, -0.252, 0.15, 0, Math.PI);
+    this.mouth = add(this.head, G.torus(0.036, 0.011, 6, 14, Math.PI), ink, 0, 0.1, -0.252, 0.15, 0, Math.PI);
     add(this.head, softSphere(0.055, 0.55, 1, 0.8), skin, -0.268, 0.19, 0.01); // ears
     add(this.head, softSphere(0.055, 0.55, 1, 0.8), skin, 0.268, 0.19, 0.01);
     // hair tufts peeking out under the hat
     for (let i = 0; i < 5; i++) {
       const t = (i - 2) / 2;
-      const tuft = deform(new THREE.ConeGeometry(0.045, 0.12, 8), (v) => {
+      const tuft = deform(G.cone(0.045, 0.12, 8), (v) => {
         v.z += (v.y + 0.06) * (v.y + 0.06) * 2.2; // curl
       });
       add(this.head, tuft, hairM, t * 0.12, 0.34 - Math.abs(t) * 0.03, -0.215 + Math.abs(t) * 0.04, Math.PI - 0.5, t * 0.3, t * 0.4);
     }
-    for (const sx of [-1, 1]) add(this.head, deform(new THREE.ConeGeometry(0.05, 0.16, 8), (v) => (v.x += (v.y + 0.08) ** 2 * sx * -2)), hairM, sx * 0.235, 0.2, -0.06, Math.PI, 0, sx * 0.25);
+    for (const sx of [-1, 1]) add(this.head, deform(G.cone(0.05, 0.16, 8), (v) => (v.x += (v.y + 0.08) ** 2 * sx * -2)), hairM, sx * 0.235, 0.2, -0.06, Math.PI, 0, sx * 0.25);
 
     // ---------------- hats
     this.hat.position.set(0, 0.24, 0.02);
@@ -391,42 +412,96 @@ export class RascalRig {
     switch (L.hat) {
       case 'beanie': {
         add(this.hat, lathe([[0.001, 0.33], [0.12, 0.31], [0.24, 0.22], [0.29, 0.1], [0.3, 0.04]], 28), hatM, 0, 0, 0.01);
-        add(this.hat, new THREE.TorusGeometry(0.29, 0.05, 10, 28), this.m(shadeHex(L.hatColor, 0.82), 0.85), 0, 0.05, 0.01, Math.PI / 2);
-        add(this.hat, deform(new THREE.IcosahedronGeometry(0.085, 2), (v) => v.multiplyScalar(1 + Math.sin(v.x * 90) * 0.06)), this.m(0xffffff, 0.95), 0, 0.37, 0.02);
+        add(this.hat, G.torus(0.29, 0.05, 10, 28), this.m(shadeHex(L.hatColor, 0.82), 0.85), 0, 0.05, 0.01, Math.PI / 2);
+        add(this.hat, deform(G.ico(0.085, 2), (v) => v.multiplyScalar(1 + Math.sin(v.x * 90) * 0.06)), this.m(0xffffff, 0.95), 0, 0.37, 0.02);
         break;
       }
       case 'aviator': {
         add(this.hat, lathe([[0.001, 0.31], [0.14, 0.29], [0.25, 0.2], [0.3, 0.08], [0.305, 0.0]], 28), hatM, 0, 0, 0.02);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.SphereGeometry(0.1, 14, 10), (v) => ((v.x *= 0.45), (v.y *= 1.35))), hatM, sx * 0.285, -0.12, 0.06, -0.3, 0, sx * 0.2);
-        add(this.hat, new THREE.TorusGeometry(0.3, 0.03, 6, 30), this.m(0xf4e7c8, 0.9), 0, 0.0, 0.02, Math.PI / 2); // fleece rim
+        for (const sx of [-1, 1]) add(this.hat, deform(G.sphere(0.1, 14, 10), (v) => ((v.x *= 0.45), (v.y *= 1.35))), hatM, sx * 0.285, -0.12, 0.06, -0.3, 0, sx * 0.2);
+        add(this.hat, G.torus(0.3, 0.03, 6, 30), this.m(0xf4e7c8, 0.9), 0, 0.0, 0.02, Math.PI / 2); // fleece rim
         break;
       }
       case 'pot': {
         add(this.hat, lathe([[0.001, 0.26], [0.24, 0.255], [0.27, 0.2], [0.29, 0.06], [0.35, 0.05], [0.35, 0.03], [0.28, 0.03]], 26), hatM, 0, 0, 0);
-        add(this.hat, new THREE.CapsuleGeometry(0.025, 0.2, 4, 8), this.m(0x6b7380, 0.4), 0.42, 0.1, 0, 0, 0, Math.PI / 2 + 0.2);
+        add(this.hat, G.capsule(0.025, 0.2, 4, 8), this.m(0x6b7380, 0.4), 0.42, 0.1, 0, 0, 0, Math.PI / 2 + 0.2);
         add(this.hat, softSphere(0.028, 1, 1, 1), metal, 0, 0.27, 0);
         break;
       }
       case 'hood': {
         add(this.hat, lathe([[0.001, 0.34], [0.16, 0.31], [0.28, 0.2], [0.315, 0.05], [0.3, -0.12]], 28, 28, 1.05), hatM, 0, -0.01, 0.04);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.ConeGeometry(0.09, 0.18, 12), (v) => (v.z *= 0.55)), hatM, sx * 0.17, 0.3, 0.03, 0, 0, -sx * 0.45);
-        for (const sx of [-1, 1]) add(this.hat, deform(new THREE.ConeGeometry(0.05, 0.1, 10), (v) => (v.z *= 0.4)), this.m(0xffc2d6, 0.8), sx * 0.165, 0.29, 0.005, 0, 0, -sx * 0.45);
+        for (const sx of [-1, 1]) add(this.hat, deform(G.cone(0.09, 0.18, 12), (v) => (v.z *= 0.55)), hatM, sx * 0.17, 0.3, 0.03, 0, 0, -sx * 0.45);
+        for (const sx of [-1, 1]) add(this.hat, deform(G.cone(0.05, 0.1, 10), (v) => (v.z *= 0.4)), this.m(0xffc2d6, 0.8), sx * 0.165, 0.29, 0.005, 0, 0, -sx * 0.45);
         break;
       }
       case 'leaf': {
         add(this.hat, lathe([[0.001, 0.3], [0.2, 0.26], [0.29, 0.12], [0.3, 0.05]], 26), this.m(PAL.brown, 0.75), 0, 0, 0.01);
-        const leaf = add(this.hat, deform(new THREE.SphereGeometry(0.16, 14, 8), (v) => ((v.x *= 0.45), (v.y *= 0.1), (v.z *= 1.4), (v.y += v.z * v.z * 2))), hatM, 0.06, 0.34, 0.05, 0.3, 0, -0.4);
+        const leaf = add(this.hat, deform(G.sphere(0.16, 14, 8), (v) => ((v.x *= 0.45), (v.y *= 0.1), (v.z *= 1.4), (v.y += v.z * v.z * 2))), hatM, 0.06, 0.34, 0.05, 0.3, 0, -0.4);
         leaf.castShadow = true;
-        add(this.hat, new THREE.CapsuleGeometry(0.014, 0.1, 3, 6), this.m(PAL.brownDark, 0.7), 0, 0.33, 0);
+        add(this.hat, G.capsule(0.014, 0.1, 3, 6), this.m(PAL.brownDark, 0.7), 0, 0.33, 0);
+        break;
+      }
+      case 'party': {
+        add(this.hat, lathe([[0.001, 0.56], [0.04, 0.52], [0.17, 0.22], [0.25, 0.04], [0.26, 0.0]], 24), hatM, 0, 0.02, 0.02);
+        const stripe = this.m(PAL.mustard, 0.6);
+        add(this.hat, G.torus(0.2, 0.022, 6, 22), stripe, 0, 0.17, 0.02, Math.PI / 2);
+        add(this.hat, G.torus(0.115, 0.02, 6, 18), stripe, 0, 0.35, 0.02, Math.PI / 2);
+        add(this.hat, deform(G.ico(0.07, 2), (v) => v.multiplyScalar(1 + Math.sin(v.y * 80) * 0.08)), this.m(0x6ff7ff, 0.9), 0, 0.6, 0.02);
+        add(this.hat, G.torus(0.26, 0.03, 8, 26), this.m(0xffffff, 0.9), 0, 0.02, 0.02, Math.PI / 2);
+        break;
+      }
+      case 'pirate': {
+        add(this.hat, lathe([[0.001, 0.27], [0.18, 0.25], [0.26, 0.14], [0.28, 0.02]], 24), hatM, 0, 0.02, 0.02);
+        // tricorn brim: a wide disc whose edge curls up
+        const brim = deform(G.cylinder(0.46, 0.46, 0.035, 30, 1), (v) => {
+          const r = Math.hypot(v.x, v.z);
+          const a = Math.atan2(v.z, v.x);
+          v.y += Math.max(0, r - 0.26) * (0.7 + 0.5 * Math.cos(a * 3 + Math.PI / 2));
+        });
+        add(this.hat, brim, hatM, 0, 0.05, 0.02);
+        add(this.hat, G.torus(0.275, 0.018, 6, 26), this.m(0xffc83d, 0.35), 0, 0.07, 0.02, Math.PI / 2);
+        add(this.hat, softSphere(0.05, 1, 1, 0.6), this.m(0xffffff, 0.6), 0, 0.16, -0.26, -0.3);
+        for (const sx of [-1, 1]) add(this.hat, G.capsule(0.012, 0.06, 3, 6), this.m(0xffffff, 0.6), sx * 0.025, 0.1, -0.27, 0, 0, sx * 0.8);
+        break;
+      }
+      case 'wizard': {
+        add(this.hat, deform(lathe([[0.001, 0.78], [0.05, 0.64], [0.14, 0.34], [0.22, 0.1], [0.25, 0.0]], 24), (v) => (v.z += v.y * v.y * 0.55)), hatM, 0, 0.03, 0.02);
+        add(this.hat, deform(G.cylinder(0.44, 0.44, 0.03, 30, 1), (v) => (v.y -= Math.max(0, Math.hypot(v.x, v.z) - 0.3) * 0.25)), hatM, 0, 0.04, 0.02);
+        const star = this.m(0xffe27a, 0.4);
+        for (const [x, y, z] of [[0.12, 0.22, -0.18], [-0.1, 0.36, -0.1], [0.04, 0.5, 0.02]] as const) add(this.hat, G.ico(0.035, 0), star, x, y, z);
+        add(this.hat, G.torus(0.24, 0.022, 6, 24), this.m(0xffe27a, 0.4), 0, 0.07, 0.02, Math.PI / 2);
+        break;
+      }
+      case 'crown': {
+        const gold = this.m(0xffc83d, 0.3);
+        add(this.hat, G.cylinder(0.2, 0.19, 0.1, 22, 1, true), gold, 0, 0.1, 0.03);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * TAU;
+          add(this.hat, G.cone(0.045, 0.13, 8), gold, Math.sin(a) * 0.19, 0.2, 0.03 + Math.cos(a) * 0.19);
+          add(this.hat, G.sphere(0.022, 8, 6), gold, Math.sin(a) * 0.19, 0.28, 0.03 + Math.cos(a) * 0.19);
+        }
+        const gems = [0xff5c7a, 0x6ff7ff, 0x9dff8a];
+        for (let i = 0; i < 3; i++) {
+          const a = Math.PI + (i - 1) * 0.7;
+          add(this.hat, G.ico(0.03, 1), this.m(gems[i], 0.15), Math.sin(a) * 0.205, 0.1, 0.03 + Math.cos(a) * 0.205);
+        }
+        break;
+      }
+      case 'antenna': {
+        add(this.hat, G.torus(0.29, 0.03, 8, 28), this.m(0x2b2238, 0.6), 0, 0.02, 0.02, Math.PI / 2 + 0.2);
+        for (const sx of [-1, 1]) {
+          add(this.hat, deform(G.capsule(0.016, 0.34, 4, 8), (v) => (v.x += sx * (v.y + 0.17) * (v.y + 0.17) * 1.4)), this.m(0x2b2238, 0.6), sx * 0.12, 0.2, -0.06, -0.25, 0, -sx * 0.25);
+          add(this.hat, G.sphere(0.055, 12, 10), hatM, sx * 0.3, 0.4, -0.14);
+        }
         break;
       }
     }
-    if (L.hat !== 'pot') {
+    if (GOGGLE_HATS.includes(L.hat)) {
       const gy = L.hat === 'hood' ? 0.1 : 0.1;
-      add(this.hat, new THREE.TorusGeometry(0.298, 0.022, 6, 30), this.m(0x3b2a22, 0.8), 0, gy - 0.02, 0.01, Math.PI / 2 + 0.3);
+      add(this.hat, G.torus(0.298, 0.022, 6, 30), this.m(0x3b2a22, 0.8), 0, gy - 0.02, 0.01, Math.PI / 2 + 0.3);
       for (const sx of [-1, 1]) {
-        add(this.hat, new THREE.TorusGeometry(0.058, 0.02, 8, 18), metal, sx * 0.09, gy + 0.04, -0.262, -0.55);
-        add(this.hat, deform(new THREE.SphereGeometry(0.056, 14, 10), (v) => (v.z *= 0.45)), gog, sx * 0.09, gy + 0.04, -0.262, -0.55);
+        add(this.hat, G.torus(0.058, 0.02, 8, 18), metal, sx * 0.09, gy + 0.04, -0.262, -0.55);
+        add(this.hat, deform(G.sphere(0.056, 14, 10), (v) => (v.z *= 0.45)), gog, sx * 0.09, gy + 0.04, -0.262, -0.55);
       }
     }
 
@@ -436,6 +511,114 @@ export class RascalRig {
       if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = false;
     });
     finalizeBinds(this.root, binds);
+    this.mouth.userData.keep = true;
+    // far LOD: the whole rascal baked into one mesh at rest pose (1 draw call)
+    this.root.updateMatrixWorld(true);
+    this.lodMesh = mergeToVertexColored(this.body);
+    this.lodMesh.castShadow = false;
+    this.lodMesh.visible = false;
+    this.root.add(this.lodMesh);
+    this.mergeStatic(this.root);
+    for (const b of binds) {
+      // skinned meshes: generous bounds so they can be frustum culled like everything else
+      b.mesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -0.3, 0), 1.2);
+      b.mesh.frustumCulled = true;
+    }
+  }
+
+  lodMesh!: THREE.Mesh;
+  private flatMat: THREE.MeshStandardMaterial | null = null;
+  lod = false;
+
+  private ghost = 1;
+  /** Fade the whole rascal (Wisp shimmer). 1 = solid. */
+  setGhost(k: number) {
+    if (Math.abs(k - this.ghost) < 0.01) return;
+    this.ghost = k;
+    const solid = k >= 0.999;
+    for (const m of this.materials) {
+      m.transparent = !solid;
+      m.opacity = k;
+      m.depthWrite = solid;
+    }
+  }
+
+  /** Switch between the full animated rig and the single-mesh stand-in. */
+  setLod(far: boolean) {
+    if (far === this.lod) return;
+    this.lod = far;
+    this.body.visible = !far;
+    this.lodMesh.visible = far;
+  }
+
+  setShadows(on: boolean) {
+    this.body.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && !o.userData.noShadow) (o as THREE.Mesh).castShadow = on;
+    });
+  }
+
+  /**
+   * Merge each node's static child meshes into one vertex-coloured mesh. Animation lives on the
+   * groups, so nothing visible changes — but a rascal drops from ~45 draw calls to ~20.
+   */
+  private mergeStatic(node: THREE.Object3D) {
+    for (const c of [...node.children]) if (!(c as THREE.Mesh).isMesh) this.mergeStatic(c);
+    const meshes = node.children.filter((c) => {
+      const m = c as THREE.Mesh;
+      return m.isMesh && !(m as THREE.SkinnedMesh).isSkinnedMesh && !m.userData.keep && m !== this.lodMesh && !Array.isArray(m.material) && (m.material as THREE.Material).blending !== THREE.AdditiveBlending;
+    }) as THREE.Mesh[];
+    if (meshes.length < 2) return;
+    if (!this.flatMat) {
+      this.flatMat = mat(0xffffff, 0.62);
+      this.flatMat.vertexColors = true;
+      this.materials.push(this.flatMat);
+    }
+    const parts: THREE.BufferGeometry[] = [];
+    for (const m of meshes) {
+      m.updateMatrix();
+      let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+      g.applyMatrix4(m.matrix);
+      const mm = m.material as THREE.MeshStandardMaterial;
+      const c = mm.color.clone();
+      if (mm.emissiveIntensity > 0 && mm.emissive.getHex() !== 0) c.lerp(mm.emissive, 0.3).multiplyScalar(1.3);
+      const n = g.getAttribute('position').count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = c.r;
+        col[i * 3 + 1] = c.g;
+        col[i * 3 + 2] = c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      parts.push(g);
+      node.remove(m);
+    }
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((p) => p.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, this.flatMat);
+    mesh.castShadow = true;
+    node.add(mesh);
+  }
+
+  private held: THREE.Object3D | null = null;
+  private healK = 0;
+  private diveK = 0;
+  private glideK = 0;
+  private emoteK = 0;
+  private downK = 0;
+  private emoteKind: EmoteKind = 'wave';
+  /** Put a consumable in the left hand (eating/drinking animation). */
+  setHeld(obj: THREE.Object3D | null) {
+    if (this.held) this.handL.remove(this.held);
+    this.held = obj;
+    if (obj) {
+      obj.scale.setScalar(0.9);
+      obj.position.set(0, -0.08, -0.04);
+      obj.rotation.set(Math.PI, 0, 0);
+      obj.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      this.handL.add(obj);
+    }
   }
 
   setWeapon(view: WeaponView | null) {
@@ -622,6 +805,136 @@ export class RascalRig {
       if (this.throwT >= 0) this.throwArm(this.armR, this.elbowR, this.throwT, 1);
     }
 
+    // --- eating / drinking: weapon tucked away, item to the mouth with little nibbles
+    this.healK = damp(this.healK, a.healing ? 1 : 0, 12, dt);
+    if (this.weapon) this.weapon.group.visible = this.healK < 0.5;
+    if (this.healK > 0.02) {
+      const nib = Math.sin(t * 14) * 0.12;
+      const k = this.healK;
+      _q.setFromEuler(new THREE.Euler(2.25 + nib, 0, -0.55));
+      this.armL.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x = this.elbowL.rotation.x * (1 - k) + (1.9 + nib) * k;
+      if (a.healing) {
+        _q2.setFromEuler(new THREE.Euler(0.3, 0, 0.2));
+        this.armR.quaternion.slerp(_q2, k);
+        this.elbowR.rotation.x = this.elbowR.rotation.x * (1 - k) + 0.6 * k;
+        this.head.rotation.x += 0.12 * k + nib * 0.3;
+        if (this.expression === 'normal') this.eyeL.scale.y = this.eyeR.scale.y = 0.35; // blissful squint
+      }
+    }
+
+    // --- skydive (belly down, limbs starfished) and glider hang
+    this.diveK = damp(this.diveK, a.diving ? 1 : 0, 6, dt);
+    this.glideK = damp(this.glideK, a.gliding ? 1 : 0, 8, dt);
+    this.body.rotation.x = -1.25 * this.diveK - 0.15 * this.glideK;
+    if (this.diveK > 0.02) {
+      const k = this.diveK, fl = Math.sin(t * 13) * 0.08;
+      _q.setFromEuler(new THREE.Euler(0.35 + fl, 0, -1.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(0.35 - fl, 0, 1.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.legL.rotation.x += (-0.35 - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (-0.35 - this.legR.rotation.x) * k;
+      this.legL.rotation.z += (-0.35 - this.legL.rotation.z) * k;
+      this.legR.rotation.z += (0.35 - this.legR.rotation.z) * k;
+      this.head.rotation.x += 0.9 * k; // look ahead while belly-down
+      if (this.weapon) this.weapon.group.visible = false;
+    }
+    if (this.glideK > 0.02) {
+      const k = this.glideK;
+      _q.setFromEuler(new THREE.Euler(2.95, 0, -0.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(2.95, 0, 0.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x *= 1 - k;
+      this.elbowR.rotation.x *= 1 - k;
+      const dang = Math.sin(t * 4) * 0.25;
+      this.legL.rotation.x += (dang - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (-dang - this.legR.rotation.x) * k;
+      this.kneeL.rotation.x += (-0.5 - this.kneeL.rotation.x) * k;
+      this.kneeR.rotation.x += (-0.3 - this.kneeR.rotation.x) * k;
+      if (this.weapon) this.weapon.group.visible = false;
+    }
+
+    // --- emotes (procedural, layered over whatever the body was doing)
+    if (a.emote) this.emoteKind = a.emote;
+    this.emoteK = damp(this.emoteK, a.emote ? 1 : 0, 10, dt);
+    if (this.emoteK > 0.02) {
+      const k = this.emoteK;
+      if (this.weapon) this.weapon.group.visible = false;
+      const e = this.emoteKind;
+      if (e === 'dance') {
+        const b = Math.sin(t * 9), b2 = Math.sin(t * 4.5);
+        this.hips.position.y += Math.abs(b) * 0.08 * k;
+        this.hips.rotation.y += b2 * 0.45 * k;
+        _q.setFromEuler(new THREE.Euler(2.6 + b * 0.4, 0, -0.4 - b2 * 0.3));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(0.6 - b * 0.5, 0, 0.9 + b2 * 0.3));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (0.5 + b * 0.3 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (1.2 - this.elbowR.rotation.x) * k;
+        this.legL.rotation.x += (Math.max(0, b) * 0.9 - this.legL.rotation.x) * k;
+        this.legR.rotation.x += (Math.max(0, -b) * 0.9 - this.legR.rotation.x) * k;
+        this.kneeL.rotation.x += (-Math.max(0, b) * 1.3 - this.kneeL.rotation.x) * k;
+        this.kneeR.rotation.x += (-Math.max(0, -b) * 1.3 - this.kneeR.rotation.x) * k;
+        this.head.rotation.z += b2 * 0.25 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.45;
+      } else if (e === 'wave') {
+        const w = Math.sin(t * 11);
+        _q.setFromEuler(new THREE.Euler(2.9, 0, 0.55 + w * 0.35));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowR.rotation.x += (0.5 + w * 0.3 - this.elbowR.rotation.x) * k;
+        this.head.rotation.z += 0.18 * k;
+        this.torso.rotation.z += -0.08 * k;
+      } else if (e === 'laugh') {
+        const h = Math.sin(t * 16);
+        this.torso.rotation.x += (-0.25 + h * 0.12) * k;
+        this.head.rotation.x += (-0.35 + h * 0.1) * k;
+        _q.setFromEuler(new THREE.Euler(0.9, 0, -0.5));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(0.9, 0, 0.5));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (1.7 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (1.7 - this.elbowR.rotation.x) * k;
+        this.hips.position.y += Math.abs(h) * 0.03 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.3;
+        this.mouth.scale.set(0.8, -1.4, 1);
+      } else {
+        const p = Math.sin(t * 6);
+        _q.setFromEuler(new THREE.Euler(1.6, 0, -1.3));
+        this.armL.quaternion.slerp(_q, k);
+        _q.setFromEuler(new THREE.Euler(1.6, 0, 1.3));
+        this.armR.quaternion.slerp(_q, k);
+        this.elbowL.rotation.x += (2.1 + p * 0.15 - this.elbowL.rotation.x) * k;
+        this.elbowR.rotation.x += (2.1 - p * 0.15 - this.elbowR.rotation.x) * k;
+        this.torso.scale.x *= 1 + Math.max(0, p) * 0.08 * k;
+        this.hips.position.y += -0.05 * k;
+        this.eyeL.scale.y = this.eyeR.scale.y = 0.6;
+      }
+    }
+
+    // --- knocked down: belly-crawl, arms pulling forward, legs dragging, head up
+    this.downK = damp(this.downK, a.downed ? 1 : 0, 7, dt);
+    if (this.downK > 0.02) {
+      const k = this.downK;
+      if (this.weapon) this.weapon.group.visible = false;
+      const cr = Math.sin(t * 6) * clamp(speed / 1.2, 0, 1);
+      this.hips.position.y += -0.36 * k;
+      this.hips.rotation.x += -1.15 * k;
+      _q.setFromEuler(new THREE.Euler(2.7 + cr * 0.5, 0, -0.35));
+      this.armL.quaternion.slerp(_q, k);
+      _q.setFromEuler(new THREE.Euler(2.7 - cr * 0.5, 0, 0.35));
+      this.armR.quaternion.slerp(_q, k);
+      this.elbowL.rotation.x += (0.6 + cr * 0.4 - this.elbowL.rotation.x) * k;
+      this.elbowR.rotation.x += (0.6 - cr * 0.4 - this.elbowR.rotation.x) * k;
+      this.legL.rotation.x += (0.35 + cr * 0.25 - this.legL.rotation.x) * k;
+      this.legR.rotation.x += (0.35 - cr * 0.25 - this.legR.rotation.x) * k;
+      this.kneeL.rotation.x += (-0.4 - this.kneeL.rotation.x) * k;
+      this.kneeR.rotation.x += (-0.4 - this.kneeR.rotation.x) * k;
+      this.head.rotation.x += 0.75 * k;
+      this.eyeL.scale.y = this.eyeR.scale.y = 0.55;
+    }
+
     // --- secondary motion: backpack, scarf, hat
     this.packSwingXV += (-this.packSwingX * 120 - this.packSwingXV * 9 + accel * 0.4 + (a.grounded ? Math.abs(c) * runK * 12 : 0) - this.squashV * 3) * dt;
     this.packSwingX += this.packSwingXV * dt;
@@ -726,14 +1039,14 @@ function curveFn(pts: [number, number][]) {
 }
 
 function softSphere(r: number, sx: number, sy: number, sz: number) {
-  const g = new THREE.SphereGeometry(r, 14, 10);
+  const g = G.sphere(r, 14, 10);
   g.scale(sx, sy, sz);
   return g;
 }
 
 /** A tapered, slightly curved cloth ribbon (scarf tails). */
 function taperedRibbon(w: number, h: number, d: number) {
-  return deform(new RoundedBoxGeometry(w, h, d, 3, Math.min(d / 2 - 0.001, 0.015)), (v) => {
+  return deform(G.rbox(w, h, d, 3, Math.min(d / 2 - 0.001, 0.015)), (v) => {
     const t = (h / 2 - v.y) / h; // 0 top .. 1 bottom
     v.x *= 1 - t * 0.2;
     v.z += Math.sin(t * Math.PI) * 0.012;

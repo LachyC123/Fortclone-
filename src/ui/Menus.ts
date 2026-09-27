@@ -1,7 +1,17 @@
 import type { Game } from '../core/Game';
-import type { Quality } from '../render/Renderer';
+import { QUALITY_PRESETS, type Quality } from '../render/Renderer';
 import { audio } from '../audio/Audio';
 import { ICONS } from './icons';
+import { CollectionScreen } from './Collection';
+import { LanScreen } from './LanScreen';
+import { TrophyRoadScreen, nextReward } from './TrophyRoad';
+import { BurrowScreen } from './BurrowScreen';
+import { INCUBATORS } from '../progression/Burrow';
+import { arenaFor, unclaimed, ROAD } from '../progression/Trophies';
+
+const ROAD_ATS = ROAD.map((r) => r.at);
+import { SPECIES_BY_ID } from '../progression/Bugs';
+import { RARITY } from '../render/Palette';
 
 export interface Settings {
   quality: Quality;
@@ -12,12 +22,14 @@ export interface Settings {
   aimAssist: boolean;
   autoFire: boolean;
   showFps: boolean;
+  /** 'auto' adapts to how you've been doing */
+  botDifficulty: 'auto' | 'easy' | 'normal' | 'hard';
 }
 
 const isMobile = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && window.innerWidth < 1100);
 
 export function loadSettings(): Settings {
-  const def: Settings = { quality: isMobile() ? 'medium' : 'high', autoQuality: true, sensitivity: 1, fov: 72, volume: 0.8, aimAssist: true, autoFire: false, showFps: false };
+  const def: Settings = { quality: isMobile() ? 'medium' : 'high', autoQuality: true, sensitivity: 1, fov: 72, volume: 0.8, aimAssist: true, autoFire: false, showFps: false, botDifficulty: 'auto' };
   try {
     const raw = localStorage.getItem('rr.settings');
     if (raw) return { ...def, ...JSON.parse(raw) };
@@ -47,21 +59,135 @@ export class Menus {
   private title = h('div', 'overlay');
   private pauseEl = h('div', 'overlay hidden');
   private elimEl = h('div', 'overlay hidden');
+  collection!: CollectionScreen;
+  lan!: LanScreen;
+  road!: TrophyRoadScreen;
+  burrow!: BurrowScreen;
 
   constructor(private game: Game) {
-    this.title.innerHTML = `<div class="title">
+    this.title.innerHTML = `<div class="title home">
       <div class="logo">RIFT<span>RASCALS</span></div>
       <div class="tagline">DROP. BLINK. GRAB. RUN.</div>
-      <button class="btn play">PLAY</button>
-      <div class="hint">Milestone 1 · Combat Playground<br>
+      <div class="profile big"></div>
+      <button class="trophybtn"></button>
+      <button class="burrowbtn"></button>
+      <div class="modepick"><button data-n="1">SOLO</button><button data-n="2">DUOS</button><button data-n="3">TRIOS</button><button data-n="4">SQUADS</button></div>
+      <div class="modehint"></div>
+      <div class="playrow"><button class="btn play">PLAY</button><button class="btn secondary friends">WITH FRIENDS<small>same Wi-Fi</small></button></div>
+      <button class="mybug"></button>
+      <div class="homebtns">
+        <button class="btn secondary bugsbtn">MY BUGS<span class="badge"></span></button>
+        <button class="btn secondary practice">PRACTICE</button>
+        <button class="btn secondary training">TRAINING</button>
+        <button class="btn secondary howto">HOW TO PLAY</button>
+      </div>
+      <div class="hint hidden">
       <kbd>WASD</kbd> move · <kbd>Mouse</kbd> aim · <kbd>LMB</kbd> fire · <kbd>RMB</kbd> aim down sights<br>
-      <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump/climb · <kbd>C</kbd> crouch/slide · <kbd>R</kbd> reload · <kbd>F</kbd> pick up<br>
-      <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!) · <kbd>Esc</kbd> pause</div></div>`;
+      <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump/climb/<b>drop from the Sky Barge</b> · <kbd>C</kbd> crouch/slide · <kbd>R</kbd> reload · <kbd>F</kbd> pick up<br>
+      <kbd>Q</kbd> hold to aim, release to throw your Blinkbug · <kbd>E</kbd> BLINK (swap places!)<br>
+      <kbd>G</kbd> hold/release to throw a utility · <kbd>H</kbd> heal · <kbd>X</kbd> drop gun · <kbd>1-3</kbd> weapons · <kbd>Esc</kbd> pause<br>
+      Grab the <b>same gun at the same rarity</b> to <b>FUSE</b> it into a better one!<br>
+      Knocked out? Your <b>Blinkbug</b> carries your spark to a <b>Rift Nest</b> — once per match. Stay out of <b>THE GLOOM</b>.<br>
+      <b>Rift Relics</b> are glowing gems with a tall beam — grab one and stand on a <b>Rift Nest</b> to send it home to your <b>Burrow</b> (drop it if you're knocked out!).<br>
+      <b>Duos / Trios / Squads:</b> at 0 HP you're <b>knocked down</b> — a teammate holds <kbd>F</kbd> to pick you up. Fully out? Your spark drops: a teammate grabs it and rebuilds you at a <b>Rift Nest</b>.</div></div>`;
+    // solo / duos / trios / squads (your teammates are bots until you play with friends)
+    const hints = ['', 'Every rascal for themselves', 'You + 1 bot teammate · 12 teams', 'You + 2 bot teammates · 8 teams', 'You + 3 bot teammates · 6 teams'];
+    const setMode = (n: number) => {
+      this.game.teamSize = n;
+      try {
+        localStorage.setItem('rr.mode', String(n));
+      } catch {
+        /* ignore */
+      }
+      this.title.querySelectorAll<HTMLButtonElement>('.modepick button').forEach((b) => b.classList.toggle('on', Number(b.dataset.n) === n));
+      (this.title.querySelector('.modehint') as HTMLElement).textContent = hints[n];
+    };
+    let saved = 1;
+    try {
+      saved = Number(localStorage.getItem('rr.mode')) || 1;
+    } catch {
+      /* ignore */
+    }
+    setMode(Math.min(4, Math.max(1, saved)));
+    this.title.querySelector('.modepick')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button');
+      if (!b) return;
+      audio.uiTap();
+      setMode(Number(b.dataset.n));
+    });
     this.title.querySelector('.play')!.addEventListener('click', () => {
       audio.unlock();
       audio.uiTap();
-      this.game.play();
+      // first time ever: a quick (skippable) training lap before the real thing
+      if (!this.game.trained) this.game.startTraining();
+      else this.game.startMatch();
     });
+    this.title.querySelector('.training')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.game.startTraining();
+    });
+    this.title.querySelector('.practice')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.game.startPlayground();
+    });
+    this.road = new TrophyRoadScreen(this.game);
+    this.road.onClose = () => {
+      this.title.classList.remove('hidden');
+      this.refreshProfile();
+    };
+    this.title.querySelector('.trophybtn')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.road.open();
+    });
+    this.lan = new LanScreen(this.game);
+    this.lan.onClose = () => this.title.classList.remove('hidden');
+    this.title.querySelector('.friends')!.addEventListener('click', () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.lan.open();
+    });
+    this.collection = new CollectionScreen(this.game);
+    this.collection.onClose = () => {
+      this.refreshProfile();
+      this.title.classList.remove('hidden');
+    };
+    const openBugs = () => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.collection.open();
+    };
+    this.burrow = new BurrowScreen(this.game, this.collection);
+    this.burrow.onClose = () => {
+      this.refreshProfile();
+      this.title.classList.remove('hidden');
+    };
+    const openBurrow = (focus: import('../progression/Burrow').BuildingId | null = null) => {
+      audio.unlock();
+      audio.uiTap();
+      this.title.classList.add('hidden');
+      this.burrow.open(focus);
+    };
+    this.title.querySelector('.burrowbtn')!.addEventListener('click', () => openBurrow());
+    // MY BUGS' cocoon button: straight to the first free (or ready) incubator
+    this.collection.onIncubate = () => {
+      this.collection.el.classList.add('hidden');
+      const b = this.game.burrow;
+      const slot = [0, 1, 2].find((i) => b.lv[INCUBATORS[i]] && !b.inc[i]) ?? [0, 1, 2].find((i) => b.lv[INCUBATORS[i]]) ?? 0;
+      openBurrow(INCUBATORS[slot]);
+    };
+    this.title.querySelector('.bugsbtn')!.addEventListener('click', openBugs);
+    this.title.querySelector('.mybug')!.addEventListener('click', openBugs);
+    this.title.querySelector('.howto')!.addEventListener('click', () => {
+      audio.uiTap();
+      this.title.querySelector('.hint')!.classList.toggle('hidden');
+    });
+    this.refreshProfile();
 
     this.buildPause();
     this.elimEl.innerHTML = `<div class="elim"><div class="t">ELIMINATED!</div><div class="by"></div><div style="margin-top:18px"><button class="btn">RESPAWN</button></div></div>`;
@@ -75,16 +201,18 @@ export class Menus {
   private buildPause() {
     const s = this.game.settings;
     this.pauseEl.innerHTML = `<div class="menu panel">
-      <h2>PAUSED</h2>
-      <div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
+      <div class="menuhead"><h2>PAUSED</h2><button class="btn resume">RESUME</button></div>
+      <div class="rows"><div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
+      <div class="row qnote hidden"><small>Model &amp; world detail change after a reload.</small></div>
       <div class="row"><span>Auto-adjust graphics</span><div class="seg" data-k="autoQuality"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Look sensitivity</span><input type="range" min="0.3" max="2.5" step="0.05" data-k="sensitivity"></div>
       <div class="row"><span>Field of view</span><input type="range" min="60" max="90" step="1" data-k="fov"></div>
       <div class="row"><span>Volume</span><input type="range" min="0" max="1" step="0.05" data-k="volume"></div>
       <div class="row"><span>Aim assist (touch)</span><div class="seg" data-k="aimAssist"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Auto-fire</span><div class="seg" data-k="autoFire"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
-      <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
-      <div class="btns"><button class="btn resume">${'RESUME'}</button></div>
+      <div class="row"><span>Bot difficulty</span><div class="seg" data-k="botDifficulty"><button data-v="auto">AUTO</button><button data-v="easy">EASY</button><button data-v="normal">MED</button><button data-v="hard">HARD</button></div></div>
+      <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div></div>
+      <div class="pausefoot"><button class="btn secondary skiptut hidden">SKIP TRAINING</button><button class="btn secondary leave">LEAVE MATCH</button></div>
     </div>`;
     const sync = () => {
       this.pauseEl.querySelectorAll<HTMLDivElement>('.seg').forEach((seg) => {
@@ -102,6 +230,9 @@ export class Menus {
         (s as unknown as Record<string, unknown>)[k] = v === 'true' ? true : v === 'false' ? false : v;
         audio.uiTap();
         this.game.applySettings();
+        const note = this.pauseEl.querySelector('.qnote');
+        const bq = this.game.bootQuality;
+        note?.classList.toggle('hidden', QUALITY_PRESETS[s.quality].model === QUALITY_PRESETS[bq].model);
         sync();
       });
     });
@@ -111,12 +242,73 @@ export class Menus {
         this.game.applySettings();
       }),
     );
+    this.pauseEl.querySelector('.skiptut')!.addEventListener('click', () => {
+      audio.uiTap();
+      this.pauseEl.classList.add('hidden');
+      this.game.training?.skip();
+    });
+    this.pauseEl.querySelector('.leave')!.addEventListener('click', (e) => {
+      audio.uiTap();
+      // two taps: first one asks
+      const b = e.currentTarget as HTMLButtonElement;
+      if (!b.classList.contains('sure')) {
+        b.classList.add('sure');
+        b.textContent = 'TAP AGAIN TO LEAVE';
+        setTimeout(() => {
+          b.classList.remove('sure');
+          this.syncLeave();
+        }, 2500);
+        return;
+      }
+      b.classList.remove('sure');
+      this.pauseEl.classList.add('hidden');
+      if (this.game.mode === 'match' || this.game.mode === 'net') this.game.matchCtl.ui.onHome?.();
+      else this.game.goHome();
+    });
     this.pauseEl.querySelector('.resume')!.addEventListener('click', () => {
       audio.uiTap();
       this.game.play();
     });
     sync();
-    void ICONS;
+  }
+
+  refreshProfile() {
+    let p = { level: 1, wins: 0, matches: 0 };
+    try {
+      p = { ...p, ...JSON.parse(localStorage.getItem('rr.profile') || '{}') };
+    } catch {
+      /* ignore */
+    }
+    const tr = this.game.trophies;
+    (this.title.querySelector('.profile') as HTMLElement).innerHTML = `<span>LV ${p.level}</span><span>${ICONS.skull} ${p.wins} wins</span>${tr.title ? `<span class="title">“${tr.title}”</span>` : ''}`;
+    // trophy banner: count, arena, progress to the next reward, and a badge when one's waiting
+    const arena = arenaFor(tr.trophies);
+    const next = nextReward(tr.trophies);
+    const waiting = unclaimed(tr).length;
+    const lastAt = Math.max(0, ...ROAD_ATS.filter((a) => a <= tr.trophies));
+    const pct = next ? ((tr.trophies - lastAt) / Math.max(1, next.at - lastAt)) * 100 : 100;
+    const tb = this.title.querySelector('.trophybtn') as HTMLElement;
+    tb.style.setProperty('--ac', arena.color);
+    tb.innerHTML = `<span class="tr big">${ICONS.trophy}${tr.trophies}</span><span class="mid"><b class="big">${arena.name}</b><span class="bar"><i style="width:${pct}%"></i></span><small>${next ? `next reward at ${next.at}` : 'road complete!'}</small></span><span class="go big">TROPHY ROAD ›</span>${waiting ? `<span class="badge">${waiting}</span>` : ''}`;
+    // the Burrow: glimmer + how many things are waiting there
+    const todo = BurrowScreen.todo(this.game);
+    (this.title.querySelector('.burrowbtn') as HTMLElement).innerHTML = `<span class="ic">${ICONS.home}</span><span class="mid"><b class="big">MY BURROW</b><small>build · hatch · train · relics</small></span><span class="glim big">${ICONS.glimmer}${Math.floor(this.game.burrow.glimmer).toLocaleString()}</span>${todo ? `<span class="badge">${todo}</span>` : ''}`;
+    const c = this.game.collection;
+    const own = c.bugs.find((b) => b.species === c.equipped)!;
+    const sp = SPECIES_BY_ID[own.species];
+    const mb = this.title.querySelector('.mybug') as HTMLElement;
+    mb.style.setProperty('--tint', `#${sp.tint.toString(16).padStart(6, '0')}`);
+    mb.style.setProperty('--rc', RARITY[sp.rarity].css);
+    mb.innerHTML = `<span class="ic">${ICONS.bug}</span><span>with <b>${own.name}</b> the ${sp.name}</span>`;
+    const badge = this.title.querySelector('.bugsbtn .badge') as HTMLElement;
+    badge.textContent = c.cocoons.length ? String(c.cocoons.length) : '';
+    badge.style.display = c.cocoons.length ? '' : 'none';
+  }
+
+  showTitle() {
+    this.hideAll();
+    this.refreshProfile();
+    this.title.classList.remove('hidden');
   }
 
   hideAll() {
@@ -125,7 +317,16 @@ export class Menus {
     this.elimEl.classList.add('hidden');
   }
 
+  private syncLeave() {
+    const m = this.game.mode;
+    const b = this.pauseEl.querySelector('.leave') as HTMLElement;
+    if (b.classList.contains('sure')) return;
+    b.textContent = m === 'net' ? 'LEAVE ROOM' : m === 'match' ? 'LEAVE MATCH' : 'HOME';
+  }
+
   showPause() {
+    this.pauseEl.querySelector('.skiptut')!.classList.toggle('hidden', this.game.mode !== 'training');
+    this.syncLeave();
     this.pauseEl.classList.remove('hidden');
   }
 

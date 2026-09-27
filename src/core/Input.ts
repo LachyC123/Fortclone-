@@ -14,12 +14,19 @@ export interface InputState {
   crouchPressed: boolean;
   reloadPressed: boolean;
   interactPressed: boolean;
+  /** interact is being held (reviving a teammate) */
+  interactHeld: boolean;
   throwHeld: boolean;
   throwReleased: boolean;
   blinkPressed: boolean;
   slotPressed: number;
   pausePressed: boolean;
   touchActive: boolean;
+  utilHeld: boolean;
+  utilReleased: boolean;
+  healPressed: boolean;
+  emotePressed: boolean;
+  dropPressed: boolean;
 }
 
 export class Input {
@@ -35,12 +42,18 @@ export class Input {
     crouchPressed: false,
     reloadPressed: false,
     interactPressed: false,
+    interactHeld: false,
     throwHeld: false,
     throwReleased: false,
     blinkPressed: false,
     slotPressed: -1,
     pausePressed: false,
     touchActive: false,
+    utilHeld: false,
+    utilReleased: false,
+    healPressed: false,
+    emotePressed: false,
+    dropPressed: false,
   };
   private keys = new Set<string>();
   locked = false;
@@ -92,6 +105,7 @@ export class Input {
     if (down) this.keys.add(k);
     else this.keys.delete(k);
     if (!this.enabled) return;
+    if (!down && k === 'KeyF') this.s.interactHeld = false;
     if (down) {
       switch (k) {
         case 'Space':
@@ -106,6 +120,7 @@ export class Input {
           break;
         case 'KeyF':
           this.s.interactPressed = true;
+          this.s.interactHeld = true;
           break;
         case 'KeyE':
           this.s.blinkPressed = true;
@@ -122,6 +137,18 @@ export class Input {
         case 'Digit3':
           this.s.slotPressed = 2;
           break;
+        case 'KeyG':
+          this.s.utilHeld = true;
+          break;
+        case 'KeyH':
+          this.s.healPressed = true;
+          break;
+        case 'KeyB':
+          this.s.emotePressed = true;
+          break;
+        case 'KeyX':
+          this.s.dropPressed = true;
+          break;
         case 'Escape':
         case 'KeyP':
           this.s.pausePressed = true;
@@ -130,11 +157,20 @@ export class Input {
     } else if (k === 'KeyQ' && this.s.throwHeld) {
       this.s.throwHeld = false;
       this.s.throwReleased = true;
+    } else if (k === 'KeyG' && this.s.utilHeld) {
+      this.s.utilHeld = false;
+      this.s.utilReleased = true;
     }
   }
 
   /** Called once per frame before controllers read input. */
   poll() {
+    if (!this.enabled) {
+      // menus / cutscenes: typing in a text box must not walk your rascal around
+      this.s.moveX = this.s.moveY = 0;
+      this.s.sprint = false;
+      return;
+    }
     if (!this.s.touchActive) {
       const kx = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
       const ky = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
@@ -155,6 +191,10 @@ export class Input {
     s.reloadPressed = false;
     s.interactPressed = false;
     s.throwReleased = false;
+    s.utilReleased = false;
+    s.healPressed = false;
+    s.emotePressed = false;
+    s.dropPressed = false;
     s.blinkPressed = false;
     s.slotPressed = -1;
     s.pausePressed = false;

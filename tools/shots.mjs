@@ -17,6 +17,12 @@ const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
 const shots = {
   // name: [px,py,pz, yaw, pitch, setup]
   portrait: [0, 0.05, 20, 0, 0, 'portrait'],
+  arsenal: [0, 0.05, 20, 0, 0, 'arsenal'],
+  card: [-2, 0.05, 14, 0, -0.35, 'card'],
+  crate: [-2, 0.05, -3.5, Math.PI, -0.2, 'crate'],
+  boom: [-2, 0.05, 12, 0, -0.05, 'boom'],
+  heal: [0, 0.05, 20, 0, 0, 'heal'],
+  held: [0, 0.05, 20, 0, 0, 'held'],
   lineup: [0, 0.05, 20, 0, 0, 'lineup'],
   house: [-10.5, 0.05, -18, 0.6, -0.1, ''],
   upstairs: [-13, 3.25, -15.5, 0.9, -0.12, ''],
@@ -43,6 +49,19 @@ for (const [name, [x, y, z, yaw, pitch, setup]] of Object.entries(shots)) {
     g.debugCam = null;
     if (setup === 'portrait') { bot.motor.teleport(new V(0, 0.05, 16)); bot.bodyYaw = 0; p.motor.teleport(new V(0.9, 0.05, 16.2)); p.bodyYaw = 0.5; g.debugCam = { pos: new V(0.5, 1.35, 13.6), target: new V(0.45, 0.95, 16) }; }
     if (setup === 'lineup') { const ext = g.__extra ?? (g.__extra = [g.createBot(), g.createBot(), g.createBot()]); ext.forEach((e, i) => { e.controller = null; e.motor.teleport(new V(-2.2 + i * 1.5, 0.05, 15.6)); e.bodyYaw = 0.25 - i * 0.2; }); bot.motor.teleport(new V(2.3, 0.05, 15.6)); bot.bodyYaw = -0.4; p.motor.teleport(new V(-3.6, 0.05, 15.8)); p.bodyYaw = 0.6; g.debugCam = { pos: new V(-0.3, 1.5, 11.2), target: new V(-0.3, 0.8, 15.6) }; }
+    if (setup === 'arsenal') {
+      const ids = ['poppistol', 'rattle', 'broomstick', 'tincan', 'needler', 'thumper', 'sparkbow', 'pepperbox'];
+      ids.forEach((id, i) => g.loot.spawn('weapon', id, i % 5, 1, new V(-5.25 + i * 1.5, 0.05, 16)));
+      g.loot.spawn('heal', 'jamjar', 1, 1, new V(-4, 0.05, 14.3)); g.loot.spawn('heal', 'biscuit', 3, 1, new V(-2.8, 0.05, 14.3)); g.loot.spawn('util', 'fizzbomb', 1, 1, new V(-1.6, 0.05, 14.3));
+      g.loot.spawn('util', 'chicken', 2, 1, new V(-0.4, 0.05, 14.3)); g.loot.spawn('util', 'stickypop', 2, 1, new V(0.8, 0.05, 14.3)); g.loot.spawn('util', 'gust', 2, 1, new V(2, 0.05, 14.3)); g.loot.spawn('util', 'bouncejam', 1, 1, new V(3.2, 0.05, 14.3)); g.loot.spawn('ammo', 'shells', 0, 10, new V(4.4, 0.05, 14.3));
+      p.motor.teleport(new V(12, 0.05, 30));
+      g.debugCam = { pos: new V(0, 2.6, 10.8), target: new V(0, 0.4, 15.4) };
+    }
+    if (setup === 'card') { p.weapons = [null, null, null]; p.giveWeapon('rattle', 1, 0, true); p.giveWeapon('tincan', 0, 1, true); g.loot.spawn('weapon', 'tincan', 0, 1, new V(-2, 0.05, 12.6)); }
+    if (setup === 'crate') { const c = g.loot.crates.find((c) => Math.abs(c.pos.x + 2) < 0.1); g.loot.resetCrates(); g.loot.openCrate(c, p); g.debugStep(52); g.debugCam = { pos: new V(0.5, 2.4, -2.2), target: new V(-2, 0.8, -6.2) }; }
+    if (setup === 'boom') { bot.motor.teleport(new V(-2, 0.05, 2)); g.throwables.smokes.push({ pos: new V(3, 1.2, 2), r: 5, t: 1.5, life: 10 }); g.debugStep(40); g.throwables.explode(new V(-2, 0.3, 3), null, g, 0, 4.5, 'TEST'); g.debugStep(5); }
+    if (setup === 'heal') { p.healItem = null; p.addItem('heal', 'jamjar', 2); p.hp = 40; g.input.s.healPressed = true; g.debugStep(40); p.bodyYaw = Math.PI - 0.5; g.debugCam = { pos: new V(0.3, 1.4, 17.8), target: new V(0, 1.0, 20) }; }
+    if (setup === 'held') { const ids = ['poppistol', 'broomstick', 'needler', 'thumper', 'sparkbow']; const ext = g.__extra ?? (g.__extra = [g.createBot(), g.createBot(), g.createBot()]); const all = [bot, ...ext, p]; all.forEach((e, i) => { e.controller = e === p ? e.controller : null; e.weapons = [null, null, null]; e.giveWeapon(ids[i], 2, 0, true); e.motor.teleport(new V(-3 + i * 1.5, 0.05, 15.6)); e.bodyYaw = Math.PI * 0.85 + i * 0.1; }); g.debugCam = { pos: new V(0, 1.5, 11.5), target: new V(0, 0.9, 15.6) }; }
     if (setup === 'face') { g.camRig.yaw = yaw; p.bodyYaw = 0; bot.motor.teleport(new V(0.8, 0.05, 16.5)); bot.bodyYaw = 0.3; }
     if (setup === 'combat') { bot.motor.teleport(new V(1.5, 0.05, -3)); bot.bodyYaw = Math.PI; }
     g.debugStep(30);

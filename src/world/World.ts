@@ -13,6 +13,7 @@ import { rand, Rng } from '../core/math';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildVillageBlock } from './VillageBlock';
 import { toyMaterial } from '../render/Materials';
+import { mergeChildren, flatMaterial } from '../render/Merge';
 
 export interface LootSpot {
   pos: THREE.Vector3;
@@ -52,6 +53,10 @@ interface Kickable {
   color: number;
 }
 
+import { buildIsland } from './Island';
+import { ISLAND_R, ISLAND_MAX } from './Heightmap';
+import { detail } from '../render/Detail';
+
 /** A named region used for indoor reverb, minimap labels and (later) POI logic. */
 export interface Zone {
   name: string;
@@ -78,12 +83,33 @@ export class World {
   private cloudData: { x: number; y: number; z: number; s: number; v: number }[] = [];
   zones: Zone[] = [];
   lootSpots: LootSpot[] = [];
+  /** small named spots between places (minimap labels) */
+  landmarks: { name: string; x: number; z: number }[] = [];
+  crateSpots: { pos: THREE.Vector3; yaw: number }[] = [];
+  nests: { pos: THREE.Vector3; used: boolean; fx: THREE.Object3D }[] = [];
+  /** Launch Isle (pre-match lobby) */
+  lobby = { center: new THREE.Vector3(0, 40, -205), radius: 16, bargeDock: new THREE.Vector3(20, 42, -205) };
   playerSpawns: { pos: THREE.Vector3; yaw: number }[] = [];
   botSpawns: THREE.Vector3[] = [];
-  islandRadius = 46;
-  mapBounds = 48;
+  islandRadius = ISLAND_R;
+  mapBounds = ISLAND_MAX + 4;
   signs: THREE.Object3D[] = [];
   private birdTimer = 2;
+  private cullT = 0;
+  private detailChunks: THREE.Mesh[] = [];
+  private interiorChunks: THREE.Mesh[] = [];
+  private smallChunks: THREE.Mesh[] = [];
+  /** small outdoor props are drawn out to this distance (set from the quality preset) */
+  smallDist = 90;
+
+  /** small props and furniture only cast shadows on the top tier (saves a shadow draw each) */
+  setPropShadows(on: boolean) {
+    for (const m of this.smallChunks) m.castShadow = on;
+    for (const m of this.interiorChunks) m.castShadow = on;
+  }
+  private bigChunks: THREE.Mesh[] = [];
+  /** chunks further than this (plus their radius) are skipped; set from the quality preset */
+  drawDist = 400;
   private t = 0;
   bellPos = new THREE.Vector3();
 
@@ -92,21 +118,89 @@ export class World {
     const foliage = new Batcher();
     const nocast = new Batcher();
     const glow = new Batcher();
+    const detail = new Batcher();
+    const interior = new Batcher();
+    const small = new Batcher();
     const k = new Kit(solid, foliage, nocast, glow, this.cw);
+    k.detail = detail;
+    k.interior = interior;
+    k.small = small;
     const doorSpecs: DoorSpec[] = [];
 
+    const T = location.search.includes('timing');
+    let t0 = performance.now();
+    const lap = (label: string) => {
+      if (!T) return;
+      const t = performance.now();
+      console.log(`[t]   ${label} ${(t - t0).toFixed(0)}ms`);
+      t0 = t;
+    };
     buildVillageBlock(k, this, doorSpecs);
+    lap('village+terrain');
+    buildIsland(k, this, doorSpecs);
+    lap('island');
 
     const wm = worldMaterial();
     const fm = foliageMaterial();
     const gm = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
-    for (const m of solid.buildChunked(wm, 24)) this.group.add(m);
-    for (const m of foliage.buildChunked(fm, 24)) this.group.add(m);
-    for (const m of nocast.buildChunked(wm, 32, false, true)) this.group.add(m);
-    for (const m of glow.buildChunked(gm, 32, false, false)) this.group.add(m);
+    // big island: larger chunks keep the draw-call count sane when you can see everything
+    for (const m of [...solid.buildChunked(wm, 40), ...foliage.buildChunked(fm, 40)]) {
+      m.geometry.computeBoundingSphere();
+      this.bigChunks.push(m);
+      this.group.add(m);
+    }
+    for (const m of nocast.buildChunked(wm, 56, false, true)) this.group.add(m);
+    for (const m of detail.buildChunked(fm, 20, false, true)) {
+      m.geometry.computeBoundingSphere();
+      this.detailChunks.push(m);
+      this.group.add(m);
+    }
+    for (const m of glow.buildChunked(gm, 72, false, false)) this.group.add(m);
+    for (const m of small.buildChunked(wm, 28, true, true)) {
+      m.geometry.computeBoundingSphere();
+      this.smallChunks.push(m);
+      this.group.add(m);
+    }
+    for (const m of interior.buildChunked(wm, 18, true, true)) {
+      m.geometry.computeBoundingSphere();
+      this.interiorChunks.push(m);
+      this.group.add(m);
+    }
+    lap('merge');
     for (const d of doorSpecs) this.makeDoor(d);
+    this.signs = this.group.children.filter((c) => c.userData.sign);
+    lap('doors');
+    this.settleLoot();
+    lap('settleLoot');
     this.scene.add(this.group);
     this.makeClouds();
+  }
+
+  /** Nudge any loot spot that ended up inside furniture/rock (or floating) to the nearest clear spot. */
+  private settleLoot() {
+    const up = new THREE.Vector3(), down = new THREE.Vector3(0, -1, 0), q = new THREE.Vector3();
+    const ok = (p: THREE.Vector3) => {
+      const hit = this.cw.raycast(up.set(p.x, p.y + 0.8, p.z), down, 2.2, ColFlags.BlocksMove);
+      if (!hit) return false;
+      p.y = hit.point.y + 0.05;
+      return !this.cw.sphereOverlaps(q.set(p.x, p.y + 0.5, p.z), 0.28, ColFlags.BlocksMove);
+    };
+    this.lootSpots = this.lootSpots.filter((s) => {
+      const t = s.pos.clone();
+      if (ok(t)) {
+        s.pos.copy(t);
+        return true;
+      }
+      for (let r = 0.5; r <= 3; r += 0.5)
+        for (let a = 0; a < 8; a++) {
+          t.set(s.pos.x + Math.cos((a / 8) * Math.PI * 2) * r, s.pos.y, s.pos.z + Math.sin((a / 8) * Math.PI * 2) * r);
+          if (ok(t)) {
+            s.pos.copy(t);
+            return true;
+          }
+        }
+      return false;
+    });
   }
 
   /* ------------------------------------------------------------ builders called by the layout */
@@ -245,6 +339,7 @@ export class World {
     win2.position.z = -0.05;
     win2.rotation.y = Math.PI;
     pivot.add(win, win2);
+    mergeChildren(pivot, flatMaterial('door', 0.7));
     this.group.add(pivot);
     const c = Math.cos(d.yaw), s = Math.sin(d.yaw);
     const cx = d.x + (d.w / 2) * c, cz = d.z - (d.w / 2) * s;
@@ -305,6 +400,21 @@ export class World {
     }
   }
 
+  /** Radial shove for explosions and gusts: props tumble away. */
+  pushProps(p: THREE.Vector3, R: number, force: number) {
+    for (const kk of this.kickables) {
+      const d = kk.pos.clone().sub(p);
+      const dist = d.length();
+      if (dist > R) continue;
+      d.normalize();
+      const k = 1 - dist / R;
+      kk.vel.addScaledVector(d, force * k).y += force * 0.6 * k;
+      kk.spin.set(rand(-14, 14), rand(-14, 14), rand(-14, 14));
+    }
+    for (const d of this.doors) if (d.hinge.distanceTo(p) < R) d.vel -= 6;
+    for (const s of this.swingers) if (s.obj.position.distanceTo(p) < R + 2) s.vel += (Math.random() - 0.5) * 4;
+  }
+
   /** Direct hit on a kickable prop (bullets test these separately; cheap sphere check). */
   kickableRay(o: THREE.Vector3, d: THREE.Vector3, maxT: number): number {
     let best = -1;
@@ -323,6 +433,37 @@ export class World {
   update(dt: number, actors: Actor[], camPos: THREE.Vector3) {
     this.t += dt;
     shared.time.value = this.t;
+
+    // distance culling for the small separate meshes (a few per frame is plenty)
+    this.cullT -= dt;
+    if (this.cullT <= 0) {
+      this.cullT = 0.25;
+      const far = (o: THREE.Object3D, d: number) => (o.visible = o.position.distanceToSquared(camPos) < d * d);
+      const cf = detail.cull;
+      for (const f of this.flyers) if (f.kind === 'butterfly') far(f.mesh, 45 * cf);
+      for (const kk of this.kickables) far(kk.mesh, 55 * cf);
+      for (const s of this.signs) far(s, 85 * cf);
+      // swinging doors and Rift Nest sparkles are separate meshes: only draw the nearby ones
+      const dd = 62 * cf;
+      for (const d of this.doors) d.pivot.visible = d.hinge.distanceToSquared(camPos) < dd * dd;
+      for (const n of this.nests) far(n.fx, 130);
+      for (const m of this.detailChunks) m.visible = m.geometry.boundingSphere!.center.distanceToSquared(camPos) < 62 * 62;
+      for (const m of this.smallChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = Math.min(this.drawDist, this.smallDist) + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
+      for (const m of this.interiorChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = Math.min(this.drawDist, 46) + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
+      for (const m of this.bigChunks) {
+        const bs = m.geometry.boundingSphere!;
+        const d = this.drawDist + bs.radius;
+        m.visible = bs.center.distanceToSquared(camPos) < d * d;
+      }
+    }
 
     // doors auto-open for anyone approaching, close when clear
     for (const d of this.doors) {

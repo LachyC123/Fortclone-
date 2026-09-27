@@ -19,11 +19,11 @@ page.on('pageerror', (e) => errors.push(`[pageerror] ${e.message}\n${e.stack}`))
 await page.goto(`http://localhost:${PORT}/`);
 await page.waitForFunction(() => window.__game, null, { timeout: 60000 });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${out}/01-title${mobile ? '-m' : ''}.png` });
+await page.screenshot({ path: `${out}/01-title${mobile ? '-m' : ''}.png`, timeout: 120000 });
 const steps = process.argv.includes('--steps');
 await page.evaluate(() => { const g = window.__game; g.play(); });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${out}/02-spawn${mobile ? '-m' : ''}.png` });
+await page.screenshot({ path: `${out}/02-spawn${mobile ? '-m' : ''}.png`, timeout: 120000 });
 const res = await page.evaluate(() => {
   const g = window.__game;
   const s = g.input.s;
@@ -32,8 +32,13 @@ const res = await page.evaluate(() => {
   const f = (v) => v.toArray().map((x) => x.toFixed(2)).join(',');
   const log = [];
   const p = g.player;
+  for (const extra of g.actors.slice(2)) { extra.parked = true; extra.controller = null; extra.alive = false; extra.rig.root.visible = false; extra.bug.root.visible = false; extra.motor.teleport(new extra.motor.pos.constructor(0, -500, 0)); }
   const bot = g.actors[1];
   const brain = bot.controller; bot.controller = null; bot.motor.teleport(new p.motor.pos.constructor(40, 0.05, 0));
+  // deterministic starter gun for the test
+  for (const pk of [...g.loot.pickups]) if (pk.pos.distanceTo(new p.motor.pos.constructor(0, 0, 22)) < 4) g.loot.remove(pk);
+  g.loot.spawn('weapon', 'tincan', 0, 1, new p.motor.pos.constructor(0, 0.05, 22.5));
+  g.loot.spawn('ammo', 'medium', 0, 30, new p.motor.pos.constructor(2.2, 0.05, 21.5));
   step(0.5);
   log.push(`spawn pos ${f(p.motor.pos)} grounded=${p.motor.grounded}`);
   // walk forward to the rifle (at z=22.5)

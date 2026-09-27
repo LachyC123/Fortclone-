@@ -1,0 +1,43 @@
+import { createRequire } from 'module';
+import { spawn } from 'child_process';
+const require = createRequire(import.meta.url);
+let chromium;
+try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require('/opt/node22/lib/node_modules/playwright')); }
+const PORT = 4176;
+const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'pipe' });
+await new Promise((r) => setTimeout(r, 2500));
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+await page.goto(`http://localhost:${PORT}/`);
+await page.waitForFunction(() => window.__game, null, { timeout: 60000 });
+const r = await page.evaluate(() => {
+  const g = window.__game;
+  g.startMatch();
+  g.pause();
+  const out = [];
+  const measure = (label) => {
+    const t0 = performance.now();
+    g.r.render();
+    const t1 = performance.now();
+    const info = g.r.renderer.info.render;
+    let sim = performance.now();
+    g.debugStep(10, 1 / 30);
+    sim = (performance.now() - sim) / 10;
+    out.push(`${label}: render=${(t1 - t0).toFixed(0)}ms calls=${info.calls} tris=${info.triangles} sim=${sim.toFixed(1)}ms particles=${g.fx.glow?.count ?? '?'}`);
+  };
+  measure('lobby');
+  g.debugStep(15 * 30, 1 / 30);
+  measure('barge');
+  g.debugStep(12 * 30, 1 / 30);
+  measure('dropping');
+  g.debugStep(20 * 30, 1 / 30);
+  measure('live');
+  g.debugStep(20 * 30, 1 / 30);
+  measure('live2');
+  return out;
+});
+console.log(r.join('\n'));
+await browser.close();
+server.kill();
+process.exit(0);

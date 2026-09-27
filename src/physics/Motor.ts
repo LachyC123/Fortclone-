@@ -96,6 +96,44 @@ export class CharacterMotor {
     this.mantleT = -1;
   }
 
+  /**
+   * Free flight integration (skydiving / gliding): no walking rules, same collision.
+   * Returns true when we touch walkable ground.
+   */
+  flyStep(dt: number): boolean {
+    this.grounded = false;
+    _disp.copy(this.vel).multiplyScalar(dt);
+    const steps = Math.max(1, Math.ceil(_disp.length() / 0.25));
+    _disp.divideScalar(steps);
+    for (let s = 0; s < steps; s++) {
+      this.pos.add(_disp);
+      this.resolve();
+      if (this.grounded) break;
+    }
+    if (!this.grounded && this.vel.y <= 0) this.probeGround(0.05);
+    return this.grounded;
+  }
+
+  /** External push (explosions, gusts, bounce pads, knockback). */
+  impulse(v: THREE.Vector3) {
+    this.vel.add(v);
+    if (v.y > 0.5) {
+      this.grounded = false;
+      this.jumpedRecently = 0.2;
+      this.coyoteT = 0;
+      if (this.sliding) {
+        this.sliding = false;
+        this.events.slideEnded = true;
+      }
+    }
+    this.mantleT = -1;
+  }
+
+  /** Temporary speed multiplier (Golden Biscuit zoomies). */
+  speedBoost = 1;
+  /** Springy Socks */
+  jumpMul = 1;
+
   horizontalSpeed() {
     return Math.hypot(this.vel.x, this.vel.z);
   }
@@ -198,7 +236,7 @@ export class CharacterMotor {
       else this.slideGroundLost = 0;
       if (cap < MOTOR.slideEndSpeed || this.slideGroundLost > 0.3) this.endSlide();
     } else {
-      const maxSpeed = (this.crouching ? MOTOR.crouchSpeed : this.sprinting ? MOTOR.sprintSpeed : MOTOR.runSpeed) * inp.speedMul;
+      const maxSpeed = (this.crouching ? MOTOR.crouchSpeed : this.sprinting ? MOTOR.sprintSpeed : MOTOR.runSpeed) * inp.speedMul * this.speedBoost;
       const tx = inp.wishX * maxSpeed, tz = inp.wishZ * maxSpeed;
       let accel: number;
       if (this.grounded) {
@@ -211,8 +249,12 @@ export class CharacterMotor {
       const dx = tx - this.vel.x, dz = tz - this.vel.z;
       const dl = Math.hypot(dx, dz);
       const step = accel * dt;
-      if (!this.grounded && wishLen < 0.05) {
-        // no input in air: keep momentum
+      if (!this.grounded && (wishLen < 0.05 || hs > maxSpeed + 0.5)) {
+        // in the air: keep momentum (knockback, bounce pads, slide-jumps) — only gentle steering
+        if (wishLen > 0.05) {
+          this.vel.x += inp.wishX * 6 * dt;
+          this.vel.z += inp.wishZ * 6 * dt;
+        }
       } else if (dl <= step) {
         this.vel.x = tx;
         this.vel.z = tz;
@@ -237,7 +279,7 @@ export class CharacterMotor {
         this.endSlide();
         this.slideCd = MOTOR.slideCooldown;
       }
-      this.vel.y = MOTOR.jumpVel;
+      this.vel.y = MOTOR.jumpVel * this.jumpMul;
       this.grounded = false;
       this.coyoteT = 0;
       this.jumpBufT = 0;

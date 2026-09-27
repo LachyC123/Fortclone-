@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "lan": "node server/checknode.mjs && vite build && node server/lan.mjs",
+    "lan:serve": "node server/lan.mjs"
   },
   "dependencies": {
     "@fontsource/fredoka": "^5.3.0",

@@ -1,11 +1,20 @@
 import * as THREE from 'three';
+import type { PerkId } from '../combat/Perks';
 import type { Actor, Controller } from '../entities/Actor';
 import type { GameCtx } from '../core/types';
-import { angleDelta, clamp, DEG, dirFromYawPitch, rand, wrapAngle, yawFromDir } from '../core/math';
+import { angleDelta, clamp, DEG, dirFromYawPitch, noise1, rand, wrapAngle, yawFromDir } from '../core/math';
 import { ColFlags } from '../physics/Collision';
 import { BUG, simulateBug, Blinkbug } from '../entities/Blinkbug';
-import type { Pickup } from '../loot/Loot';
+import type { Pickup, Crate } from '../loot/Loot';
+import { UTILS } from '../combat/Items';
+import { WEAPONS } from '../combat/Weapons';
+import { HEALS } from '../combat/Items';
+import { RARITY } from '../render/Palette';
+
+const oneOf = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+import { simulateThrow, throwVelocity, THROW } from '../combat/Throwables';
 import type { AmmoType } from '../combat/Weapons';
+import { POIS } from '../world/Heightmap';
 
 export type Archetype = 'aggressive' | 'cautious' | 'goblin' | 'rooftop' | 'chaotic' | 'sniper';
 
@@ -33,7 +42,7 @@ export const PROFILES: Record<Archetype, BotProfile> = {
   sniper: { archetype: 'sniper', reaction: [0.35, 0.55], aimError: 5, residual: 0.9, tracking: 2.8, turnSpeed: 4.5, preferredRange: 28, aggression: 0.3, blinkiness: 0.5, retreatHp: 45, burst: [0.25, 0.5], pause: [0.4, 0.8] },
 };
 
-type BotState = 'wander' | 'loot' | 'investigate' | 'engage' | 'chase' | 'retreat';
+type BotState = 'wander' | 'loot' | 'investigate' | 'engage' | 'chase' | 'retreat' | 'help' | 'rotate';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -77,23 +86,120 @@ export class BotController implements Controller {
   private crouchWant = false;
   private blinkPlanT = -1;
   private lootTarget: Pickup | null = null;
+  private crateTarget: Crate | null = null;
+  private utilCd = 2;
+  private lingerT = 0;
   private goalTimeout = 0;
   private jumpCd = 0;
   private headshotBias: number;
+  /** 0 = Rookie .. 1 = Ace. Drives aim, reactions and trigger discipline (archetype drives style). */
+  skill = 0.5;
+  private lag = 0.2;
+  private lead = 0.7;
+  private noiseDeg = 2;
+  private reactRange: [number, number] = [0.35, 0.6];
+  private initErr = 8;
+  private trackRate = 2.2;
+  private turn = 5.5;
+  private hist = new Float32Array(48 * 4);
+  private histN = 0;
+  private histHead = 0;
+  private histFor: Actor | null = null;
+  private aimHead = false;
+  private phase1 = Math.random() * 10;
+  private phase2 = Math.random() * 10;
 
   constructor(public profile: BotProfile, private rng: () => number = Math.random) {
     this.headshotBias = profile.residual < 1.5 ? 0.35 : 0.15;
+    this.setSkill(0.5);
+  }
+
+  /** Aim/reaction model from skill; archetype nudges it (snipers steadier, chaotic twitchier). */
+  setSkill(s: number) {
+    this.skill = clamp(s, 0, 1);
+    const a = this.profile.archetype;
+    const steady = a === 'sniper' ? 0.8 : a === 'chaotic' ? 1.2 : a === 'aggressive' ? 1.05 : 1;
+    this.lag = (0.2 - 0.1 * this.skill) * (a === 'chaotic' ? 1.1 : 1);
+    this.lead = 0.5 + 0.4 * this.skill;
+    this.noiseDeg = (4.2 - 2.0 * this.skill) * steady;
+    const r0 = 0.5 - 0.25 * this.skill;
+    this.reactRange = [r0, r0 + 0.3 - 0.1 * this.skill];
+    this.initErr = (12 - 6 * this.skill) * steady;
+    this.trackRate = 1.2 + 1.8 * this.skill;
+    this.headshotBias = 0.06 + 0.22 * this.skill + (a === 'sniper' ? 0.08 : 0);
+    this.turn = 3.5 + 3 * this.skill;
+  }
+
+  /** where the target was `lag` seconds ago, plus a (skill-limited) lead from its old velocity */
+  private perceivedPos(t: Actor, time: number, out: THREE.Vector3) {
+    if (this.histFor !== t) {
+      this.histFor = t;
+      this.histN = 0;
+    }
+    const H = this.hist, cap = H.length / 4;
+    const w = this.histHead * 4;
+    H[w] = t.motor.pos.x;
+    H[w + 1] = t.motor.pos.y;
+    H[w + 2] = t.motor.pos.z;
+    H[w + 3] = time;
+    this.histHead = (this.histHead + 1) % cap;
+    this.histN = Math.min(cap, this.histN + 1);
+    const want = time - this.lag;
+    // walk back to the newest sample older than `want`
+    let idx = -1, prev = -1;
+    for (let k = 1; k <= this.histN; k++) {
+      const i = (this.histHead - k + cap) % cap;
+      if (H[i * 4 + 3] <= want) {
+        idx = i;
+        break;
+      }
+      prev = i;
+    }
+    if (idx < 0) idx = (this.histHead - this.histN + cap) % cap;
+    out.set(H[idx * 4], H[idx * 4 + 1], H[idx * 4 + 2]);
+    if (prev >= 0) {
+      const dtS = Math.max(1e-3, H[prev * 4 + 3] - H[idx * 4 + 3]);
+      const vx = (H[prev * 4] - H[idx * 4]) / dtS, vz = (H[prev * 4 + 2] - H[idx * 4 + 2]) / dtS;
+      out.x += vx * this.lag * this.lead;
+      out.z += vz * this.lag * this.lead;
+    }
+    return out;
   }
 
   /** Called by Actor when damaged */
   onDamaged(me: Actor, from: Actor | null, ctx: GameCtx) {
     if (!from || from === me) return;
-    this.awareness.set(from.id, 1.2);
-    if (!this.target || this.target === from || !this.targetVisible) {
+    if (me.hp < 30 && me.hp > 0) me.say(this.rng() < 0.5 ? 'EEK!' : 'OW!', '#ff8a8a', 1.2);
+    this.awareness.set(from.id, 1.5);
+    this.ignoreUntil.delete(from.id);
+    // threat bookkeeping: who is actually hurting us right now?
+    const th = (this.threat.get(from.id) ?? 0) + 1;
+    this.threat.set(from.id, th);
+    const cur = this.target;
+    if (cur && cur !== from && cur.alive) {
+      // shot by a third party mid-fight: make ONE decision and stick to it for a moment
+      this.thirdPartyT = ctx.time;
+      if (ctx.time > this.switchCd) {
+        const curThreat = this.threat.get(cur.id) ?? 0;
+        // hysteresis: only swap when the newcomer is clearly the bigger problem (or it's a fresh
+        // ambush while we're hurt) — otherwise two shooters make us ping-pong between them
+        const fresh = th < 1.5;
+        if (!this.targetVisible || th > curThreat * 1.35 + 0.3 || (fresh && me.hp < 55)) {
+          this.target = from;
+          this.switchCd = ctx.time + 2.6;
+          this.reactT = rand(0.2, 0.35);
+        }
+      }
+    } else if (!cur || cur === from || !cur.alive) {
       this.target = from;
+      if (this.state !== 'engage') this.reactT = rand(0.15, 0.3);
+    }
+    if (this.target === from) {
       this.lastSeenPos.copy(from.motor.pos);
       this.lastSeenT = ctx.time;
-      if (this.state !== 'engage') this.reactT = rand(0.15, 0.3);
+      // snap attention toward the shooter instead of sweeping around
+      this.lookYaw = yawFromDir(from.motor.pos.x - me.motor.pos.x, from.motor.pos.z - me.motor.pos.z);
+      this.lookAroundT = 0;
     }
     // panic-blink when hurt badly
     if (me.hp < this.profile.retreatHp && me.bug.canBlink && this.rng() < 0.7) me.intent.blink = true;
@@ -109,11 +215,20 @@ export class BotController implements Controller {
     it.throwAim = false;
     it.interact = false;
     it.slot = -1;
+    it.utilRelease = false;
+    it.utilAim = false;
+    it.heal = false;
+    it.drop = false;
+    this.utilCd -= dt;
+    this.lingerT -= dt;
     const wasBlink = it.blink;
     it.blink = false;
     if (wasBlink && me.bug.canBlink) it.blink = true;
 
     this.jumpCd -= dt;
+    this.repathCd -= dt;
+    if (this.matchMode(me, ctx, dt)) return;
+    if (this.pendingPlan && this.hasGoal && ctx.nav.canPlan()) this.setGoal(me, ctx, this.goal, true);
     this.thinkT -= dt;
     if (this.thinkT <= 0) {
       const local = ctx.localActor;
@@ -132,54 +247,273 @@ export class BotController implements Controller {
     this.aim(me, ctx, dt);
   }
 
+  /* ------------------------------------------------------------------ match phases */
+
+  private lobbyGoal = new THREE.Vector3();
+  private lobbyT = 0;
+  private dropDist = Infinity;
+  private dropDelay = -1;
+  private zoneSprint = false;
+  private repathCd = 0;
+  private threat = new Map<number, number>();
+  private switchCd = 0;
+  private thirdPartyT = -99;
+  private fleeDecideT = 0;
+  private wantFlee = false;
+  private ignoreUntil = new Map<number, number>();
+  private dryT = 0;
+  private escapeT = 0;
+  private stuckCount = 0;
+  private escapeA = 0;
+  /** loot we tried and failed to path to (blink-only perches) -> retry after this time */
+  private unreachable = new Map<object, number>();
+  private pendingPlan = false;
+  private shareT = 2;
+  private deliverTo: Actor | null = null;
+  private deliverUntil = 0;
+  private calloutT = 0;
+  private askT = 0;
+  private spotted = new Map<number, number>();
+
+  /** Lobby, Sky Barge, skydive and bugout: simple purpose-built steering. True if handled. */
+  private matchMode(me: Actor, ctx: GameCtx, dt: number): boolean {
+    const m = ctx.match;
+    if (!m) return false;
+    const it = me.intent;
+    const setMove = (x: number, z: number, max = 1) => {
+      const l = Math.hypot(x, z);
+      const k = l > 0.01 ? Math.min(max, l) / l : 0;
+      it.moveX = x * k;
+      it.moveZ = z * k;
+      if (l > 0.3) {
+        this.aimYaw = yawFromDir(x, z);
+        it.aimYaw = this.aimYaw;
+      }
+      it.aimPitch = 0;
+      it.fire = false;
+      it.ads = false;
+    };
+    if (me.bugout) {
+      // race for the nearest Rift Nest, weaving a little
+      let best: THREE.Vector3 | null = null, bd = Infinity;
+      for (const n of ctx.world.nests) {
+        if (n.used) continue;
+        const d = n.pos.distanceTo(me.bug.pos);
+        if (d < bd) {
+          bd = d;
+          best = n.pos;
+        }
+      }
+      if (best) {
+        const wx = Math.sin(ctx.time * 3 + me.id) * 0.35;
+        const dx = best.x - me.bug.pos.x, dz = best.z - me.bug.pos.z;
+        const l = Math.hypot(dx, dz) || 1;
+        setMove(dx / l - (dz / l) * wx, dz / l + (dx / l) * wx);
+        it.sprint = bd > 6;
+      } else setMove(0, 0);
+      return true;
+    }
+    if (me.flight === 'barge') {
+      setMove(0, 0);
+      const tgt = m.dropTargetFor(me);
+      const d = Math.hypot(tgt.x - m.barge.pos.x, tgt.z - m.barge.pos.z);
+      // squads with you in them: wait for you to jump, then leap right after
+      const lead = m.teamSize > 1 ? ctx.actors.find((o) => !!o.me && !o.parked && o.team === me.team) : null;
+      if (lead) {
+        if (m.canDrop && lead.flight !== 'barge' && this.dropDelay < 0) this.dropDelay = rand(0.15, 0.7);
+      } else if (m.canDrop && this.dropDelay < 0 && (d > this.dropDist + 0.05 || d < 16)) this.dropDelay = rand(0, 1.2);
+      this.dropDist = d;
+      if (this.dropDelay >= 0) {
+        this.dropDelay -= dt;
+        if (this.dropDelay < 0) it.jump = true;
+      }
+      return true;
+    }
+    this.dropDist = Infinity;
+    if (me.flight === 'dive' || me.flight === 'glide') {
+      const tgt = m.dropTargetFor(me);
+      const dx = tgt.x - me.motor.pos.x, dz = tgt.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      setMove(dx, dz, d < 3 ? d / 3 : 1);
+      this.state = 'loot';
+      this.hasGoal = false;
+      this.path = [];
+      return true;
+    }
+    if (m.phase === 'lobby') {
+      // mill about Launch Isle: amble, pause, hop, show off a blink now and then
+      const L = ctx.world.lobby;
+      this.lobbyT -= dt;
+      if (this.lobbyT <= 0) {
+        this.lobbyT = rand(1.5, 4);
+        const a = this.rng() * Math.PI * 2, r = Math.sqrt(this.rng()) * (L.radius - 3);
+        this.lobbyGoal.set(L.center.x + Math.cos(a) * r, L.center.y, L.center.z + Math.sin(a) * r);
+        if (this.rng() < 0.3) this.lobbyGoal.copy(me.motor.pos);
+        if (this.rng() < 0.15 && me.bug.ready) {
+          _v.copy(me.motor.pos).add(_v2.set(rand(-8, 8), 0, rand(-8, 8)));
+          if (this.throwAt(me, ctx, _v)) this.blinkPlanT = rand(0.6, 1.2);
+        }
+      }
+      const dx = this.lobbyGoal.x - me.motor.pos.x, dz = this.lobbyGoal.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (!me.emote && this.rng() < dt * 0.06) {
+        me.startEmote((['wave', 'dance', 'flex', 'laugh'] as const)[Math.floor(this.rng() * 4)], 2.4);
+        if (this.rng() < 0.5) me.say(['hi!', 'yo!', 'GL', ':)', 'hehe'][Math.floor(this.rng() * 5)], '#2a9d8f', 1.6, true);
+      }
+      if (me.emote) setMove(0, 0);
+      else setMove(d > 0.8 ? dx : 0, d > 0.8 ? dz : 0, 0.6);
+      it.sprint = false;
+      if (this.rng() < dt * 0.3 && this.jumpCd <= 0) {
+        it.jump = true;
+        this.jumpCd = 2;
+      }
+      if (this.blinkPlanT >= 0) {
+        this.blinkPlanT -= dt;
+        if (this.blinkPlanT < 0 && me.bug.canBlink) it.blink = true;
+      }
+      this.target = null;
+      return true;
+    }
+    return false;
+  }
+
+  /** How pressing the Gloom is for us: 0 fine, 1 should head in, 2 standing in it. */
+  private zoneUrgency(me: Actor, ctx: GameCtx): 0 | 1 | 2 {
+    const m = ctx.match;
+    if (!m || m.phase !== 'live' || m.safeRadius > 120) return 0;
+    if (m.gloomOutside(me.motor.pos)) return 2;
+    const c = m.safeCenter;
+    const d = Math.hypot(me.motor.pos.x - c.x, me.motor.pos.z - c.y);
+    // cautious rascals rotate early; the rest cut it closer
+    const margin = this.profile.archetype === 'cautious' || this.profile.archetype === 'sniper' ? 0.7 : 0.9;
+    return d < m.safeRadius * margin ? 0 : 1;
+  }
+
+  /** is this spot comfortably inside the next safe circle? */
+  private safeAt(ctx: GameCtx, p: THREE.Vector3, k = 0.85) {
+    const m = ctx.match;
+    if (!m || m.phase !== 'live' || m.safeRadius > 120) return true;
+    return Math.hypot(p.x - m.safeCenter.x, p.z - m.safeCenter.y) < m.safeRadius * k;
+  }
+
+  /** heading for safety: one goal inside the circle, kept until reached or the circle moves */
+  private rotateThink(me: Actor, ctx: GameCtx, urgent: boolean) {
+    const m = ctx.match!;
+    const c = m.safeCenter;
+    this.zoneSprint = true;
+    if (!this.hasGoal || this.goalTimeout <= 0 || Math.hypot(this.goal.x - c.x, this.goal.z - c.y) > m.safeRadius * 0.8) {
+      const r = Math.max(1, m.safeRadius * 0.5);
+      const p = ctx.nav.randomWalkable(this.rng, c.x, c.y, r) ?? _v.set(c.x, 0, c.y);
+      this.setGoal(me, ctx, p, true);
+      this.goalTimeout = 8;
+    }
+    if (urgent && me.bug.ready && this.rng() < 0.05) {
+      // blink toward safety
+      _v.set(c.x - me.motor.pos.x, 0, c.y - me.motor.pos.z).normalize();
+      if (this.throwAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 16))) this.blinkPlanT = rand(0.7, 1.1);
+    }
+  }
+
   /* ------------------------------------------------------------------ perception + decisions */
 
   private think(me: Actor, ctx: GameCtx, tick: number) {
+    this.zoneSprint = false;
     const eye = me.eyePos(_eye);
     const facing = me.intent.aimYaw;
     this.targetVisible = false;
     let bestNew: Actor | null = null;
     let bestD = Infinity;
     for (const o of ctx.actors) {
-      if (o === me || !o.alive) continue;
-      const tp = _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
+      if (o === me || o.parked || (!o.alive && !o.bugout)) continue;
+      if (o.team === me.team) continue;
+      // knocked rascals aren't worth chasing across the map (the pushy ones still finish them off)
+      if (o.downed && o !== this.target && o.motor.pos.distanceTo(me.motor.pos) > (this.profile.aggression > 0.7 ? 25 : 12)) continue;
+      // a freshly spawned Blinkbug is shimmering (can't be hit) and often goes unnoticed
+      if (o.bugout && (o.bugout.grace > 0 || (this.ignoreUntil.get(o.id) ?? 0) > ctx.time)) continue;
+      const tp = o.bugout ? _v.copy(o.bug.pos) : _v.copy(o.motor.pos).setY(o.motor.pos.y + o.motor.height * 0.7);
       const d = tp.distanceTo(eye);
       if (d > 70) continue;
+      // Nimbus: my bug sensed them — go have a look
+      if (o.pingT > 0 && o.pingedBy === me && !this.targetVisible) {
+        this.heardPos.copy(o.motor.pos);
+        this.heardT = ctx.time;
+      }
+      // Wisp: shimmering rascals are nearly invisible unless right on top of you
+      if (o.stealthT > 0 && d > 4) {
+        this.awareness.set(o.id, Math.max(0, (this.awareness.get(o.id) ?? 0) - tick));
+        if (o === this.target) this.lastSeenT = Math.min(this.lastSeenT, ctx.time - 2);
+        continue;
+      }
       const yawTo = yawFromDir(tp.x - eye.x, tp.z - eye.z);
-      const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5;
+      const hurtMe = me.lastDamagedBy === o && ctx.time - me.lastDamageTime < 2.5;
+      const inCone = Math.abs(angleDelta(facing, yawTo)) < 80 * DEG || d < 5 || hurtMe;
       let aw = this.awareness.get(o.id) ?? 0;
-      if (inCone && ctx.cw.lineClear(eye, tp, ColFlags.BlocksSight)) {
+      const range = ctx.match ? ctx.match.engageRange * (this.profile.aggression > 0.7 ? 1.25 : this.profile.aggression < 0.4 ? 0.8 : 1) : 999;
+      if (inCone && ctx.sightClear(eye, tp)) {
         // awareness builds faster when close, moving, or shooting; crouching hides you a bit
         const moving = o.motor.horizontalSpeed() > 3 ? 1.4 : 1;
         const crouch = o.motor.crouching ? 0.6 : 1;
         const rate = (d < 10 ? 6 : d < 25 ? 3.2 : 1.6) * moving * crouch;
         aw = Math.min(1.5, aw + rate * tick);
+        // tell the team about anyone we can see (even if we decide to let them walk on by);
+        // spot() keeps it to one call-out per rascal every so often
+        if (aw >= 1) this.spot(me, o, ctx);
         if (aw >= 1) {
           if (o === this.target) {
             this.targetVisible = true;
             this.lastSeenPos.copy(o.motor.pos);
             this.lastSeenT = ctx.time;
-          } else if (d < bestD) {
-            bestNew = o;
-            bestD = d;
+          } else if (d < bestD && (d <= range || o.lastDamagedBy === me) && (d < 16 || (this.ignoreUntil.get(o.id) ?? 0) < ctx.time)) {
+            // pacing + personality: a calm bot sometimes lets a distant passer-by go (unless they're
+            // shooting at it) — but nobody stands next to an enemy pretending not to see them
+            const attacked = me.lastDamagedBy === o && ctx.time - me.lastDamageTime < 4;
+            const keen = ctx.match ? Math.min(1, ctx.match.aggro * 1.3 + (this.profile.aggression - 0.5) * 0.4) : 1;
+            if (d < 16) this.ignoreUntil.delete(o.id);
+            if (!attacked && d >= 16 && o !== this.target && this.rng() > keen) this.ignoreUntil.set(o.id, ctx.time + 10);
+            else {
+              bestNew = o;
+              bestD = d;
+            }
           }
         }
       } else aw = Math.max(0, aw - tick * 0.5);
       this.awareness.set(o.id, aw);
     }
     // switch target if current one is lost and someone else is visible (or much closer)
-    if (bestNew && (!this.target || !this.target.alive || (!this.targetVisible && ctx.time - this.lastSeenT > 1.5) || bestD < 6)) {
+    if (bestNew && ctx.time > this.switchCd && (!this.target || !this.target.alive || (!this.targetVisible && ctx.time - this.lastSeenT > 1.5) || bestD < 6)) {
+      if (this.target && this.target !== bestNew) this.switchCd = ctx.time + 1.2;
       if (this.target !== bestNew) {
+        if (!this.target) me.say(this.rng() < 0.8 ? '!' : '!!', '#ff6b6b', 1.1);
         this.target = bestNew;
-        this.reactT = rand(this.profile.reaction[0], this.profile.reaction[1]);
-        this.errYaw = (this.rng() - 0.5) * 2 * this.profile.aimError * DEG;
-        this.errPitch = (this.rng() - 0.5) * this.profile.aimError * DEG;
+        this.reactT = rand(this.reactRange[0], this.reactRange[1]);
+        this.errYaw = (this.rng() - 0.5) * 2 * this.initErr * DEG;
+        this.errPitch = (this.rng() - 0.5) * this.initErr * DEG;
       }
       this.targetVisible = true;
       this.lastSeenPos.copy(bestNew.motor.pos);
       this.lastSeenT = ctx.time;
     }
-    if (this.target && !this.target.alive) {
+    // pacing: let go of far-off fights when the match wants calm (unless they're hurting us)
+    if (this.target && ctx.match) {
+      const td = this.target.motor.pos.distanceTo(me.motor.pos);
+      if (td > ctx.match.engageRange * 1.5 && ctx.time - me.lastDamageTime > 3) {
+        this.target = null;
+        this.targetVisible = false;
+      }
+    }
+    // decay threat
+    for (const [k, v] of this.threat) {
+      const nv = v * Math.exp(-tick / 3);
+      if (nv < 0.05) this.threat.delete(k);
+      else this.threat.set(k, nv);
+    }
+    // our target just became a fleeing Blinkbug: most rascals don't clock it straight away
+    if (this.target && this.target.bugout && this.target.bugout.grace > 0) {
+      if (this.rng() < 0.6) this.ignoreUntil.set(this.target.id, ctx.time + rand(5, 9));
+      this.target = null;
+      this.targetVisible = false;
+    }
+    if (this.target && !this.target.alive && !this.target.bugout) {
       this.target = null;
       this.targetVisible = false;
       this.idleT = rand(0.6, 1.4); // little victory pause
@@ -190,6 +524,8 @@ export class BotController implements Controller {
       if (s.source === me || ctx.time - s.time > 0.6) continue;
       const d = s.pos.distanceTo(me.motor.pos);
       if (d > s.loudness) continue;
+      // pacing: a calm match means we don't go chasing every distant pop
+      if (ctx.match && d > ctx.match.engageRange * 1.3 && !(s.kind === 'impact' && d < 5)) continue;
       if (s.kind === 'gunshot' || s.kind === 'blink' || (s.kind === 'footstep' && d < s.loudness * 0.7) || s.kind === 'impact') {
         // imprecise estimate, better when closer
         const err = d * 0.15;
@@ -203,48 +539,183 @@ export class BotController implements Controller {
       }
     }
 
+    // ---- weapon choice: the right tool for the range (and something with bullets in it)
+    this.chooseWeapon(me, ctx);
+
+    // ---- top the mag up between fights, like a person would
+    const cw = me.weapon;
+    if (cw && !cw.reloading && !this.targetVisible && cw.mag < cw.def.mag * 0.5 && me.ammo[cw.def.ammo] > 0 && ctx.time - me.lastDamageTime > 1.5 && me.healT < 0) me.intent.reload = true;
+
+    // ---- heal up when nobody is shooting at us
+    const tgtD = this.target && this.targetVisible ? this.target.motor.pos.distanceTo(me.motor.pos) : Infinity;
+    const calm = ctx.time - me.lastDamageTime > 2 && (tgtD > 28 || (tgtD > 14 && me.hp < 40));
+    if (me.healItem && me.healT < 0 && me.hp < 75 && calm && !me.downed) {
+      me.intent.heal = true;
+      if (this.rng() < 0.3) me.say(oneOf(['healing!', 'patching up', 'brb snack']), '#7ee06a', 1.3);
+    }
+    // squads: hurt with nothing to heal with — say so (a teammate may have spare)
+    if (!me.healItem && me.hp < 45 && tgtD > 20 && ctx.match && ctx.match.teamSize > 1 && ctx.time > this.askT) {
+      this.askT = ctx.time + 20;
+      me.say('NEED HEALS!', '#ff9a9a', 1.6);
+      for (const o of ctx.actors) if (o.me && o.team === me.team && o.alive && o.motor.pos.distanceTo(me.motor.pos) < 60) o.me.hud.toast(`${me.name} is hurt and has no heals`, '#ff9a9a');
+    }
+    // hurt, no heals, quiet: go and find some (instead of wandering about at 20 hp)
+    if (!me.healItem && me.hp < 50 && tgtD > 20 && this.state !== 'engage' && this.state !== 'help' && this.state !== 'rotate' && !this.lootTarget && !this.crateTarget) {
+      let best: Pickup | null = null, bd = 70;
+      for (const q of ctx.loot.pickups) {
+        if (q.kind !== 'heal' || q.collectT >= 0 || !q.settled) continue;
+        if ((this.unreachable.get(q) ?? -1) > ctx.time) continue;
+        if (q.giftFor && q.giftFor !== me && q.giftFor.alive && (q.giftUntil ?? 0) > ctx.time) continue;
+        const d = q.pos.distanceTo(me.motor.pos) + this.lootRisk(me, ctx, q.pos);
+        if (d < bd) {
+          bd = d;
+          best = q;
+        }
+      }
+      let crate: Crate | null = null;
+      if (!best) {
+        let cd = 30;
+        for (const c of ctx.loot.crates) {
+          if (c.opened || c.openT >= 0 || (this.unreachable.get(c) ?? -1) > ctx.time) continue;
+          const d = c.pos.distanceTo(me.motor.pos);
+          if (d < cd) {
+            cd = d;
+            crate = c;
+          }
+        }
+      }
+      if (best || crate) {
+        this.lootTarget = best;
+        this.crateTarget = crate;
+        this.state = 'loot';
+        this.hasGoal = false;
+      }
+    }
+
+    // ---- squads: knocked crawling, reviving, sparks, sticking with the leader
+    if (this.squadThink(me, ctx)) return;
+
     // ---- choose state
     const w = me.weapon;
     const ammoType = w?.def.ammo as AmmoType | undefined;
     const lowAmmo = w ? w.mag + me.ammo[ammoType!] < w.def.mag * 0.5 : true;
     const hasTarget = !!this.target && ctx.time - this.lastSeenT < 8;
     let next: BotState = this.state;
-    if (!me.armed) next = 'loot';
-    else if (hasTarget && this.targetVisible) next = me.hp < this.profile.retreatHp && this.rng() < 0.6 ? 'retreat' : 'engage';
+    let canShoot = me.weapons.some((x) => x && (x.mag > 0 || me.ammo[x.def.ammo] > 0));
+    // quiet scavenging (bots only): nobody stays helpless for long, so late circles still fight
+    if (ctx.match && ctx.match.phase === 'live' && !canShoot && ctx.time - me.lastDamageTime > 10) {
+      this.dryT += tick;
+      const gun = me.weapons.find((x) => x);
+      if (gun && this.dryT > 10) {
+        me.addAmmo(gun.def.ammo, gun.def.mag);
+        this.dryT = 0;
+        canShoot = true;
+      } else if (!gun && this.dryT > 40) {
+        me.giveWeapon('poppistol', 0, 0, true);
+        me.addAmmo('light', 24);
+        this.dryT = 0;
+        canShoot = true;
+      }
+    } else this.dryT = 0;
+    if (!me.armed || !canShoot) {
+      // no gun: stay away from anyone who has one; otherwise it's a race for the nearest weapon
+      const t = this.target;
+      const armedThreat = !!t && this.targetVisible && !t.bugout && t.armed && t.motor.pos.distanceTo(me.motor.pos) < 14;
+      // decided every couple of seconds, not every tick (no dithering between running and grabbing)
+      if (ctx.time > this.fleeDecideT) {
+        this.fleeDecideT = ctx.time + rand(1.5, 2.5);
+        this.wantFlee = hasTarget && this.targetVisible && (me.hp < this.profile.retreatHp || (armedThreat && !this.lootNearSafe(me, ctx)));
+      }
+      next = this.wantFlee && hasTarget ? 'retreat' : 'loot';
+    }
+    else if (hasTarget && this.targetVisible) {
+      // fight-or-flight is decided every couple of seconds, not every tick (no dithering)
+      if (ctx.time > this.fleeDecideT) {
+        this.fleeDecideT = ctx.time + 2;
+        const pinched = ctx.time - this.thirdPartyT < 3 && me.hp < 60; // caught between two shooters
+        this.wantFlee = (me.hp < this.profile.retreatHp && this.rng() < 0.6) || (pinched && this.rng() < 0.7);
+        if (pinched && this.wantFlee && me.bug.ready && this.rng() < this.profile.blinkiness) this.planEscapeBlink(me, ctx);
+      }
+      next = this.wantFlee ? 'retreat' : 'engage';
+    }
     else if (hasTarget) next = me.hp < this.profile.retreatHp ? 'retreat' : 'chase';
     else if (lowAmmo || (this.profile.archetype === 'goblin' && this.rng() < 0.3)) next = 'loot';
     else if (ctx.time - this.heardT < 6) next = 'investigate';
+    else if (this.state === 'loot' && !this.lootTarget && !this.crateTarget && me.armed && this.lingerT <= 0) next = 'wander';
     else if (this.state !== 'wander' && this.state !== 'loot') next = 'wander';
+    // opportunism: never walk past an unopened crate when nobody is shooting
+    if (next !== 'engage' && next !== 'retreat' && !this.crateTarget && me.armed) {
+      for (const c of ctx.loot.crates) {
+        if (c.opened || c.openT >= 0 || c.pos.y > 4) continue;
+        if (c.pos.distanceTo(me.motor.pos) < 8) {
+          this.crateTarget = c;
+          this.lootTarget = null;
+          next = 'loot';
+          break;
+        }
+      }
+    }
+    // the Gloom: decided here, once per think, so it never fights the other states tick by tick
+    const zone = this.zoneUrgency(me, ctx);
+    if (zone > 0 && next !== 'help') {
+      const holdFight = next === 'engage' && zone < 2 && me.hp > 50;
+      let lootOk = false;
+      if (next === 'loot' && zone < 2) {
+        if (!this.lootTarget && !this.crateTarget) {
+          const pick = this.pickLoot(me, ctx);
+          this.lootTarget = pick.pickup;
+          this.crateTarget = pick.crate;
+        }
+        const lp = this.lootTarget?.pos ?? this.crateTarget?.pos;
+        // grab it if it's on the safe side (or right here and we have nothing to fight with)
+        lootOk = !!lp && (this.safeAt(ctx, lp) || (!canShoot && lp.distanceTo(me.motor.pos) < 12));
+      }
+      if (!holdFight && !lootOk) next = 'rotate';
+    }
     if (next !== this.state) {
+      if (next === 'investigate') me.say('?', '#49a8ff', 1.2);
+      else if (next === 'loot' && !canShoot && hasTarget) me.say('...', '#8a7a9a', 1.4);
       this.state = next;
       this.hasGoal = false;
       this.path = [];
     }
-
+    // a little victory dance when the coast is clear
+    if (ctx.time - me.lastKillAt < 2.5 && ctx.time - me.lastKillAt > 0.8 && !this.targetVisible && !me.emote && me.healT < 0 && this.rng() < (this.profile.archetype === 'chaotic' || this.profile.archetype === 'aggressive' ? 0.25 : 0.1)) {
+      me.startEmote((['dance', 'laugh', 'flex'] as const)[Math.floor(this.rng() * 3)], 2.2);
+      me.lastKillAt = -99;
+    }
     switch (this.state) {
       case 'loot': {
-        if (!this.lootTarget || !ctx.loot.pickups.includes(this.lootTarget) || this.lootTarget.collectT >= 0) this.lootTarget = this.pickLoot(me, ctx);
-        if (this.lootTarget) {
-          this.setGoal(me, ctx, this.lootTarget.pos);
-          const d = this.lootTarget.pos.distanceTo(me.motor.pos);
-          if (d < 1.6) {
-            const p = this.lootTarget;
-            if (p.kind === 'weapon') {
-              // only swap if it's better (goblins can't resist though)
-              const cur = me.weapon;
-              if (!cur || p.rarity > cur.rarity || this.profile.archetype === 'goblin' || me.weapons.some((x) => !x)) ctx.loot.collect(me, p, ctx);
-            } else {
-              me.ammo[p.defId as AmmoType] += p.amount;
-              p.collectT = 0;
-              p.collector = me;
+        const valid = (this.lootTarget && ctx.loot.pickups.includes(this.lootTarget) && this.lootTarget.collectT < 0) || (this.crateTarget && !this.crateTarget.opened && this.crateTarget.openT < 0);
+        if (!valid) {
+          const pick = this.pickLoot(me, ctx);
+          this.lootTarget = pick.pickup;
+          this.crateTarget = pick.crate;
+        }
+        const goalPos = this.lootTarget?.pos ?? this.crateTarget?.pos;
+        if (goalPos) {
+          this.setGoal(me, ctx, goalPos);
+          const d = goalPos.distanceTo(me.motor.pos);
+          if (d < (this.crateTarget ? 2.0 : 1.6)) {
+            if (this.lootTarget) ctx.loot.collect(me, this.lootTarget, ctx);
+            else if (this.crateTarget) {
+              ctx.loot.openCrate(this.crateTarget, me);
+              this.idleT = 0.9; // wait for the goodies to land
+              this.lingerT = 2.5;
             }
             this.lootTarget = null;
+            this.crateTarget = null;
             this.hasGoal = false;
-            this.idleT = rand(0.2, 0.6);
+            this.idleT = Math.max(this.idleT, rand(0.2, 0.6));
           }
         } else if (!this.hasGoal) this.wanderGoal(me, ctx);
         break;
       }
+      case 'help':
+        break;
+      case 'rotate':
+        this.rotateThink(me, ctx, zone === 2);
+        break;
       case 'engage':
         this.engageThink(me, ctx);
         break;
@@ -258,13 +729,37 @@ export class BotController implements Controller {
       case 'retreat': {
         // run away from the threat, preferably blink out
         if (this.target) {
+          // away from everyone who's been hurting us, weighted by threat; caught in a crossfire
+          // (shooters on opposite sides) → break out sideways instead of running into one of them
           _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+          if (this.threat.size > 1) {
+            _v.set(0, 0, 0);
+            let n = 0;
+            for (const o of ctx.actors) {
+              const w = this.threat.get(o.id);
+              if (!w || !o.alive || o === me) continue;
+              _v3.subVectors(me.motor.pos, o.motor.pos).setY(0).normalize();
+              _v.addScaledVector(_v3, w);
+              n += w;
+            }
+            if (n > 0 && _v.length() < n * 0.45) {
+              // opposite sides: pick the side of the line between them we're already leaning to (stable per bot)
+              _v3.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+              const side = me.id % 2 ? 1 : -1;
+              _v.set(-_v3.z * side, 0, _v3.x * side);
+            }
+            if (_v.lengthSq() < 1e-6) _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0);
+            _v.normalize();
+          }
           _v2.copy(me.motor.pos).addScaledVector(_v, 14);
           if (!this.hasGoal || this.goalTimeout <= 0) this.setGoal(me, ctx, _v2, true);
           if (me.bug.ready && this.rng() < this.profile.blinkiness * 0.4) this.planEscapeBlink(me, ctx);
         }
-        // heal isn't in M1 — cautious bots regen a little while hiding (placeholder for Jam Jars)
-        if (!this.targetVisible) me.heal(tick * 4);
+        // pop smoke to cover the escape
+        if (me.util?.id === 'fizzbomb' && this.utilCd <= 0 && this.target) {
+          _v.subVectors(this.target.motor.pos, me.motor.pos).setY(0).normalize();
+          if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 3))) this.utilCd = 6;
+        }
         break;
       }
       case 'investigate':
@@ -277,6 +772,49 @@ export class BotController implements Controller {
       case 'wander':
         if (!this.hasGoal || me.motor.pos.distanceTo(this.goal) < 1.5 || this.goalTimeout <= 0) {
           if (this.rng() < 0.3) this.idleT = rand(0.5, 2); // hesitate / look around
+          // curiosity: crates and shiny loot pull rascals off their route
+          const curious = this.profile.archetype === 'goblin' ? 0.9 : 0.55;
+          if (this.rng() < curious) {
+            const pick = this.pickLoot(me, ctx);
+            const at = pick.pickup?.pos ?? pick.crate?.pos;
+            if (at && at.distanceTo(me.motor.pos) < 30) {
+              this.lootTarget = pick.pickup;
+              this.crateTarget = pick.crate;
+              this.state = 'loot';
+              this.hasGoal = false;
+              break;
+            }
+          }
+          // hunting (pacing director): go and find someone
+          const hunt = ctx.match?.hunt ?? 0;
+          const canFight = me.weapons.some((x) => x && (x.mag > 0 || me.ammo[x.def.ammo] > 0));
+          // a Loot Balloon is coming down nearby: go get it (and everyone else will too)
+          const hs = ctx.match?.hotspot;
+          if (hs && canFight && hs.distanceTo(me.motor.pos) < 85 && this.rng() < 0.55) {
+            this.heardPos.set(hs.x + rand(-3, 3), hs.y, hs.z + rand(-3, 3));
+            this.heardT = ctx.time;
+            this.state = 'investigate';
+            this.hasGoal = false;
+            break;
+          }
+          if (hunt > 0 && canFight && this.rng() < hunt) {
+            let prey: Actor | null = null, pd = 95;
+            for (const o of ctx.actors) {
+              if (o === me || !o.alive || o.parked || o.flight !== 'none' || o.team === me.team) continue;
+              const dd = o.motor.pos.distanceTo(me.motor.pos);
+              if (dd < pd) {
+                pd = dd;
+                prey = o;
+              }
+            }
+            if (prey) {
+              this.heardPos.set(prey.motor.pos.x + rand(-7, 7), prey.motor.pos.y, prey.motor.pos.z + rand(-7, 7));
+              this.heardT = ctx.time;
+              this.state = 'investigate';
+              this.hasGoal = false;
+              break;
+            }
+          }
           this.wanderGoal(me, ctx);
         }
         break;
@@ -311,6 +849,32 @@ export class BotController implements Controller {
     // reload when empty (backpedal behaviour happens naturally from range keeping)
     const w = me.weapon;
     if (w && w.mag === 0 && !w.reloading) me.intent.reload = true;
+    // utilities
+    if (me.util && this.utilCd <= 0 && me.healT < 0) {
+      const u = me.util.id;
+      const chaos = this.profile.archetype === 'chaotic' ? 2.5 : 1;
+      if (u === 'stickypop' && d > 5 && d < 22 && this.rng() < 0.1 * chaos) {
+        if (this.throwUtilAt(me, ctx, t.motor.pos)) this.utilCd = rand(3, 6);
+      } else if (u === 'gust' && d < 5.5) {
+        if (this.throwUtilAt(me, ctx, t.motor.pos)) this.utilCd = 4;
+      } else if (u === 'fizzbomb' && me.hp < 55 && this.rng() < 0.3) {
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 3))) this.utilCd = 6;
+      } else if (u === 'chicken' && this.rng() < 0.05 * chaos) {
+        const side = this.rng() < 0.5 ? -1 : 1;
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(-_v.z * side * 8, 0, _v.x * side * 8)))) this.utilCd = 5;
+      } else if (u === 'jammer' && d < 26 && this.rng() < 0.06) {
+        // drop a jammer between us so their Blinkbug can't flank
+        _v.subVectors(t.motor.pos, me.motor.pos).setY(0).normalize();
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 2.5))) this.utilCd = 10;
+      } else if (u === 'snaptrap' && d > 6 && this.rng() < 0.03 * chaos) {
+        // leave a trap where we stand: they'll come looking
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).addScaledVector(me.motor.vel, -0.2))) this.utilCd = 6;
+      } else if (u === 'bouncejam' && this.rng() < 0.03 * chaos) {
+        if (this.throwUtilAt(me, ctx, _v2.copy(me.motor.pos).add(_v3.set(me.motor.vel.x * 0.4, 0, me.motor.vel.z * 0.4)))) this.utilCd = 6;
+      }
+    }
     // Blinkbug flank: throw to the target's side, blink shortly after
     if (me.bug.ready && this.blinkPlanT < 0 && d < 26 && d > 5 && this.rng() < this.profile.blinkiness * 0.08) {
       const side = this.rng() < 0.5 ? -1 : 1;
@@ -319,6 +883,53 @@ export class BotController implements Controller {
       const aimPt = _v3.copy(t.motor.pos).addScaledVector(perp, rand(4, 7)).addScaledVector(_v, rand(-2, 3));
       if (this.throwAt(me, ctx, aimPt)) this.blinkPlanT = rand(0.5, 1.2);
     }
+  }
+
+  private chooseWeapon(me: Actor, ctx: GameCtx) {
+    if (me.healT >= 0) return;
+    const d = this.target && this.targetVisible ? this.target.motor.pos.distanceTo(me.motor.pos) : 20;
+    let best = -1, bestScore = -Infinity;
+    me.weapons.forEach((w, i) => {
+      if (!w) return;
+      if (w.mag === 0 && me.ammo[w.def.ammo] === 0) return;
+      const [lo, hi] = w.def.botRange;
+      const fit = d < lo ? -(lo - d) : d > hi ? -(d - hi) * 0.6 : 5;
+      const score = fit + w.rarity * 1.5 + (w.mag > 0 ? 1 : 0) + (i === me.activeSlot ? 1.5 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    });
+    if (best >= 0 && best !== me.activeSlot) me.intent.slot = best;
+    void ctx;
+  }
+
+  /** Solve a lob toward a point with the item's real physics, then throw it. */
+  private throwUtilAt(me: Actor, ctx: GameCtx, pt: THREE.Vector3): boolean {
+    if (!me.util || me.util.count <= 0) return false;
+    const def = UTILS[me.util.id];
+    const yaw = yawFromDir(pt.x - me.motor.pos.x, pt.z - me.motor.pos.z);
+    const start = new THREE.Vector3(me.motor.pos.x, me.motor.pos.y + 1.2, me.motor.pos.z);
+    let bestPitch = 0, bestErr = Infinity;
+    const pos = new THREE.Vector3(), vel = new THREE.Vector3(), dir = new THREE.Vector3();
+    for (let p = -0.5; p <= 0.9; p += 0.14) {
+      pos.copy(start);
+      throwVelocity(def, dirFromYawPitch(yaw, p, dir), vel);
+      for (let i = 0; i < 200; i++) {
+        const r = simulateThrow(ctx, def, pos, vel, THROW.step * 2);
+        if (r.settled || ((def.sticky || def.id === 'gust') && r.hit)) break;
+      }
+      const err = Math.hypot(pos.x - pt.x, pos.z - pt.z) + Math.abs(pos.y - pt.y) * 0.5;
+      if (err < bestErr) {
+        bestErr = err;
+        bestPitch = p;
+      }
+    }
+    if (bestErr > 6) return false;
+    dirFromYawPitch(yaw, bestPitch, me.intent.aimDir);
+    me.intent.aimYaw = yaw;
+    me.intent.utilRelease = true;
+    return true;
   }
 
   private planEscapeBlink(me: Actor, ctx: GameCtx) {
@@ -340,8 +951,8 @@ export class BotController implements Controller {
     const pos = new THREE.Vector3(), vel = new THREE.Vector3(), dir = new THREE.Vector3();
     for (let p = -0.3; p <= 0.9; p += 0.15) {
       pos.copy(start);
-      Blinkbug.throwVelocity(dirFromYawPitch(yaw, p, dir), vel);
-      for (let i = 0; i < 240; i++) if (simulateBug(ctx.cw, pos, vel, BUG.step * 2)) break;
+      Blinkbug.throwVelocity(dirFromYawPitch(yaw, p, dir), vel, me.bug.stats.throwSpeed);
+      for (let i = 0; i < 240; i++) if (simulateBug(ctx.cw, pos, vel, BUG.step * 2, undefined, me.bug.stats)) break;
       const err = Math.hypot(pos.x - pt.x, pos.z - pt.z) + Math.abs(pos.y - pt.y) * 0.5;
       if (err < bestErr) {
         bestErr = err;
@@ -355,32 +966,416 @@ export class BotController implements Controller {
     return true;
   }
 
-  private pickLoot(me: Actor, ctx: GameCtx): Pickup | null {
-    let best: Pickup | null = null, bestScore = -Infinity;
-    const w = me.weapon;
+  /** unarmed with a gunman about: is there something to grab that's on our side of them, and close? */
+  private lootNearSafe(me: Actor, ctx: GameCtx): boolean {
+    if (!this.lootTarget && !this.crateTarget) {
+      const pick = this.pickLoot(me, ctx);
+      this.lootTarget = pick.pickup;
+      this.crateTarget = pick.crate;
+    }
+    const lp = this.lootTarget?.pos ?? this.crateTarget?.pos;
+    if (!lp || !this.target) return false;
+    const mine = lp.distanceTo(me.motor.pos);
+    return mine < 10 && mine < lp.distanceTo(this.target.motor.pos) * 0.8;
+  }
+
+  private pickLoot(me: Actor, ctx: GameCtx): { pickup: Pickup | null; crate: Crate | null } {
+    let best: Pickup | null = null, bestCrate: Crate | null = null, bestScore = -Infinity;
+    const goblin = this.profile.archetype === 'goblin';
+    // a gun with no bullets (and none in the bag) is worth nothing
+    const loaded = (x: { mag: number; def: { ammo: AmmoType } }) => x.mag > 0 || me.ammo[x.def.ammo] > 0;
+    const worst = me.weapons.some((x) => !x) ? -1 : Math.min(...me.weapons.map((x) => (loaded(x!) ? x!.score : -50)));
+    const dry = !me.weapons.some((x) => x && loaded(x));
+    const reach = dry ? 70 : 45;
     for (const p of ctx.loot.pickups) {
       if (p.collectT >= 0 || !p.settled) continue;
-      if (p.pos.y > 1.2) continue; // bots don't know how to reach upper floors via stairs yet
+      if ((this.unreachable.get(p) ?? -1) > ctx.time) continue;
       const d = p.pos.distanceTo(me.motor.pos);
-      if (d > 45) continue;
-      let v = 0;
-      if (p.kind === 'weapon') v = !w ? 30 : p.rarity > w.rarity ? 10 + p.rarity * 4 : this.profile.archetype === 'goblin' ? 4 : -50;
-      else v = w ? 8 : 1;
-      const score = v - d * 0.4;
+      if (d > reach) continue;
+      let v = -99;
+      if (p.kind === 'weapon') {
+        const act = me.previewOffer(p.defId, p.rarity);
+        const sc = p.rarity * 10 + (WEAPONS[p.defId]?.weight ?? 5);
+        if (!me.armed) v = 40;
+        else if (act === 'fuse') v = 26 + p.rarity * 4;
+        else if (act === 'add') v = 18 + p.rarity * 3;
+        else if (sc > worst + 4) v = Math.min(40, 8 + (sc - worst) * 0.5);
+        // an empty gun we have no bullets for is barely worth the walk
+        if (p.mag <= 0 && me.ammo[WEAPONS[p.defId].ammo] <= 0) {
+          const t = WEAPONS[p.defId].ammo;
+          const ammoNear = ctx.loot.pickups.some((q) => q.kind === 'ammo' && q.defId === t && q.pos.distanceToSquared(p.pos) < 12 * 12);
+          if (!ammoNear) v *= 0.3;
+        }
+        if (goblin && v > 0) v += 8;
+      } else if (p.kind === 'ammo') {
+        const gun = me.weapons.find((w) => w && w.def.ammo === p.defId);
+        const needs = !!gun && me.ammo[p.defId as AmmoType] < 40;
+        v = needs ? (gun!.mag + me.ammo[p.defId as AmmoType] === 0 ? (dry ? 36 : 22) : 12) : -99;
+      } else if (p.kind === 'heal') {
+        // hurt with nothing to heal with: that's the priority (a stash is nice too)
+        const room = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3);
+        v = room ? (me.hp < 55 && !me.healItem ? 34 : me.hp < 80 ? 16 : 9) : -99;
+      } else if (p.kind === 'util') {
+        v = !me.util || me.util.id === p.defId ? (this.profile.archetype === 'chaotic' ? 14 : 6) : -99;
+      } else if (p.kind === 'perk') {
+        v = !me.hasPerk(p.defId as PerkId) && me.perks.length < 2 ? 16 : -99;
+      } else if (p.kind === 'relic') {
+        // shiny! (goblins can't resist)
+        v = me.relics.length < 3 ? (me.armed ? 20 : 6) + (goblin ? 12 : 0) : -99;
+      }
+      // presents are for the teammate they were thrown to
+      if (p.giftFor && p.giftFor !== me && p.giftFor.alive && (p.giftUntil ?? 0) > ctx.time) continue;
+      // leave the good stuff lying next to a human teammate for them (unless we've nothing to shoot with)
+      if (!dry && (p.kind === 'weapon' || p.kind === 'perk' || p.kind === 'heal' || p.kind === 'relic') && this.nearHumanMate(me, ctx, p.pos, 5)) continue;
+      const score = v - d * 0.4 - this.lootRisk(me, ctx, p.pos);
       if (score > bestScore) {
         bestScore = score;
         best = p;
+        bestCrate = null;
       }
     }
-    return bestScore > -20 ? best : null;
+    for (const c of ctx.loot.crates) {
+      if (c.opened || c.openT >= 0) continue;
+      if ((this.unreachable.get(c) ?? -1) > ctx.time) continue;
+      const d = c.pos.distanceTo(me.motor.pos);
+      if (d > (c.rich ? 90 : 45)) continue;
+      const score = (goblin ? 34 : 20) + (c.rich ? 25 : 0) - d * 0.4 - this.lootRisk(me, ctx, c.pos);
+      if (score > bestScore) {
+        bestScore = score;
+        bestCrate = c;
+        best = null;
+      }
+    }
+    return bestScore > -5 ? { pickup: best, crate: bestCrate } : { pickup: null, crate: null };
+  }
+
+  /** how much less we want loot here: out in the Gloom, or closer to a gunman than to us */
+  private lootRisk(me: Actor, ctx: GameCtx, at: THREE.Vector3) {
+    let r = 0;
+    if (!this.safeAt(ctx, at, 0.95)) r += 15;
+    const t = this.target;
+    if (t && this.targetVisible && t.alive && t.armed && at.distanceTo(t.motor.pos) < at.distanceTo(me.motor.pos)) r += 25;
+    return r;
+  }
+
+  private nearHumanMate(me: Actor, ctx: GameCtx, at: THREE.Vector3, r: number) {
+    if (!ctx.match || ctx.match.teamSize <= 1) return false;
+    for (const o of ctx.actors) if (o !== me && o.me && o.team === me.team && o.alive && !o.downed && o.motor.pos.distanceTo(at) < r) return true;
+    return false;
+  }
+
+  /* ------------------------------------------------------------------ squads */
+
+  /** the teammate I follow: a human teammate if there is one, else the lowest-numbered bot */
+  private leader(me: Actor, ctx: GameCtx): Actor | null {
+    const m = ctx.match;
+    if (!m || m.teamSize <= 1) return null;
+    let best: Actor | null = null;
+    for (const o of ctx.actors) {
+      if (o.team !== me.team || !o.alive || o.downed || o.parked) continue;
+      if (!best || (!!o.me && !best.me) || (!!o.me === !!best.me && o.id < best.id)) best = o;
+    }
+    return best === me ? null : best;
+  }
+
+  /** squads: call out an enemy we just saw — it's marked on teammates' maps and bots share the intel */
+  private spot(me: Actor, enemy: Actor, ctx: GameCtx) {
+    const m = ctx.match;
+    if (!m || m.teamSize <= 1 || enemy.bugout || m.phase !== 'live') return;
+    if ((this.spotted.get(enemy.id) ?? -99) > ctx.time) return;
+    this.spotted.set(enemy.id, ctx.time + 12);
+    enemy.pingT = Math.max(enemy.pingT, 5);
+    enemy.pingedBy = me;
+    let human: Actor | null = null;
+    for (const o of ctx.actors) {
+      if (o === me || o.team !== me.team || !o.alive || o.downed) continue;
+      if (o.me) human = o;
+      else if (o.motor.pos.distanceTo(me.motor.pos) < 70) (o.controller as BotController | null)?.intel?.(enemy, ctx);
+    }
+    if (human && ctx.time > this.calloutT && human.motor.pos.distanceTo(me.motor.pos) < 70) {
+      this.calloutT = ctx.time + 7;
+      const dx = enemy.motor.pos.x - human.motor.pos.x, dz = enemy.motor.pos.z - human.motor.pos.z;
+      const dir = ['NORTH', 'NORTH-EAST', 'EAST', 'SOUTH-EAST', 'SOUTH', 'SOUTH-WEST', 'WEST', 'NORTH-WEST'][((Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) % 8) + 8) % 8];
+      me.say(oneOf(['ENEMY!', 'OVER THERE!', 'CONTACT!']), '#ffe27a', 1.4);
+      human.me?.hud.toast(`${me.name}: enemy ${dir}, ${Math.round(Math.hypot(dx, dz))}m`, '#ffe27a');
+    }
+  }
+
+  /** a teammate spotted someone: we know roughly where they are now */
+  intel(enemy: Actor, ctx: GameCtx) {
+    this.awareness.set(enemy.id, Math.max(this.awareness.get(enemy.id) ?? 0, 0.7));
+    this.ignoreUntil.delete(enemy.id);
+    if (!this.targetVisible && ctx.time - this.heardT > 3) {
+      this.heardPos.copy(enemy.motor.pos);
+      this.heardT = ctx.time;
+    }
+  }
+
+  /**
+   * Squads: toss a teammate what they're missing — a spare gun if they have nothing to shoot with,
+   * ammo for the gun in their hands, a heal when they're hurt and have none. Humans first.
+   */
+  private shareGear(me: Actor, ctx: GameCtx): Actor | null {
+    if (this.targetVisible || me.healT >= 0 || me.downed || me.flight !== 'none') return null;
+    const loaded = (a: Actor, w: Actor['weapons'][number]) => !!w && (w.mag > 0 || a.ammo[w.def.ammo] > 0);
+    const mates = ctx.actors.filter((o) => o !== me && o.team === me.team && o.alive && !o.downed && !o.parked && o.flight === 'none').sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0));
+    let far: Actor | null = null;
+    for (const o of mates) {
+      const d = o.motor.pos.distanceTo(me.motor.pos);
+      if (d > 45) continue;
+      // something already thrown to them and still lying there counts as sorted
+      const pending = (k: string) => ctx.loot.pickups.some((q) => q.giftFor === o && q.kind === k && q.collectT < 0 && (q.giftUntil ?? 0) > ctx.time);
+      const mine0 = me.weapons.filter((w) => loaded(me, w)).length;
+      const ow0 = o.weapon;
+      const needGun = !o.weapons.some((w) => loaded(o, w)) && mine0 >= 2 && !pending('weapon');
+      const needAmmo = !!ow0 && o.ammo[ow0.def.ammo] + ow0.mag < ow0.def.mag && me.ammo[ow0.def.ammo] >= ow0.def.mag * 1.5 && !pending('ammo');
+      const needHeal = o.hp < 60 && !o.healItem && !!me.healItem && me.healItem.count > 0 && (me.healItem.count >= 2 || me.hp > 85) && !pending('heal');
+      const needs = needGun || needAmmo || needHeal;
+      if (!needs) continue;
+      if (d > 10 || !ctx.sightClear(_v.copy(me.motor.pos).setY(me.motor.pos.y + 1.4), _v2.copy(o.motor.pos).setY(o.motor.pos.y + 1))) {
+        far ??= o;
+        continue;
+      }
+      // 1) nothing to shoot with: my spare gun (the worse one) and some bullets for it
+      const mine = me.weapons.map((w, i) => ({ w, i })).filter((x) => loaded(me, x.w));
+      if (needGun && mine.length >= 2) {
+        const give = mine.sort((a, b) => a.w!.score - b.w!.score + (a.i === me.activeSlot ? 100 : 0) - (b.i === me.activeSlot ? 100 : 0))[0];
+        const w = give.w!;
+        me.weapons[give.i] = null;
+        if (me.activeSlot === give.i) me.equip(me.weapons.findIndex((x) => !!x), true);
+        this.toss(me, o, 'weapon', w.def.id, w.rarity, 1, ctx, w.mag);
+        const share = Math.min(me.ammo[w.def.ammo], w.def.mag * 2);
+        if (share > 0) {
+          me.ammo[w.def.ammo] -= share;
+          this.toss(me, o, 'ammo', w.def.ammo, 0, share, ctx);
+        }
+        me.say(o.me ? 'TAKE THIS!' : 'HERE!', '#9dff8a', 1.6);
+        o.me?.hud.toast(`${me.name} threw you a ${RARITY[w.rarity].name} ${w.def.name}! (grab it)`, RARITY[w.rarity].css);
+        return null;
+      }
+      // 2) running dry: half my bullets for the gun they're holding
+      const ow = o.weapon;
+      if (ow) {
+        const t = ow.def.ammo;
+        if (needAmmo) {
+          const amount = Math.floor(me.ammo[t] / 2);
+          me.ammo[t] -= amount;
+          this.toss(me, o, 'ammo', t, 0, amount, ctx);
+          me.say(o.me ? 'AMMO!' : 'catch', '#f2c14e', 1.4);
+          o.me?.hud.toast(`${me.name} threw you ammo`, '#f2c14e');
+          return null;
+        }
+      }
+      // 3) hurt with nothing to heal: one of mine
+      const hi = me.healItem;
+      if (needHeal && hi) {
+        hi.count--;
+        if (hi.count <= 0) me.healItem = null;
+        this.toss(me, o, 'heal', hi.id, HEALS[hi.id].rarity, 1, ctx);
+        me.say(o.me ? 'HEAL UP!' : 'here, heal', '#7ee06a', 1.4);
+        o.me?.hud.toast(`${me.name} threw you a ${HEALS[hi.id].name}`, '#7ee06a');
+        return null;
+      }
+    }
+    return far;
+  }
+
+  /** lob an item so it lands at a teammate's feet */
+  private toss(me: Actor, o: Actor, kind: Pickup['kind'], id: string, rarity: Pickup['rarity'], amount: number, ctx: GameCtx, mag?: number) {
+    const from = me.motor.pos.clone().setY(me.motor.pos.y + 1.2);
+    const to = o.motor.pos.clone().add(_v.set(me.motor.pos.x - o.motor.pos.x, 0, me.motor.pos.z - o.motor.pos.z).normalize().multiplyScalar(0.9));
+    to.x += rand(-0.3, 0.3);
+    to.z += rand(-0.3, 0.3);
+    const T = clamp(from.distanceTo(to) / 9, 0.35, 0.8);
+    const vel = new THREE.Vector3((to.x - from.x) / T, (to.y + 0.3 - from.y + 0.5 * 20 * T * T) / T, (to.z - from.z) / T);
+    const p = ctx.loot.spawn(kind, id, rarity, amount, from, vel, mag);
+    p.giftFor = o;
+    p.giftUntil = ctx.time + 12;
+    p.lockUntil = performance.now() + 300;
+    me.rig.onThrow();
+    me.intent.aimYaw = this.aimYaw = yawFromDir(o.motor.pos.x - me.motor.pos.x, o.motor.pos.z - me.motor.pos.z);
+  }
+
+  /** a teammate got shot: turn towards the shooter and join in */
+  teamAlert(me: Actor, attacker: Actor, victim: Actor, ctx: GameCtx) {
+    if (attacker.motor.pos.distanceTo(me.motor.pos) > 80) return;
+    this.awareness.set(attacker.id, Math.max(this.awareness.get(attacker.id) ?? 0, 0.9));
+    this.ignoreUntil.delete(attacker.id);
+    if (!this.targetVisible) {
+      this.heardPos.copy(attacker.motor.pos);
+      this.heardT = ctx.time;
+      this.lookYaw = yawFromDir(attacker.motor.pos.x - me.motor.pos.x, attacker.motor.pos.z - me.motor.pos.z);
+      this.lookAroundT = 0;
+    }
+    if (victim.me && this.rng() < 0.15) me.say('ON IT!', '#ffd36b', 1.2);
+  }
+
+  /** returns true when a squad duty took over this tick */
+  private squadThink(me: Actor, ctx: GameCtx): boolean {
+    const m = ctx.match;
+    if (!m || m.teamSize <= 1 || m.phase !== 'live') return false;
+    const threatNear = this.targetVisible && !!this.target && this.target.motor.pos.distanceTo(me.motor.pos) < 22;
+    // knocked: crawl towards the nearest teammate, or at least away from whoever did it
+    if (me.downed) {
+      let mate: Actor | null = null, md = 1e9;
+      for (const o of ctx.actors) {
+        if (o === me || o.team !== me.team || !o.alive || o.downed) continue;
+        const d = o.motor.pos.distanceTo(me.motor.pos);
+        if (d < md) {
+          md = d;
+          mate = o;
+        }
+      }
+      this.state = 'help';
+      if (mate && md > 1.5) this.setGoal(me, ctx, mate.motor.pos);
+      else if (this.target) {
+        _v.subVectors(me.motor.pos, this.target.motor.pos).setY(0).normalize();
+        this.setGoal(me, ctx, _v2.copy(me.motor.pos).addScaledVector(_v, 6));
+      } else this.hasGoal = false;
+      return true;
+    }
+    me.intent.revive = false;
+    // pick up a knocked teammate: straight away if it's quiet; under fire only when it's close
+    // and covered (smoke, a wall, or the shooter has gone quiet), and sooner if they're bleeding out
+    let down: Actor | null = null, dd = 45;
+    for (const o of ctx.actors) {
+      if (o === me || o.team !== me.team || !o.downed || !o.alive) continue;
+      const d = o.motor.pos.distanceTo(me.motor.pos);
+      if (d < dd) {
+        dd = d;
+        down = o;
+      }
+    }
+    if (down) {
+      const t = this.target;
+      const threatD = t && this.targetVisible ? t.motor.pos.distanceTo(me.motor.pos) : Infinity;
+      const bleeding = down.downHp < 45;
+      let covered = threatD > 22;
+      if (!covered && t && dd < 7) {
+        const hidden = !ctx.sightClear(_v.copy(t.motor.pos).setY(t.motor.pos.y + 1.5), _v2.copy(down.motor.pos).setY(down.motor.pos.y + 0.5));
+        const quiet = ctx.time - me.lastDamageTime > 2.5 && (!t.weapon || t.weapon.reloading || threatD > 14);
+        covered = hidden || quiet || (bleeding && threatD > 9);
+        // no cover? make some: smoke between the shooter and our mate
+        if (!covered && me.util?.id === 'fizzbomb' && this.utilCd <= 0) {
+          _v.subVectors(t.motor.pos, down.motor.pos).setY(0).normalize();
+          if (this.throwUtilAt(me, ctx, _v2.copy(down.motor.pos).addScaledVector(_v, 2.5))) {
+            this.utilCd = 6;
+            me.say('SMOKING YOU!', '#b49be0', 1.4);
+          }
+        }
+      }
+      if (covered) {
+        this.state = 'help';
+        if (dd < 1.8) {
+          this.hasGoal = false;
+          this.path = [];
+          me.reviving = down;
+          me.intent.revive = true;
+          if (down.reviveK < 0.05) me.say(oneOf(['HOLD ON!', 'GOT YOU!', "I'M HERE!"]), '#9dff8a', 1.4);
+        } else this.setGoal(me, ctx, down.motor.pos);
+        return true;
+      }
+      // not safe yet: deal with the shooter first
+      if (down.me && this.rng() < 0.05) me.say('COVERING YOU!', '#ffd36b', 1.2);
+      me.reviving = null;
+      return false;
+    }
+    if (threatNear) {
+      me.reviving = null;
+      return false;
+    }
+    // share gear with a teammate who needs it (walking over to them if they're a way off)
+    this.shareT -= 0.13;
+    if (this.shareT <= 0 || this.deliverTo) {
+      this.shareT = rand(1.2, 2);
+      const far = this.shareGear(me, ctx);
+      if (far && !this.deliverTo) {
+        this.deliverTo = far;
+        this.deliverUntil = ctx.time + 12;
+        if (far.me) me.say('COMING WITH SUPPLIES!', '#9dff8a', 1.6);
+      } else if (!far) this.deliverTo = null;
+    }
+    const dt2 = this.deliverTo;
+    if (dt2 && (ctx.time > this.deliverUntil || !dt2.alive || dt2.downed || this.targetVisible)) this.deliverTo = null;
+    else if (dt2) {
+      this.state = 'help';
+      this.setGoal(me, ctx, dt2.motor.pos);
+      return true;
+    }
+    me.reviving = null;
+    // carry a spark to a nest
+    const carrying = m.sparks.find((sp) => sp.carrier === me);
+    if (carrying) {
+      let best: { pos: THREE.Vector3 } | null = null, bd = 1e9;
+      for (const n of ctx.world.nests) {
+        if (n.used) continue;
+        const d = n.pos.distanceTo(me.motor.pos);
+        if (d < bd) {
+          bd = d;
+          best = n;
+        }
+      }
+      if (best) {
+        this.state = 'help';
+        if (bd > 1.5) this.setGoal(me, ctx, best.pos);
+        else this.hasGoal = false;
+        return true;
+      }
+      return false;
+    }
+    // grab a teammate's spark off the ground
+    let spark: { pos: THREE.Vector3 } | null = null, sd = 70;
+    for (const sp of m.sparks) {
+      if (sp.carrier || sp.owner.team !== me.team) continue;
+      const d = sp.pos.distanceTo(me.motor.pos);
+      if (d < sd) {
+        sd = d;
+        spark = sp;
+      }
+    }
+    if (spark) {
+      this.state = 'help';
+      if (sd < 2) m.trySparkPickup(me);
+      else this.setGoal(me, ctx, _v.copy(spark.pos).setY(spark.pos.y - 0.9));
+      return true;
+    }
+    // drifted too far from the leader: catch up (fights and looting nearby are fine)
+    const lead = this.leader(me, ctx);
+    if (lead && !this.targetVisible) {
+      const d = lead.motor.pos.distanceTo(me.motor.pos);
+      if (d > 26) {
+        this.state = 'help';
+        const a = me.id * 2.4;
+        this.setGoal(me, ctx, _v.copy(lead.motor.pos).add(_v2.set(Math.cos(a) * 4, 0, Math.sin(a) * 4)));
+        return true;
+      }
+    }
+    if (this.state === 'help') this.state = 'wander';
+    return false;
   }
 
   private wanderGoal(me: Actor, ctx: GameCtx) {
     const arch = this.profile.archetype;
     let c = me.motor.pos;
-    // bias toward interesting places: the square & buildings
-    if (this.rng() < 0.5) c = _v.set(rand(-12, 12), 0, rand(-14, 8));
-    const p = ctx.nav.randomWalkable(this.rng, c.x, c.z, arch === 'sniper' ? 30 : 18);
+    let r = arch === 'sniper' ? 30 : 18;
+    // bias toward interesting places: a nearby named place, sometimes a far one
+    if (this.rng() < 0.5) {
+      const near = POIS.slice().sort((a, b) => Math.hypot(a.x - me.motor.pos.x, a.z - me.motor.pos.z) - Math.hypot(b.x - me.motor.pos.x, b.z - me.motor.pos.z));
+      const p = this.rng() < 0.75 ? near[this.rng() < 0.6 ? 0 : 1] : near[Math.floor(this.rng() * near.length)];
+      c = _v.set(p.x + rand(-p.r, p.r) * 0.6, 0, p.z + rand(-p.r, p.r) * 0.6);
+    }
+    const m = ctx.match;
+    if (m && m.phase === 'live' && m.safeRadius < 120) {
+      c = _v.set(m.safeCenter.x, 0, m.safeCenter.y);
+      r = Math.max(2, Math.min(r, m.safeRadius * 0.7));
+    }
+    // squads: followers wander around their leader instead
+    const lead = this.leader(me, ctx);
+    if (lead) {
+      c = _v.copy(lead.motor.pos);
+      r = 7;
+    }
+    const p = ctx.nav.randomWalkable(this.rng, c.x, c.z, r);
     if (p) this.setGoal(me, ctx, p);
     this.goalTimeout = rand(8, 16);
   }
@@ -390,27 +1385,90 @@ export class BotController implements Controller {
     this.goal.copy(p);
     this.hasGoal = true;
     this.goalTimeout = Math.max(this.goalTimeout, 6);
+    if (!ctx.nav.canPlan()) {
+      // over this frame's planning budget: keep walking the old path (or straight) and retry soon
+      if (!this.path.length) {
+        this.path = [p.clone()];
+        this.pathIdx = 0;
+      }
+      this.repathCd = 0;
+      this.pendingPlan = true;
+      return;
+    }
+    this.pendingPlan = false;
     const path = ctx.nav.findPath(me.motor.pos, p);
+    if (!path && ctx.nav.lastFail === 'start' && me.motor.grounded) {
+      this.escapeT = 1.6;
+      this.escapeA = this.rng() * Math.PI * 2;
+    }
     this.path = path ?? [p.clone()];
     this.pathIdx = 0;
+    // loot that pathing can't reach (or only gets under): forget it for a while
+    const tgt = this.lootTarget ?? this.crateTarget;
+    if (tgt && tgt.pos.distanceToSquared(p) < 0.01) {
+      const end = path?.[path.length - 1];
+      const nearEnough = end && Math.hypot(end.x - p.x, end.z - p.z) < 1.8 && Math.abs(end.y - p.y) < 1.2;
+      // only blame the loot if the loot is the problem (not us standing somewhere odd)
+      const bad = !path ? ctx.nav.lastFail === 'goal' : !nearEnough && (!ctx.nav.lastPartial || me.motor.pos.distanceTo(p) < 30);
+      if (bad) {
+        this.unreachable.set(tgt, ctx.time + 12);
+        this.lootTarget = null;
+        this.crateTarget = null;
+        this.hasGoal = false;
+        this.path = [];
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ steering */
 
   private steer(me: Actor, ctx: GameCtx, dt: number) {
     const it = me.intent;
+    if (me.emote) {
+      it.moveX = it.moveZ = 0;
+      it.sprint = false;
+      return;
+    }
     let mx = 0, mz = 0;
     if (this.idleT > 0) {
       this.idleT -= dt;
+    } else if (this.escapeT > 0) {
+      // stranded off the nav grid (a roof, a crate stack): hop in one direction until we drop off
+      this.escapeT -= dt;
+      mx = Math.cos(this.escapeA);
+      mz = Math.sin(this.escapeA);
+      if (me.motor.grounded && this.jumpCd <= 0) {
+        it.jump = true;
+        this.jumpCd = 0.7;
+      }
+    } else if (this.hasGoal && (!this.path.length || this.pathIdx >= this.path.length) && Math.hypot(this.goal.x - me.motor.pos.x, this.goal.z - me.motor.pos.z) > 2) {
+      // no usable path (e.g. just landed somewhere odd): head straight for it; stuck logic hops
+      const dx = this.goal.x - me.motor.pos.x, dz = this.goal.z - me.motor.pos.z;
+      const d = Math.hypot(dx, dz);
+      mx = dx / d;
+      mz = dz / d;
     } else if (this.path.length && this.pathIdx < this.path.length) {
       const wp = this.path[this.pathIdx];
-      const dx = wp.x - me.motor.pos.x, dz = wp.z - me.motor.pos.z;
-      const d = Math.hypot(dx, dz);
+      let dx = wp.x - me.motor.pos.x, dz = wp.z - me.motor.pos.z;
+      let d = Math.hypot(dx, dz);
+      // a waypoint below us (hopping off a roof or ledge): keep walking the way we were going
+      if (d < 0.7 && wp.y < me.motor.pos.y - 1.2 && me.motor.grounded) {
+        const prev = this.pathIdx > 0 ? this.path[this.pathIdx - 1] : null;
+        const hx = prev ? wp.x - prev.x : dx, hz = prev ? wp.z - prev.z : dz;
+        const hl = Math.hypot(hx, hz) || 1;
+        dx = (hx / hl) * 2;
+        dz = (hz / hl) * 2;
+        d = 2;
+      }
       if (d < 0.7) {
         this.pathIdx++;
         if (this.pathIdx >= this.path.length) {
           this.path = [];
-          if (this.state === 'wander') this.idleT = rand(0.2, 1.2);
+          // a partial path (long trip): keep going toward the real goal
+          if (this.hasGoal && Math.hypot(this.goal.x - me.motor.pos.x, this.goal.z - me.motor.pos.z) > 2.5 && this.repathCd <= 0) {
+            this.repathCd = 0.4;
+            this.setGoal(me, ctx, this.goal, true);
+          } else if (this.state === 'wander') this.idleT = rand(0.2, 1.2);
         }
       } else {
         mx = dx / d;
@@ -430,12 +1488,11 @@ export class BotController implements Controller {
       }
       // don't strafe off ledges/into walls forever
       _v2.set(me.motor.pos.x + sx * 1.2, 0, me.motor.pos.z + sz * 1.2);
-      const [ci, cj] = ctx.nav.toCell(_v2.x, _v2.z);
-      if (!ctx.nav.isWalk(ci, cj)) this.strafe *= -1;
+      if (!ctx.nav.isWalkAt(_v2.x, me.motor.pos.y, _v2.z)) this.strafe *= -1;
     }
     it.moveX = mx;
     it.moveZ = mz;
-    it.sprint = (this.state === 'chase' || this.state === 'retreat' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
+    it.sprint = (this.zoneSprint || this.state === 'rotate' || this.state === 'chase' || this.state === 'retreat' || this.state === 'help' || this.state === 'loot' || (this.state === 'investigate' && this.profile.aggression > 0.6)) && Math.hypot(mx, mz) > 0.5;
     const wantCrouch = this.state === 'engage' && this.crouchWant;
     if (wantCrouch !== me.motor.crouching && me.motor.grounded && !me.motor.sliding) it.crouch = true;
     // aggressive bots slide into fights
@@ -444,16 +1501,30 @@ export class BotController implements Controller {
     // stuck detection -> jump / repath
     this.stuckT += dt;
     if (this.stuckT > 0.8) {
-      const moved = me.motor.pos.distanceTo(this.lastProgressPos);
+      const moved = Math.hypot(me.motor.pos.x - this.lastProgressPos.x, me.motor.pos.z - this.lastProgressPos.z);
       if (Math.hypot(mx, mz) > 0.3 && moved < 0.35) {
-        if (this.jumpCd <= 0) {
+        // wedged somewhere for a while: pick a direction and bail out
+        if (++this.stuckCount >= 4) {
+          this.stuckCount = 0;
+          this.escapeT = 1.4;
+          this.escapeA = this.rng() * Math.PI * 2;
+          // whatever we were trying to reach here isn't reachable this way
+          const tgt = this.lootTarget ?? this.crateTarget;
+          if (tgt && tgt.pos.distanceTo(me.motor.pos) < 8) {
+            this.unreachable.set(tgt, ctx.time + 15);
+            this.lootTarget = null;
+            this.crateTarget = null;
+            this.hasGoal = false;
+            this.path = [];
+          }
+        } else if (this.jumpCd <= 0) {
           it.jump = true;
           this.jumpCd = 0.8;
         } else if (this.hasGoal) {
           this.setGoal(me, ctx, this.goal, true);
           this.strafe *= -1;
         }
-      }
+      } else if (moved > 1) this.stuckCount = 0;
       this.lastProgressPos.copy(me.motor.pos);
       this.stuckT = 0;
     }
@@ -465,21 +1536,27 @@ export class BotController implements Controller {
     const it = me.intent;
     const eye = me.eyePos(_eye);
     let desiredYaw = this.aimYaw, desiredPitch = 0;
-    const engaged = this.state === 'engage' && this.target && this.targetVisible;
+    // a close retreat is a fighting retreat: keep eyes (and gun) on the threat while backing off,
+    // rather than whipping round to face the run direction and back again
+    const fightingRetreat = this.state === 'retreat' && !!this.target && this.targetVisible && me.armed && this.target.motor.pos.distanceTo(me.motor.pos) < 16;
+    const engaged = (this.state === 'engage' || fightingRetreat) && this.target && this.targetVisible;
     if (engaged) {
       const t = this.target!;
-      const head = this.rng() < this.headshotBias;
-      const tp = _v.copy(t.motor.pos).setY(t.motor.pos.y + (head ? t.motor.height - 0.22 : t.motor.height * 0.55));
+      // human-ish tracking: aim where they were a moment ago (+ an imperfect lead), with a
+      // wandering hand that shakes more when the target moves fast
+      const tp = t.bugout ? _v.copy(t.bug.pos) : this.perceivedPos(t, ctx.time, _v);
+      if (!t.bugout) tp.y += this.aimHead ? t.motor.height - 0.22 : t.motor.height * 0.55;
       desiredYaw = yawFromDir(tp.x - eye.x, tp.z - eye.z);
       desiredPitch = Math.atan2(tp.y - eye.y, Math.hypot(tp.x - eye.x, tp.z - eye.z));
-      // error settles while tracking; fast lateral movement makes it harder
       const lateral = Math.abs(t.motor.vel.x * Math.cos(desiredYaw) - t.motor.vel.z * Math.sin(desiredYaw));
-      const k = Math.exp(-this.profile.tracking * dt);
-      const res = this.profile.residual * DEG * (1 + lateral * 0.12);
-      this.errYaw = this.errYaw * k + (this.rng() - 0.5) * res * 0.6;
-      this.errPitch = this.errPitch * k + (this.rng() - 0.5) * res * 0.4;
-      desiredYaw += this.errYaw;
-      desiredPitch += this.errPitch;
+      const k = Math.exp(-this.trackRate * dt);
+      this.errYaw *= k;
+      this.errPitch *= k;
+      const dist = Math.hypot(tp.x - eye.x, tp.z - eye.z);
+      const shake = this.noiseDeg * DEG * (0.55 + Math.min(1.2, lateral * 0.14)) * (me.motor.horizontalSpeed() > 2 ? 1.25 : 1) * (0.6 + dist / 20);
+      const nt = ctx.time;
+      desiredYaw += this.errYaw + (noise1(nt * 2.2 + this.phase1 * 7) * 0.65 + noise1(nt * 5.3 + this.phase2 * 7) * 0.35) * 2 * shake;
+      desiredPitch += this.errPitch + (noise1(nt * 2.6 + this.phase2 * 11) * 0.65 + noise1(nt * 6.1 + this.phase1 * 11) * 0.35) * 1.2 * shake;
     } else if (this.lookAroundT > 0) {
       this.lookAroundT -= dt;
       desiredYaw = this.lookYaw + Math.sin(ctx.time * 1.5) * 1.2;
@@ -490,12 +1567,12 @@ export class BotController implements Controller {
       desiredYaw = this.lookYaw + Math.sin(ctx.time * 0.7 + me.id) * 0.6;
     }
     // turn-rate limited aim
-    const maxTurn = this.profile.turnSpeed * dt * (engaged ? 1 : 0.7);
+    const maxTurn = this.turn * dt * (engaged ? 1 : 0.7);
     const dy = clamp(angleDelta(this.aimYaw, desiredYaw), -maxTurn, maxTurn);
     this.aimYaw = wrapAngle(this.aimYaw + dy);
     this.aimPitch += clamp(desiredPitch - this.aimPitch, -maxTurn, maxTurn);
 
-    if (!it.throwRelease) {
+    if (!it.throwRelease && !it.utilRelease) {
       it.aimYaw = this.aimYaw;
       it.aimPitch = this.aimPitch;
       dirFromYawPitch(this.aimYaw, this.aimPitch, it.aimDir);
@@ -510,13 +1587,18 @@ export class BotController implements Controller {
       const onTarget = Math.abs(angleDelta(this.aimYaw, desiredYaw)) < 6 * DEG;
       const d = this.target!.motor.pos.distanceTo(me.motor.pos);
       it.ads = d > 14 && this.profile.archetype !== 'aggressive';
-      if (this.reactT <= 0 && onTarget) {
+      // don't waste ammo far outside the gun's useful range (close in instead)
+      const inRange = d <= me.weapon.def.botRange[1] * 1.3 + 4;
+      if (this.reactT <= 0 && onTarget && inRange) {
         if (this.burstT > 0) {
           this.burstT -= dt;
           it.fire = true;
-          if (this.burstT <= 0) this.pauseT = rand(this.profile.pause[0], this.profile.pause[1]) * (d > 25 ? 1.8 : 1);
+          if (this.burstT <= 0) this.pauseT = rand(this.profile.pause[0], this.profile.pause[1]) * (d > 25 ? 1.8 : 1) * (1.3 - this.skill * 0.5);
         } else if (this.pauseT > 0) this.pauseT -= dt;
-        else this.burstT = rand(this.profile.burst[0], this.profile.burst[1]);
+        else {
+          this.burstT = rand(this.profile.burst[0], this.profile.burst[1]);
+          this.aimHead = this.rng() < this.headshotBias;
+        }
       }
     }
   }

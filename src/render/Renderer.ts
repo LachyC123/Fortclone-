@@ -3,10 +3,14 @@ import { PAL } from './Palette';
 
 export type Quality = 'low' | 'medium' | 'high';
 
-export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; shadows: boolean; shadowSize: number; particles: number; drawDist: number; grass: number }> = {
-  low: { pixelRatio: 0.8, shadows: false, shadowSize: 512, particles: 700, drawDist: 140, grass: 0.35 },
-  medium: { pixelRatio: 1.25, shadows: true, shadowSize: 1024, particles: 1400, drawDist: 200, grass: 0.7 },
-  high: { pixelRatio: 2, shadows: true, shadowSize: 2048, particles: 2200, drawDist: 280, grass: 1 },
+/**
+ * `model` scales character/bug/weapon tessellation and `lite` builds the world with plain boxes and
+ * fewer segments — both are applied when the game boots (changing them needs a reload).
+ */
+export const QUALITY_PRESETS: Record<Quality, { pixelRatio: number; shadows: boolean; shadowSize: number; particles: number; drawDist: number; grass: number; smallDist: number; model: number; lite: boolean; cull: number }> = {
+  low: { pixelRatio: 0.8, shadows: false, shadowSize: 512, particles: 700, drawDist: 130, grass: 0.35, smallDist: 50, model: 0.45, lite: true, cull: 0.58 },
+  medium: { pixelRatio: 1.25, shadows: true, shadowSize: 1024, particles: 1400, drawDist: 170, grass: 0.7, smallDist: 68, model: 0.6, lite: true, cull: 0.72 },
+  high: { pixelRatio: 2, shadows: true, shadowSize: 2048, particles: 2200, drawDist: 280, grass: 1, smallDist: 95, model: 1, lite: false, cull: 1 },
 };
 
 /**
