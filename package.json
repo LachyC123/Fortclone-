@@ -10,7 +10,7 @@
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "smoke": "node tools/smoke.mjs",
-    "lan": "npm run build && node server/lan.mjs",
+    "lan": "node server/checknode.mjs && vite build && node server/lan.mjs",
     "lan:serve": "node server/lan.mjs"
   },
   "dependencies": {
