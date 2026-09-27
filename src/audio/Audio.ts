@@ -389,16 +389,22 @@ export class Audio {
     }
   }
 
+  private hitAt = -9;
+  private hitCombo = 0;
   hitmarker(headshot: boolean, kill: boolean) {
     const out = this.out(undefined, 0.55);
     if (!out) return;
     const t = this.ctx!.currentTime;
+    // a string of hits climbs in pitch: tick, tick, TICK, TICK!
+    this.hitCombo = t - this.hitAt < 0.5 ? Math.min(10, this.hitCombo + 1) : 0;
+    this.hitAt = t;
+    const k = 1 + this.hitCombo * 0.06;
     if (headshot) {
-      this.tone(out, 'sine', 2400, 2400, t, 0.18, 0.45);
-      this.tone(out, 'sine', 3600, 3600, t + 0.01, 0.14, 0.25);
+      this.tone(out, 'sine', 2400 * k, 2400 * k, t, 0.18, 0.45);
+      this.tone(out, 'sine', 3600 * k, 3600 * k, t + 0.01, 0.14, 0.25);
       this.tone(out, 'triangle', 1200, 1250, t, 0.1, 0.3);
     } else {
-      this.tone(out, 'triangle', 1500, 1300, t, 0.05, 0.35);
+      this.tone(out, 'triangle', 1500 * k, 1300 * k, t, 0.05, 0.35);
       this.noise(out, t, 0.03, 0.3, 'highpass', 4000, 3000, 1);
     }
     if (kill) {
@@ -666,6 +672,20 @@ export class Audio {
     this.noise(out, t, 0.06, 0.9, 'highpass', 2500, 1500, 1);
     this.tone(out, 'square', 900, 200, t, 0.08, 0.5);
     for (let i = 0; i < 3; i++) this.tone(out, 'triangle', rand(2000, 3200), 1500, t + 0.05 + i * 0.03, 0.04, 0.15);
+  }
+
+  /** streak banner sting: bigger streak, bigger chord */
+  streak(tier: number) {
+    const out = this.out(undefined, 0.6);
+    if (!out) return;
+    const t = this.ctx!.currentTime;
+    const notes = tier >= 3 ? [523, 659, 784, 1047, 1319] : tier === 2 ? [587, 740, 880, 1175] : [659, 880, 1047];
+    notes.forEach((f, i) => {
+      this.tone(out, 'square', f, f, t + i * 0.06, 0.16, 0.18);
+      this.tone(out, 'triangle', f * 2, f * 2, t + i * 0.06, 0.22, 0.12);
+    });
+    this.noise(out, t, 0.25, 0.25, 'highpass', 6000, 3000, 0.7);
+    if (tier >= 3) this.tone(out, 'sine', 110, 55, t, 0.5, 0.6);
   }
 
   /** a perk badge being pinned on */

@@ -187,6 +187,8 @@ node tools/contenttest.mjs [--shots]          # new weapons, Bug Jammer, Snap Tr
 node tools/tutorialtest.mjs [--mobile]        # first-play training: every step, hatch + naming, SKIP
 node tools/squadai.mjs                        # bot teammates: throw you a gun/ammo/heal, call out enemies, revive under fire
 node tools/botdiag.mjs                        # unarmed bots after landing: do they go somewhere (no dithering)?
+node tools/botidle.mjs [--team=2]             # armed enemies standing near each other not fighting; low-hp bots & heals
+node tools/juiceshots.mjs                     # screenshots: combo damage numbers, streak announcer, explosion
 node tools/shots.mjs --only=portrait,lineup   # or --mobile
 ```
 

@@ -578,13 +578,17 @@ export class Actor implements BugOwner {
       by.streak = ctx.time - by.lastKillAt < 12 ? by.streak + 1 : 1;
       by.lastKillAt = ctx.time;
       const dist = by.motor.pos.distanceTo(this.motor.pos);
-      if (by.streak >= 3) callout = 'TRIPLE TROUBLE!';
+      if (by.streak >= 5) callout = 'UNSTOPPABLE!';
+      else if (by.streak === 4) callout = 'RAMPAGE!';
+      else if (by.streak === 3) callout = 'TRIPLE TROUBLE!';
       else if (by.streak === 2) callout = 'DOUBLE BONK!';
       else if (ctx.time - by.lastBlinkAt < 1.6) callout = 'BLINK BONK!';
       else if (dist > 45) callout = `LONG SHOT! ${Math.round(dist)}m`;
-      else if (by.kills === 5) callout = 'UNSTOPPABLE!';
+      else if (by.kills === 5) callout = 'FIVE BONKS!';
       else if (by.kills === 3) callout = 'ON A ROLL!';
       else if (this.hp <= 0 && by.hp < 20) callout = 'CLUTCH!';
+      // a big streak gets a beat of slow motion to savour it
+      if (by.streak >= 3) by.me?.slowMo(0.35, 0.5);
       if (!by.me) {
         // bots gloat a little
         by.say(['HA!', 'GG', 'YES!', 'BONK!', 'EZ'][Math.floor(Math.random() * 5)], '#f2c14e', 1.5, true);

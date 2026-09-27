@@ -272,6 +272,7 @@ export class BotController implements Controller {
   private deliverTo: Actor | null = null;
   private deliverUntil = 0;
   private calloutT = 0;
+  private askT = 0;
   private spotted = new Map<number, number>();
 
   /** Lobby, Sky Barge, skydive and bugout: simple purpose-built steering. True if handled. */
@@ -462,11 +463,13 @@ export class BotController implements Controller {
             this.targetVisible = true;
             this.lastSeenPos.copy(o.motor.pos);
             this.lastSeenT = ctx.time;
-          } else if (d < bestD && (d <= range || o.lastDamagedBy === me) && (this.ignoreUntil.get(o.id) ?? 0) < ctx.time) {
-            // pacing + personality: a calm bot sometimes lets a passer-by go (unless they're shooting at it)
+          } else if (d < bestD && (d <= range || o.lastDamagedBy === me) && (d < 16 || (this.ignoreUntil.get(o.id) ?? 0) < ctx.time)) {
+            // pacing + personality: a calm bot sometimes lets a distant passer-by go (unless they're
+            // shooting at it) — but nobody stands next to an enemy pretending not to see them
             const attacked = me.lastDamagedBy === o && ctx.time - me.lastDamageTime < 4;
-            const keen = ctx.match ? Math.min(1, ctx.match.aggro * 1.3 + (this.profile.aggression - 0.5) * 0.4 + (d < 8 ? 0.35 : 0)) : 1;
-            if (!attacked && o !== this.target && this.rng() > keen) this.ignoreUntil.set(o.id, ctx.time + 10);
+            const keen = ctx.match ? Math.min(1, ctx.match.aggro * 1.3 + (this.profile.aggression - 0.5) * 0.4) : 1;
+            if (d < 16) this.ignoreUntil.delete(o.id);
+            if (!attacked && d >= 16 && o !== this.target && this.rng() > keen) this.ignoreUntil.set(o.id, ctx.time + 10);
             else {
               bestNew = o;
               bestD = d;
@@ -544,7 +547,50 @@ export class BotController implements Controller {
     if (cw && !cw.reloading && !this.targetVisible && cw.mag < cw.def.mag * 0.5 && me.ammo[cw.def.ammo] > 0 && ctx.time - me.lastDamageTime > 1.5 && me.healT < 0) me.intent.reload = true;
 
     // ---- heal up when nobody is shooting at us
-    if (me.healItem && me.healT < 0 && me.hp < 72 && !this.targetVisible && ctx.time - me.lastDamageTime > 1.6) me.intent.heal = true;
+    const tgtD = this.target && this.targetVisible ? this.target.motor.pos.distanceTo(me.motor.pos) : Infinity;
+    const calm = ctx.time - me.lastDamageTime > 2 && (tgtD > 28 || (tgtD > 14 && me.hp < 40));
+    if (me.healItem && me.healT < 0 && me.hp < 75 && calm && !me.downed) {
+      me.intent.heal = true;
+      if (this.rng() < 0.3) me.say(oneOf(['healing!', 'patching up', 'brb snack']), '#7ee06a', 1.3);
+    }
+    // squads: hurt with nothing to heal with — say so (a teammate may have spare)
+    if (!me.healItem && me.hp < 45 && tgtD > 20 && ctx.match && ctx.match.teamSize > 1 && ctx.time > this.askT) {
+      this.askT = ctx.time + 20;
+      me.say('NEED HEALS!', '#ff9a9a', 1.6);
+      for (const o of ctx.actors) if (o.me && o.team === me.team && o.alive && o.motor.pos.distanceTo(me.motor.pos) < 60) o.me.hud.toast(`${me.name} is hurt and has no heals`, '#ff9a9a');
+    }
+    // hurt, no heals, quiet: go and find some (instead of wandering about at 20 hp)
+    if (!me.healItem && me.hp < 50 && tgtD > 20 && this.state !== 'engage' && this.state !== 'help' && this.state !== 'rotate' && !this.lootTarget && !this.crateTarget) {
+      let best: Pickup | null = null, bd = 70;
+      for (const q of ctx.loot.pickups) {
+        if (q.kind !== 'heal' || q.collectT >= 0 || !q.settled) continue;
+        if ((this.unreachable.get(q) ?? -1) > ctx.time) continue;
+        if (q.giftFor && q.giftFor !== me && q.giftFor.alive && (q.giftUntil ?? 0) > ctx.time) continue;
+        const d = q.pos.distanceTo(me.motor.pos) + this.lootRisk(me, ctx, q.pos);
+        if (d < bd) {
+          bd = d;
+          best = q;
+        }
+      }
+      let crate: Crate | null = null;
+      if (!best) {
+        let cd = 30;
+        for (const c of ctx.loot.crates) {
+          if (c.opened || c.openT >= 0 || (this.unreachable.get(c) ?? -1) > ctx.time) continue;
+          const d = c.pos.distanceTo(me.motor.pos);
+          if (d < cd) {
+            cd = d;
+            crate = c;
+          }
+        }
+      }
+      if (best || crate) {
+        this.lootTarget = best;
+        this.crateTarget = crate;
+        this.state = 'loot';
+        this.hasGoal = false;
+      }
+    }
 
     // ---- squads: knocked crawling, reviving, sparks, sticking with the leader
     if (this.squadThink(me, ctx)) return;
@@ -966,7 +1012,9 @@ export class BotController implements Controller {
         const needs = !!gun && me.ammo[p.defId as AmmoType] < 40;
         v = needs ? (gun!.mag + me.ammo[p.defId as AmmoType] === 0 ? (dry ? 36 : 22) : 12) : -99;
       } else if (p.kind === 'heal') {
-        v = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3) ? (me.hp < 80 ? 14 : 7) : -99;
+        // hurt with nothing to heal with: that's the priority (a stash is nice too)
+        const room = !me.healItem || (me.healItem.id === p.defId && me.healItem.count < 3);
+        v = room ? (me.hp < 55 && !me.healItem ? 34 : me.hp < 80 ? 16 : 9) : -99;
       } else if (p.kind === 'util') {
         v = !me.util || me.util.id === p.defId ? (this.profile.archetype === 'chaotic' ? 14 : 6) : -99;
       } else if (p.kind === 'perk') {
@@ -1245,7 +1293,7 @@ export class BotController implements Controller {
       } else if (!far) this.deliverTo = null;
     }
     const dt2 = this.deliverTo;
-    if (dt2 && (ctx.time > this.deliverUntil || !dt2.alive || dt2.downed)) this.deliverTo = null;
+    if (dt2 && (ctx.time > this.deliverUntil || !dt2.alive || dt2.downed || this.targetVisible)) this.deliverTo = null;
     else if (dt2) {
       this.state = 'help';
       this.setGoal(me, ctx, dt2.motor.pos);

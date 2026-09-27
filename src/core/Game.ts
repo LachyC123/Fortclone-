@@ -3,7 +3,7 @@ import { Renderer, Quality, QUALITY_PRESETS } from '../render/Renderer';
 import { detail } from '../render/Detail';
 import { FX } from '../fx/FX';
 import { World } from '../world/World';
-import { LootSystem, rollWeapon, ammoFor, rollFloor } from '../loot/Loot';
+import { LootSystem, rollWeapon, ammoFor, rollFloor, rollConsumable } from '../loot/Loot';
 import { NavGrid } from '../world/NavGrid';
 import { Actor, Controller } from '../entities/Actor';
 import type { HostSession } from '../net/Host';
@@ -599,11 +599,19 @@ export class Game implements GameCtx {
         this.loot.spawnRolls([w, ammoFor(w.defId, 2)], p);
       } else this.loot.spawnRolls([ammoFor(pick(['tincan', 'rattle', 'poppistol', 'needler', 'broomstick'])), ammoFor(pick(['tincan', 'rattle', 'pepperbox']))], p);
     };
-    for (const poi of POIS)
+    // snacks & gadgets: every place has a few, so a fight can be patched up after
+    const treat = (x: number, z: number, r: number) => {
+      const p = this.nav.randomWalkable(Math.random, x, z, r);
+      if (p) this.loot.spawnRolls([rollConsumable()], p.setY(p.y + 0.05));
+    };
+    for (const poi of POIS) {
       for (let i = 0; i < 10; i++) drop(poi.x, poi.z, poi.r, i < 5);
+      for (let i = 0; i < 4; i++) treat(poi.x, poi.z, poi.r);
+    }
     for (let i = 0; i < 26; i++) {
       const a = Math.random() * Math.PI * 2, d = 45 + Math.random() * 45;
       drop(Math.cos(a) * d, Math.sin(a) * d, 8, i < 14);
+      if (i % 2 === 0) treat(Math.cos(a) * d, Math.sin(a) * d, 8);
     }
     this.loot.resetCrates();
     for (const n of this.world.nests) {

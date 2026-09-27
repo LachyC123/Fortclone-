@@ -90,6 +90,8 @@ export interface HudEvents {
   playerEliminated(by: string): void;
   playerElimination(victim: string, callout?: string): void;
   bigToast(text: string, color?: string): void;
+  /** a little "+100 ELIMINATION" pop under the crosshair */
+  xpPop(text: string, color?: string): void;
   /** you got knocked out: white flash, colour drains for a beat */
   koFlash(): void;
   /** standing in the Gloom: purple flash */

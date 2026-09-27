@@ -104,6 +104,9 @@ export class FX {
   constructor(private scene: THREE.Scene, private cw: CollisionWorld, maxParticles: number) {
     this.soft = new ParticlePool(Math.floor(maxParticles * 0.55), false);
     this.glow = new ParticlePool(Math.floor(maxParticles * 0.45), true);
+    // chunkier, poppier particles all round
+    this.soft.sizeMul = 1.2;
+    this.glow.sizeMul = 1.3;
     this.group.add(this.soft.points, this.glow.points);
 
     const tg = new THREE.BoxGeometry(1, 1, 1);
@@ -201,7 +204,7 @@ export class FX {
   tracer(a: THREE.Vector3, b: THREE.Vector3, color: number, width = 0.05, speed = 260) {
     if (this.tracers.length >= 64) this.tracers.shift();
     const dist = a.distanceTo(b);
-    this.tracers.push({ a: a.clone(), b: b.clone(), t: 0, dur: Math.max(0.05, dist / speed), len: Math.min(5, dist * 0.6), width, color: new THREE.Color(color) });
+    this.tracers.push({ a: a.clone(), b: b.clone(), t: 0, dur: Math.max(0.05, dist / speed), len: Math.min(6, dist * 0.6), width: width * 1.5, color: new THREE.Color(color) });
   }
 
   ring(p: THREE.Vector3, color: number, r0: number, r1: number, dur: number, normal?: THREE.Vector3, billboard = false) {
@@ -257,26 +260,31 @@ export class FX {
   /* ------------------------------------------------------ composite effects */
 
   muzzle(p: THREE.Vector3, dir: THREE.Vector3, color = 0xffd27a, big = false) {
-    this.glow.emit(p, { count: big ? 10 : 5, color: [color, 0xffffff], speed: [2, 7], spread: 0.35, dir, life: [0.05, 0.12], size: big ? [0.3, 0.5] : [0.18, 0.3], sizeEnd: 0.2, shape: PShape.Sparkle, drag: 6 });
-    this.soft.emit(p, { count: big ? 5 : 2, color: [0xe8e0d0, 0xd0c8bc], speed: [0.5, 1.5], spread: 0.6, dir, up: 0.6, life: [0.5, 0.9], size: [0.18, 0.3], sizeEnd: 3, alpha: 0.35, drag: 2 });
-    this.lightFlash(p, color, big ? 6 : 3.5, 0.05);
+    this.glow.emit(p, { count: big ? 14 : 7, color: [color, 0xffffff], speed: [3, 9], spread: 0.35, dir, life: [0.05, 0.14], size: big ? [0.4, 0.7] : [0.24, 0.4], sizeEnd: 0.2, shape: PShape.Sparkle, drag: 6 });
+    // a fat bloom right at the barrel
+    this.glow.emit(p, { count: 1, color: [0xffffff, color], speed: 0, life: 0.06, size: big ? 1.3 : 0.8, sizeEnd: 0.3, alpha: 0.9 });
+    this.soft.emit(p, { count: big ? 6 : 3, color: [0xe8e0d0, 0xd0c8bc], speed: [0.5, 1.5], spread: 0.6, dir, up: 0.6, life: [0.5, 0.9], size: [0.2, 0.34], sizeEnd: 3, alpha: 0.35, drag: 2 });
+    this.lightFlash(p, color, big ? 8 : 4.5, 0.06);
   }
 
   impact(p: THREE.Vector3, n: THREE.Vector3, surface: Surface) {
     const cols = SURFACE_COLORS[surface] ?? SURFACE_COLORS.stone;
-    this.soft.emit(p, { count: 6, color: cols, speed: [1.5, 4], spread: 0.7, dir: n, gravity: 9, life: [0.25, 0.5], size: [0.06, 0.12], sizeEnd: 0.5, shape: PShape.Confetti, drag: 1.5, spin: 10 });
-    this.soft.emit(p, { count: 2, color: cols[0], speed: [0.3, 1], spread: 0.5, dir: n, life: [0.4, 0.7], size: [0.2, 0.35], sizeEnd: 2.4, alpha: 0.4, drag: 2 });
-    if (surface === 'metal') this.glow.emit(p, { count: 6, color: [0xffe28a, 0xffffff], speed: [3, 7], spread: 0.6, dir: n, gravity: 14, life: [0.15, 0.35], size: [0.05, 0.08], sizeEnd: 0.4, shape: PShape.Sparkle });
-    if (surface === 'wood' && Math.random() < 0.6) this.chunk(p, _p.copy(n).multiplyScalar(rand(2, 4)).add(new THREE.Vector3(rand(-1, 1), rand(1, 3), rand(-1, 1))), 0xd3a26f, 0.06, 1.2);
-    if (surface === 'water') this.soft.emit(p, { count: 8, color: [0xffffff, 0xbff3ff], speed: [2, 4], spread: 0.3, dir: _p.set(0, 1, 0), gravity: 14, life: [0.3, 0.6], size: [0.08, 0.16], sizeEnd: 0.6 });
+    this.soft.emit(p, { count: 10, color: cols, speed: [2, 5], spread: 0.7, dir: n, gravity: 9, life: [0.3, 0.6], size: [0.07, 0.14], sizeEnd: 0.5, shape: PShape.Confetti, drag: 1.5, spin: 12 });
+    this.soft.emit(p, { count: 3, color: cols[0], speed: [0.3, 1.2], spread: 0.5, dir: n, life: [0.4, 0.8], size: [0.25, 0.42], sizeEnd: 2.6, alpha: 0.45, drag: 2 });
+    // a tiny spark pop so every hit reads, whatever it hit
+    this.glow.emit(p, { count: 1, color: 0xffffff, speed: 0, life: 0.05, size: 0.45, sizeEnd: 0.1, alpha: 0.9 });
+    if (surface === 'metal' || surface === 'stone') this.glow.emit(p, { count: surface === 'metal' ? 9 : 4, color: [0xffe28a, 0xffffff], speed: [3, 8], spread: 0.6, dir: n, gravity: 14, life: [0.15, 0.4], size: [0.05, 0.09], sizeEnd: 0.4, shape: PShape.Sparkle });
+    if (surface === 'wood' && Math.random() < 0.7) this.chunk(p, _p.copy(n).multiplyScalar(rand(2, 4)).add(new THREE.Vector3(rand(-1, 1), rand(1, 3), rand(-1, 1))), 0xd3a26f, 0.07, 1.2);
+    if (surface === 'water') this.soft.emit(p, { count: 10, color: [0xffffff, 0xbff3ff], speed: [2, 5], spread: 0.3, dir: _p.set(0, 1, 0), gravity: 14, life: [0.3, 0.6], size: [0.08, 0.16], sizeEnd: 0.6 });
     if (surface !== 'water' && surface !== 'grass' && surface !== 'cloth') this.decal(p, n);
   }
 
   hitSplat(p: THREE.Vector3, headshot: boolean) {
-    // no blood: toy "stuffing" sparkles + a flash of colour
-    this.glow.emit(p, { count: headshot ? 12 : 6, color: headshot ? [0xfff27a, 0xffffff, 0xffb13d] : [0xffffff, 0xffe9a8], speed: [2, 5], spread: 1, life: [0.15, 0.35], size: headshot ? [0.14, 0.24] : [0.1, 0.16], sizeEnd: 0.2, shape: headshot ? PShape.Star : PShape.Sparkle, drag: 4 });
-    this.soft.emit(p, { count: headshot ? 5 : 3, color: [0xfff6e6, 0xf2d7b0], speed: [1, 3], spread: 1, up: 1, gravity: 6, life: [0.4, 0.8], size: [0.07, 0.12], sizeEnd: 0.6, shape: PShape.Confetti, spin: 8 });
-    if (headshot) this.ring(p, 0xfff27a, 0.1, 0.7, 0.22, undefined, true);
+    // no blood: toy "stuffing" sparkles, a pop of light and a little shock ring
+    this.glow.emit(p, { count: headshot ? 18 : 10, color: headshot ? [0xfff27a, 0xffffff, 0xffb13d] : [0xffffff, 0xffe9a8, 0xff9ad5], speed: [2.5, 6], spread: 1, life: [0.18, 0.4], size: headshot ? [0.18, 0.3] : [0.12, 0.2], sizeEnd: 0.2, shape: headshot ? PShape.Star : PShape.Sparkle, drag: 4, spin: 8 });
+    this.glow.emit(p, { count: 1, color: headshot ? 0xfff27a : 0xffffff, speed: 0, life: 0.08, size: headshot ? 1.3 : 0.8, sizeEnd: 0.2, alpha: 0.85 });
+    this.soft.emit(p, { count: headshot ? 8 : 5, color: [0xfff6e6, 0xf2d7b0, 0xff9ad5], speed: [1.5, 4], spread: 1, up: 1.4, gravity: 7, life: [0.5, 0.9], size: [0.08, 0.14], sizeEnd: 0.6, shape: PShape.Confetti, spin: 10 });
+    this.ring(p, headshot ? 0xfff27a : 0xffffff, 0.1, headshot ? 1.1 : 0.55, headshot ? 0.26 : 0.16, undefined, true);
   }
 
   dust(p: THREE.Vector3, amount: number, color = 0xe8dcc0) {
@@ -300,14 +308,15 @@ export class FX {
       this.soft.emit(p, { count: 1, color: [c, 0xffffff], speed: [2 + impact * 0.2, 3 + impact * 0.3], spread: 0.15, dir: _dir, life: [0.35, 0.6], size: [0.2, 0.32], sizeEnd: 2.2, alpha: 0.5, drag: 5 });
     }
     if (surface === 'grass') this.soft.emit(p, { count: Math.ceil(impact * 0.5), color: [0x7cc35a, 0xa6d86a], speed: [1.5, 3], spread: 0.5, dir: _dir.set(0, 1, 0), gravity: 8, life: [0.4, 0.8], size: [0.05, 0.09], shape: PShape.Confetti, spin: 10 });
-    if (impact > 12) this.ring(p.clone().setY(p.y + 0.05), 0xffffff, 0.2, 2.2, 0.35);
+    if (impact > 9) this.ring(p.clone().setY(p.y + 0.05), 0xffffff, 0.2, 1.6 + impact * 0.08, 0.35);
   }
 
   blinkBurst(p: THREE.Vector3, arriving: boolean) {
     const c = [PAL.blink, 0xffffff, PAL.blinkDeep, 0xb0ffff];
-    this.glow.emit(p, { count: arriving ? 34 : 22, color: c, speed: arriving ? [3, 8] : [1, 4], spread: 1, life: [0.25, 0.6], size: [0.1, 0.26], sizeEnd: 0.1, shape: PShape.Sparkle, drag: arriving ? 4 : 2, jitter: 0.3, spin: 6 });
-    this.glow.emit(p, { count: 3, color: PAL.blink, speed: 0, life: 0.18, size: arriving ? 2.2 : 1.4, sizeEnd: 1.8, alpha: 0.5 });
-    this.ring(p, PAL.blink, 0.2, arriving ? 2.6 : 1.6, arriving ? 0.35 : 0.3);
+    this.glow.emit(p, { count: arriving ? 46 : 28, color: c, speed: arriving ? [3, 10] : [1, 5], spread: 1, life: [0.3, 0.7], size: [0.12, 0.3], sizeEnd: 0.1, shape: PShape.Sparkle, drag: arriving ? 4 : 2, jitter: 0.3, spin: 6 });
+    this.glow.emit(p, { count: 3, color: PAL.blink, speed: 0, life: 0.2, size: arriving ? 3 : 1.8, sizeEnd: 1.8, alpha: 0.55 });
+    this.ring(p, PAL.blink, 0.2, arriving ? 3.4 : 2, arriving ? 0.4 : 0.3);
+    if (arriving) this.ring(_p.copy(p).setY(p.y + 0.05), 0xffffff, 0.2, 2.2, 0.28);
     this.ring(_p.copy(p).setY(p.y + 0.9), 0xffffff, 0.1, arriving ? 1.8 : 1.1, 0.25, undefined, true);
     this.lightFlash(p.clone().setY(p.y + 1), PAL.blink, arriving ? 9 : 5, 0.25);
   }
@@ -317,8 +326,9 @@ export class FX {
   }
 
   pickupSparkle(p: THREE.Vector3, color: number) {
-    this.glow.emit(p, { count: 16, color: [color, 0xffffff], speed: [1.5, 4], spread: 1, up: 1, life: [0.25, 0.55], size: [0.1, 0.2], sizeEnd: 0.1, shape: PShape.Sparkle, drag: 3, spin: 8 });
-    this.ring(p, color, 0.1, 1.1, 0.3, undefined, true);
+    this.glow.emit(p, { count: 24, color: [color, 0xffffff], speed: [2, 5], spread: 1, up: 1.4, life: [0.3, 0.6], size: [0.12, 0.24], sizeEnd: 0.1, shape: PShape.Sparkle, drag: 3, spin: 8 });
+    this.glow.emit(p, { count: 1, color, speed: 0, life: 0.15, size: 1.4, sizeEnd: 0.4, alpha: 0.7 });
+    this.ring(p, color, 0.1, 1.5, 0.3, undefined, true);
   }
 
   healPuff(p: THREE.Vector3) {
@@ -327,26 +337,30 @@ export class FX {
 
   elimination(p: THREE.Vector3, colors: number[]) {
     const c = [...colors, 0xffffff, PAL.mustard, PAL.pink, PAL.turquoise];
-    this.glow.emit(p, { count: 4, color: 0xffffff, speed: 0, life: 0.2, size: 3.2, sizeEnd: 1.5, alpha: 0.7 });
-    this.glow.emit(p, { count: 30, color: c, speed: [4, 10], spread: 1, up: 2, gravity: 4, life: [0.5, 1.1], size: [0.15, 0.3], sizeEnd: 0.1, shape: PShape.Star, drag: 2.5, spin: 10 });
-    this.soft.emit(p, { count: 40, color: c, speed: [3, 9], spread: 1, up: 4, gravity: 9, life: [1.2, 2.2], size: [0.08, 0.14], sizeEnd: 0.8, shape: PShape.Confetti, drag: 1.2, spin: 14 });
-    this.ring(p, 0xffffff, 0.3, 4.5, 0.45);
-    this.ring(p, PAL.mustard, 0.2, 3.2, 0.55, undefined, true);
-    for (let i = 0; i < 10; i++) this.chunk(p, new THREE.Vector3(rand(-5, 5), rand(4, 9), rand(-5, 5)), c[i % c.length], rand(0.1, 0.2), 2.2);
-    this.lightFlash(p, 0xffe6a0, 10, 0.3);
+    this.glow.emit(p, { count: 4, color: 0xffffff, speed: 0, life: 0.25, size: 4.5, sizeEnd: 1.5, alpha: 0.8 });
+    this.glow.emit(p, { count: 48, color: c, speed: [5, 13], spread: 1, up: 2.5, gravity: 4, life: [0.6, 1.3], size: [0.18, 0.36], sizeEnd: 0.1, shape: PShape.Star, drag: 2.5, spin: 12 });
+    this.soft.emit(p, { count: 64, color: c, speed: [4, 11], spread: 1, up: 5, gravity: 9, life: [1.4, 2.6], size: [0.1, 0.17], sizeEnd: 0.8, shape: PShape.Confetti, drag: 1.2, spin: 16 });
+    // a column of sparkles rising where they stood
+    this.glow.emit(p, { count: 20, color: [0xffffff, PAL.mustard, 0xfff6c0], speed: [0.5, 1.5], spread: 0.3, dir: _dir.set(0, 1, 0), up: 5, life: [0.8, 1.4], size: [0.1, 0.2], sizeEnd: 0.05, shape: PShape.Sparkle, drag: 1, jitter: 0.5 });
+    this.ring(p, 0xffffff, 0.3, 6, 0.5);
+    this.ring(p, PAL.mustard, 0.2, 4.2, 0.6, undefined, true);
+    this.ring(p, PAL.pink, 0.2, 2.6, 0.45, undefined, true);
+    for (let i = 0; i < 16; i++) this.chunk(p, new THREE.Vector3(rand(-6, 6), rand(5, 11), rand(-6, 6)), c[i % c.length], rand(0.12, 0.24), 2.4);
+    this.lightFlash(p, 0xffe6a0, 16, 0.35);
   }
 
   /** Toy explosion: white flash, fat candy fireball, confetti, smoke ring, chunks. No gore, lots of pop. */
   explosion(p: THREE.Vector3, R: number) {
-    this.glow.emit(p, { count: 3, color: 0xffffff, speed: 0, life: 0.15, size: R * 1.6, sizeEnd: 1.4, alpha: 0.9 });
-    this.glow.emit(p, { count: 26, color: [0xffe08a, 0xffb347, 0xff7a5c, 0xff5c8a], speed: [3, R * 2.4], spread: 1, up: 2, life: [0.3, 0.6], size: [0.6, 1.2], sizeEnd: 0.3, drag: 5 });
+    this.glow.emit(p, { count: 2, color: 0xffffff, speed: 0, life: 0.12, size: R * 0.9, sizeEnd: 1.4, alpha: 0.8 });
+    this.glow.emit(p, { count: 34, color: [0xffe08a, 0xffb347, 0xff7a5c, 0xff5c8a], speed: [3, R * 2.6], spread: 1, up: 2, life: [0.35, 0.7], size: [0.8, 1.5], sizeEnd: 0.3, drag: 5 });
     this.glow.emit(p, { count: 24, color: [0xffffff, PAL.mustard, PAL.pink, PAL.turquoise], speed: [6, 14], spread: 1, up: 3, gravity: 8, life: [0.5, 1], size: [0.12, 0.22], shape: PShape.Star, drag: 2, spin: 10 });
     this.soft.emit(p, { count: 18, color: [0x8a7a8a, 0xb0a4b0, 0xd8d0d8], speed: [1, 4], spread: 1, up: 1.5, life: [1.2, 2.2], size: [0.7, 1.2], sizeEnd: 2.8, alpha: 0.55, drag: 2 });
     this.soft.emit(p, { count: 30, color: [PAL.mustard, PAL.pink, PAL.turquoise, PAL.lavender, 0xffffff], speed: [4, 10], spread: 1, up: 5, gravity: 10, life: [1.2, 2], size: [0.08, 0.14], shape: PShape.Confetti, drag: 1.2, spin: 14 });
-    this.ring(p.clone().setY(p.y + 0.1), 0xffffff, 0.3, R * 1.4, 0.4);
+    this.ring(p.clone().setY(p.y + 0.1), 0xffffff, 0.3, R * 1.8, 0.45);
+    this.ring(p.clone().setY(p.y + 0.12), 0xffb347, 0.3, R * 1.2, 0.55);
     this.ring(p, 0xffb347, 0.3, R * 1.1, 0.35, undefined, true);
     for (let i = 0; i < 8; i++) this.chunk(p, new THREE.Vector3(rand(-6, 6), rand(4, 10), rand(-6, 6)), [0x5a4a3a, 0x8a7a6a, PAL.mustard][i % 3], rand(0.08, 0.18), 1.8);
-    this.lightFlash(p.clone().setY(p.y + 0.8), 0xffb347, 14, 0.35);
+    this.lightFlash(p.clone().setY(p.y + 0.8), 0xffb347, 20, 0.4);
   }
 
   /** Two weapons fusing into a better one. */

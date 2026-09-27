@@ -395,3 +395,22 @@ could fall through the island).
     distance to the human, and shares awareness with the other bots (`intel`).
   - `pickLoot` leaves weapons, perks and heals lying next to a human teammate alone.
 - **Everyone**: tactical reload when there's no target in view; a thank-you bubble when revived.
+
+## 21. Bots that fight and heal, plus juice
+
+- **No polite standoffs**: pacing may still let a *distant* passer-by go, but never within 16m. Before,
+  two bots investigating the same noise could stand a metre apart ignoring each other; now 62% of those
+  close encounters dropped to under 30%, and the rest are bots busy fighting someone else
+  (`tools/botidle.mjs`).
+- **Healing**: bots heal when they haven't been hit for 2s and no enemy is close (a far-off one no longer
+  blocks it). Hurt bots with no heals go looking for the nearest one. Squad bots say "NEED HEALS!" (with a
+  toast to you) and teammates can toss them one. Match setup now scatters consumables at every place
+  (there used to be about 3 heals on the whole island).
+- **Juice**: `ParticlePool.sizeMul` (1.2 soft / 1.3 glow). Bigger muzzle blooms, thicker tracers, and
+  impacts with a spark pop. Hits get a flash and shock ring, eliminations a rising sparkle column and
+  triple ring, and explosions, blinks, pickups and crates are all bigger. Epic and mythic pickups get a
+  burst.
+- **HUD**: damage numbers on the same target stack into one growing total (orange at 50, big pink at
+  100). Hitmarker pitch climbs through a burst of hits. Kills give a gold edge flash and +XP pops, and
+  streaks (DOUBLE BONK! → TRIPLE TROUBLE! → RAMPAGE! → UNSTOPPABLE!) get the announcer banner with its
+  own sting. Streaks of 3 or more add a beat of slow motion.

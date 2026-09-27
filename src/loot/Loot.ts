@@ -432,12 +432,20 @@ export class LootSystem {
         a.rig.setExpression('wide', 0.8);
         if (a.me) {
           a.me.sfx.fuse();
+          a.me.hud.xpPop('+30 FUSION', RARITY[w.rarity].css);
           a.me.hud.bigToast(`FUSED! ${RARITY[w.rarity].name.toUpperCase()} ${w.def.name.toUpperCase()}`, RARITY[w.rarity].css);
           a.me.shake(0.25);
         }
       } else if (a.me) {
         a.me.sfx.pickup(p.rarity);
         a.me.hud.toast(`${RARITY[p.rarity].name.toUpperCase()} ${WEAPONS[p.defId].name.toUpperCase()}`, RARITY[p.rarity].css);
+        // epic and mythic finds get a moment
+        if (p.rarity >= 3) {
+          ctx.fx.fuseBurst(_v.copy(a.motor.pos).setY(a.motor.pos.y + 1.1), RARITY[p.rarity].color);
+          a.me.hud.bigToast(`${RARITY[p.rarity].name.toUpperCase()}!`, RARITY[p.rarity].css);
+          a.me.shake(0.2);
+          a.rig.setExpression('wide', 0.8);
+        }
       }
       if (a.me) {
         a.me.hud.slotPulse(res.slot);
@@ -581,11 +589,14 @@ export class LootSystem {
           c.glow.visible = false;
           const top = _v.copy(c.pos).setY(c.pos.y + 1).clone();
           audio.crateOpen(c.pos);
-          ctx.fx.glow.emit(top, { count: 34, color: [0xffd36b, 0xffffff, PAL.pink, PAL.turquoise], speed: [3, 8], spread: 0.6, dir: new THREE.Vector3(0, 1, 0), life: [0.4, 0.9], size: [0.12, 0.26], shape: PShape.Star, drag: 2, spin: 10 });
-          ctx.fx.soft.emit(top, { count: 30, color: [PAL.mustard, PAL.pink, PAL.turquoise, 0xffffff], speed: [3, 7], spread: 1, up: 4, gravity: 9, life: [1, 1.8], size: [0.08, 0.12], shape: PShape.Confetti, spin: 12 });
-          ctx.fx.ring(c.pos.clone().setY(c.pos.y + 0.1), 0xffd36b, 0.3, 3.2, 0.45);
-          ctx.fx.lightFlash(top, 0xffd36b, 8, 0.35);
-          c.opener?.me?.shake(0.2);
+          ctx.fx.glow.emit(top, { count: 56, color: [0xffd36b, 0xffffff, PAL.pink, PAL.turquoise], speed: [4, 10], spread: 0.6, dir: new THREE.Vector3(0, 1, 0), life: [0.5, 1.1], size: [0.14, 0.3], shape: PShape.Star, drag: 2, spin: 10 });
+          ctx.fx.glow.emit(top, { count: 2, color: 0xfff6c0, speed: 0, life: 0.2, size: 3.2, sizeEnd: 1.2, alpha: 0.8 });
+          ctx.fx.soft.emit(top, { count: 50, color: [PAL.mustard, PAL.pink, PAL.turquoise, 0xffffff], speed: [3, 9], spread: 1, up: 5, gravity: 9, life: [1.2, 2.2], size: [0.09, 0.14], shape: PShape.Confetti, spin: 14 });
+          ctx.fx.ring(c.pos.clone().setY(c.pos.y + 0.1), 0xffd36b, 0.3, 4.2, 0.5);
+          ctx.fx.ring(top, 0xffffff, 0.2, 2.4, 0.35, undefined, true);
+          ctx.fx.lightFlash(top, 0xffd36b, 14, 0.45);
+          c.opener?.me?.shake(0.3);
+          c.opener?.me?.hud.xpPop('+10 CRATE', '#f2c14e');
           if (!c.netOnly) this.spawnRolls(rollCrate(!!c.rich), top, true);
           ctx.emitSound({ pos: c.pos.clone(), loudness: 20, source: c.opener, kind: 'impact' });
         }

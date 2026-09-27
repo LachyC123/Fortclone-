@@ -16,6 +16,7 @@ const MAP_PX = 640;
 const MAP_HALF = ISLAND_MAX + 4;
 const MAP_S = MAP_PX / (MAP_HALF * 2);
 import { clamp } from '../core/math';
+import { audio } from '../audio/Audio';
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -30,6 +31,10 @@ interface DmgNum {
   t: number;
   vx: number;
   active: boolean;
+  /** combo: hits on the same spot stack into one growing number */
+  total: number;
+  pop: number;
+  head: boolean;
 }
 
 const _v = new THREE.Vector3();
@@ -93,6 +98,9 @@ export class HUD implements HudEvents {
   private locator = h('div', 'buglocator');
   private vignette = h('div', 'vignette');
   private blinkFlash = h('div', 'blinkflash');
+  private killFlashEl = h('div', 'killflash');
+  private announcerEl = h('div', 'announcer big');
+  private xpEl = h('div', 'xppops big');
   private speedLines = h('div', 'speedlines');
   private fpsEl = h('div', 'fps');
   private scope = h('div', 'scope', '<i class="h"></i><i class="v"></i><b></b>');
@@ -169,7 +177,8 @@ export class HUD implements HudEvents {
       this.emotePick.classList.remove('open');
     });
     r.append(this.emoteBtn, this.emotePick);
-    document.body.append(this.gloomFlash, this.scope, this.vignette, this.speedLines, this.blinkFlash, r, this.fpsEl);
+    document.body.append(this.gloomFlash, this.scope, this.vignette, this.speedLines, this.blinkFlash, this.killFlashEl, r, this.fpsEl);
+    r.append(this.announcerEl, this.xpEl);
   }
 
   onSlotTap: ((i: number) => void) | null = null;
@@ -245,26 +254,64 @@ export class HUD implements HudEvents {
     e.className = 'hitmarker';
     void e.offsetWidth;
     e.className = `hitmarker show${headshot ? ' head' : ''}${kill ? ' kill' : ''}`;
+    if (kill && headshot) this.xpPop('+25 HEADSHOT', '#f2c14e');
   }
 
   damageNumber(pos: THREE.Vector3, amount: number, headshot: boolean) {
-    let d = this.dmgNums.find((n) => !n.active);
-    if (!d) {
-      if (this.dmgNums.length > 24) d = this.dmgNums[0];
-      else {
-        const el = h('div', 'dmgnum') as HTMLDivElement;
-        this.root.appendChild(el);
-        d = { el, pos: new THREE.Vector3(), t: 0, vx: 0, active: false };
-        this.dmgNums.push(d);
+    // keep hitting the same rascal and the number keeps climbing (and growing)
+    let d = this.dmgNums.find((n) => n.active && n.t < 0.6 && n.pos.distanceToSquared(pos) < 1.8 * 1.8);
+    if (d) {
+      d.total += amount;
+      d.t = Math.min(d.t, 0.14);
+      d.pos.copy(pos);
+      d.pop = 1;
+      d.head = d.head || headshot;
+    } else {
+      d = this.dmgNums.find((n) => !n.active);
+      if (!d) {
+        if (this.dmgNums.length > 24) d = this.dmgNums[0];
+        else {
+          const el = h('div', 'dmgnum') as HTMLDivElement;
+          this.root.appendChild(el);
+          d = { el, pos: new THREE.Vector3(), t: 0, vx: 0, active: false, total: 0, pop: 0, head: false };
+          this.dmgNums.push(d);
+        }
       }
+      d.active = true;
+      d.t = 0;
+      d.total = amount;
+      d.pop = 0;
+      d.head = headshot;
+      d.pos.copy(pos);
+      d.vx = (Math.random() - 0.5) * 60;
     }
-    d.active = true;
-    d.t = 0;
-    d.pos.copy(pos);
-    d.vx = (Math.random() - 0.5) * 60;
-    setText(d.el, String(amount));
-    d.el.className = `dmgnum${headshot ? ' head' : ''}`;
+    setText(d.el, String(Math.round(d.total)));
+    const tier = d.total >= 100 ? ' huge' : d.total >= 50 ? ' big' : '';
+    d.el.className = `dmgnum${d.head ? ' head' : ''}${tier}`;
     setStyle(d.el, 'display', 'block');
+  }
+
+  /** a golden flash round the screen edge: you got one */
+  killFlash() {
+    this.bump(this.killFlashEl, 'on');
+  }
+
+  /** the big shouty streak banner: DOUBLE BONK!, TRIPLE TROUBLE! ... */
+  announce(text: string, tier = 1) {
+    const e = this.announcerEl;
+    e.textContent = text;
+    e.dataset.tier = String(Math.min(3, tier));
+    this.bump(e, 'on');
+    audio.streak(tier);
+  }
+
+  /** a little "+100 ELIMINATION" rising under the crosshair */
+  xpPop(text: string, color = '#9dff8a') {
+    const e = h('div', 'xp', text);
+    e.style.color = color;
+    this.xpEl.appendChild(e);
+    while (this.xpEl.children.length > 4) this.xpEl.firstElementChild!.remove();
+    setTimeout(() => e.remove(), 1500);
   }
 
   damageFrom(dirWorld: THREE.Vector3) {
@@ -346,11 +393,14 @@ export class HUD implements HudEvents {
   }
 
   playerElimination(victim: string, callout = '') {
-    this.bigToast(`${victim.toUpperCase()} ELIMINATED!`, '#ff8a8a');
-    if (callout) {
-      const e = h('div', 'callout big', callout);
-      this.toastsEl.appendChild(e);
-      setTimeout(() => e.remove(), 2200);
+    const knock = callout === 'KNOCKED!';
+    this.bigToast(`${victim.toUpperCase()} ${knock ? 'KNOCKED!' : 'ELIMINATED!'}`, knock ? '#ffb36b' : '#ff8a8a');
+    this.killFlash();
+    this.xpPop(knock ? '+50 KNOCK' : '+100 ELIMINATION', knock ? '#ffb36b' : '#9dff8a');
+    if (callout && !knock) {
+      const tier = /TRIPLE|UNSTOPPABLE|RAMPAGE|FIVE/.test(callout) ? 3 : /DOUBLE|ROLL|CLUTCH/.test(callout) ? 2 : 1;
+      this.announce(callout, tier);
+      this.xpPop('+50 STYLE', '#ff9ad5');
     }
   }
 
@@ -525,7 +575,7 @@ export class HUD implements HudEvents {
     for (const d of this.dmgNums) {
       if (!d.active) continue;
       d.t += dt;
-      if (d.t > 0.9) {
+      if (d.t > 1.0) {
         d.active = false;
         setStyle(d.el, 'display', 'none');
         continue;
@@ -538,7 +588,8 @@ export class HUD implements HudEvents {
       setStyle(d.el, 'display', 'block');
       const sx = (_v.x * 0.5 + 0.5) * W + d.vx * d.t;
       const sy = (-_v.y * 0.5 + 0.5) * H - 40 * d.t + 60 * d.t * d.t;
-      const sc = d.t < 0.12 ? 0.6 + (d.t / 0.12) * 0.8 : Math.max(1, 1.4 - (d.t - 0.12) * 2);
+      d.pop = Math.max(0, d.pop - dt * 6);
+      const sc = (d.t < 0.12 ? 0.6 + (d.t / 0.12) * 0.8 : Math.max(1, 1.4 - (d.t - 0.12) * 2)) + d.pop * 0.5;
       setStyle(d.el, 'transform', `translate(-50%, -50%) translate(${sx}px, ${sy}px) scale(${sc})`);
       setStyle(d.el, 'opacity', String(d.t > 0.6 ? 1 - (d.t - 0.6) / 0.3 : 1));
     }

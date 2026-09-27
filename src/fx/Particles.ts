@@ -31,6 +31,8 @@ const _d = new THREE.Vector3();
  * shader (soft puff, sparkle, confetti, ring, star) — cheap and very flexible.
  */
 export class ParticlePool {
+  /** global size boost (the juice knob): every particle is drawn this much bigger */
+  sizeMul = 1;
   points: THREE.Points;
   private pos: Float32Array;
   private col: Float32Array;
@@ -159,7 +161,7 @@ export class ParticlePool {
       this.maxLife[i] = life;
       this.grav[i] = o.gravity ?? 0;
       this.drag[i] = o.drag ?? 1;
-      const sz = Array.isArray(o.size) ? o.size[0] + Math.random() * (o.size[1] - o.size[0]) : o.size ?? 0.2;
+      const sz = (Array.isArray(o.size) ? o.size[0] + Math.random() * (o.size[1] - o.size[0]) : o.size ?? 0.2) * this.sizeMul;
       this.size0[i] = sz;
       this.size[i] = sz;
       this.sizeEnd[i] = o.sizeEnd ?? 0.3;
