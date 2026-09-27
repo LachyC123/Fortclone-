@@ -201,7 +201,7 @@ export class Menus {
   private buildPause() {
     const s = this.game.settings;
     this.pauseEl.innerHTML = `<div class="menu panel">
-      <div class="menuhead"><h2>PAUSED</h2><button class="btn secondary skiptut hidden">SKIP TRAINING</button><button class="btn resume">RESUME</button></div>
+      <div class="menuhead"><h2>PAUSED</h2><button class="btn resume">RESUME</button></div>
       <div class="rows"><div class="row"><span>Graphics</span><div class="seg" data-k="quality"><button data-v="low">LOW</button><button data-v="medium">MED</button><button data-v="high">HIGH</button></div></div>
       <div class="row qnote hidden"><small>Model &amp; world detail change after a reload.</small></div>
       <div class="row"><span>Auto-adjust graphics</span><div class="seg" data-k="autoQuality"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
@@ -212,6 +212,7 @@ export class Menus {
       <div class="row"><span>Auto-fire</span><div class="seg" data-k="autoFire"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div>
       <div class="row"><span>Bot difficulty</span><div class="seg" data-k="botDifficulty"><button data-v="auto">AUTO</button><button data-v="easy">EASY</button><button data-v="normal">MED</button><button data-v="hard">HARD</button></div></div>
       <div class="row"><span>Show FPS</span><div class="seg" data-k="showFps"><button data-v="false">OFF</button><button data-v="true">ON</button></div></div></div>
+      <div class="pausefoot"><button class="btn secondary skiptut hidden">SKIP TRAINING</button><button class="btn secondary leave">LEAVE MATCH</button></div>
     </div>`;
     const sync = () => {
       this.pauseEl.querySelectorAll<HTMLDivElement>('.seg').forEach((seg) => {
@@ -245,6 +246,24 @@ export class Menus {
       audio.uiTap();
       this.pauseEl.classList.add('hidden');
       this.game.training?.skip();
+    });
+    this.pauseEl.querySelector('.leave')!.addEventListener('click', (e) => {
+      audio.uiTap();
+      // two taps: first one asks
+      const b = e.currentTarget as HTMLButtonElement;
+      if (!b.classList.contains('sure')) {
+        b.classList.add('sure');
+        b.textContent = 'TAP AGAIN TO LEAVE';
+        setTimeout(() => {
+          b.classList.remove('sure');
+          this.syncLeave();
+        }, 2500);
+        return;
+      }
+      b.classList.remove('sure');
+      this.pauseEl.classList.add('hidden');
+      if (this.game.mode === 'match' || this.game.mode === 'net') this.game.matchCtl.ui.onHome?.();
+      else this.game.goHome();
     });
     this.pauseEl.querySelector('.resume')!.addEventListener('click', () => {
       audio.uiTap();
@@ -298,8 +317,16 @@ export class Menus {
     this.elimEl.classList.add('hidden');
   }
 
+  private syncLeave() {
+    const m = this.game.mode;
+    const b = this.pauseEl.querySelector('.leave') as HTMLElement;
+    if (b.classList.contains('sure')) return;
+    b.textContent = m === 'net' ? 'LEAVE ROOM' : m === 'match' ? 'LEAVE MATCH' : 'HOME';
+  }
+
   showPause() {
     this.pauseEl.querySelector('.skiptut')!.classList.toggle('hidden', this.game.mode !== 'training');
+    this.syncLeave();
     this.pauseEl.classList.remove('hidden');
   }
 

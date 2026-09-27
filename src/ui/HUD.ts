@@ -88,6 +88,8 @@ export class HUD implements HudEvents {
   onItemTap: ((kind: 'util' | 'heal', down: boolean) => void) | null = null;
   private toastsEl = h('div', 'toasts big');
   private killfeedEl = h('div', 'killfeed');
+  /** top row: alive · (match timer) · eliminations */
+  topbar = h('div', 'topbar');
   private aliveEl = h('div', 'pill panel alive big');
   private elimsEl = h('div', 'pill panel elims big');
   private minimap = h('div', 'minimap');
@@ -155,7 +157,7 @@ export class HUD implements HudEvents {
       this.onItemTap?.('heal', true);
     });
     this.root.appendChild(this.lootCard);
-    const top = h('div', 'topbar');
+    const top = this.topbar;
     this.aliveEl.innerHTML = `${ICONS.people}<span>2</span>`;
     this.elimsEl.innerHTML = `${ICONS.skull}<span>0</span>`;
     top.append(this.aliveEl, this.elimsEl);
@@ -177,8 +179,20 @@ export class HUD implements HudEvents {
       this.emotePick.classList.remove('open');
     });
     r.append(this.emoteBtn, this.emotePick);
+    // phones held upright: the match is much better sideways
+    const rot = h('div', 'rotatehint', `<div class="panel"><div class="phone"></div><b class="big">Turn your phone sideways</b><small>The match plays best in landscape</small><button class="btn secondary">PLAY ANYWAY</button></div>`);
+    rot.querySelector('button')!.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      rot.classList.add('dismissed');
+    });
+    r.append(rot);
     document.body.append(this.gloomFlash, this.scope, this.vignette, this.speedLines, this.blinkFlash, this.killFlashEl, r, this.fpsEl);
     r.append(this.announcerEl, this.xpEl);
+  }
+
+  /** put something (the Gloom timer) in the middle of the top row */
+  mountTopCenter(el: HTMLElement) {
+    this.topbar.insertBefore(el, this.elimsEl);
   }
 
   onSlotTap: ((i: number) => void) | null = null;
@@ -638,18 +652,20 @@ export class HUD implements HudEvents {
     this.tagLayer.style.display = sq ? '' : 'none';
     if (!sq) return;
     const mates = others.filter((o) => o.team === p.team && !o.parked).sort((a, b) => (a === p ? -1 : b === p ? 1 : a.id - b.id));
-    const sig = mates.map((o) => o.id).join(',');
+    // the list shows your teammates (your own health is the big bar)
+    const listed = mates.filter((o) => o !== p);
+    const sig = listed.map((o) => o.id).join(',');
     if (sig !== this.teamSig) {
       this.teamSig = sig;
-      this.teamEl.innerHTML = mates.map((o) => `<div class="mate${o === p ? ' me' : ''}" data-id="${o.id}"><span class="nm">${o === p ? 'YOU' : o.name}</span><span class="st"></span><div class="hb"><i></i></div></div>`).join('');
+      this.teamEl.innerHTML = listed.map((o) => `<div class="mate" data-id="${o.id}"><span class="nm">${o.name}</span><span class="st"></span><div class="hb"><i></i></div></div>`).join('');
     }
-    for (const o of mates) {
+    for (const o of listed) {
       const row = this.teamEl.querySelector(`[data-id="${o.id}"]`) as HTMLElement | null;
       if (!row) continue;
       const spark = sq.sparks.find((s) => s.owner === o);
       const state = o.out ? (spark ? (spark.carrier ? 'CARRIED' : 'SPARK') : 'OUT') : o.bugout ? 'BUGOUT' : o.downed ? 'KNOCKED' : '';
       setText(row.querySelector('.st') as HTMLElement, state);
-      row.className = `mate${o === p ? ' me' : ''}${state ? ' ' + state.toLowerCase() : ''}`;
+      row.className = `mate${state ? ' ' + state.toLowerCase() : ''}`;
       const k = o.downed ? o.downHp / 100 : o.alive ? o.hp / o.maxHp : 0;
       setStyle(row.querySelector('i') as HTMLElement, 'transform', `scaleX(${Math.max(0, Math.min(1, k)).toFixed(3)})`);
     }
@@ -959,32 +975,41 @@ export class HUD implements HudEvents {
       }
     }
     g.restore();
-    // place names (kept upright)
-    g.font = overview ? '700 9px Fredoka, sans-serif' : '700 10px Fredoka, sans-serif';
+    // place names (kept upright). The zoomed-out map (barge / skydive) stays clean: no names.
+    // Names that would overlap one already drawn are skipped.
+    const placed: [number, number, number, number][] = [];
+    const label = (text: string, x: number, y: number) => {
+      const w = g.measureText(text).width / 2 + 2;
+      if (placed.some(([a, b, c, d]) => x - w < c && x + w > a && y - 6 < d && y + 4 > b)) return;
+      placed.push([x - w, y - 6, x + w, y + 4]);
+      g.strokeText(text, x, y);
+      g.fillText(text, x, y);
+    };
     g.textAlign = 'center';
-    g.lineWidth = 3;
     g.strokeStyle = '#2b2238';
-    g.fillStyle = '#fff8e8';
     const cy = Math.cos(yaw), sy = Math.sin(yaw);
-    for (const poi of POIS) {
-      const u = U(poi.x), v = V(poi.z);
-      const rx = u * cy - v * sy, ry = u * sy + v * cy;
-      if (Math.hypot(rx, ry) > 66) continue;
-      if (!overview && Math.hypot(rx, ry) < 14) continue;
-      g.strokeText(poi.name, 80 + rx, 80 + ry);
-      g.fillText(poi.name, 80 + rx, 80 + ry);
-    }
-    // the little landmarks in between: smaller, softer, only nearby unless it's the big map
-    g.font = overview ? 'italic 600 7px Fredoka, sans-serif' : 'italic 600 8px Fredoka, sans-serif';
-    g.fillStyle = '#ffe9a8';
-    g.lineWidth = 2.5;
-    for (const lm of this.landmarks) {
-      const u = U(lm.x), v = V(lm.z);
-      const rx = u * cy - v * sy, ry = u * sy + v * cy;
-      const d = Math.hypot(rx, ry);
-      if (d > 66 || (!overview && (d < 12 || d > 58))) continue;
-      g.strokeText(lm.name, 80 + rx, 80 + ry);
-      g.fillText(lm.name, 80 + rx, 80 + ry);
+    if (!overview) {
+      g.font = '700 10px Fredoka, sans-serif';
+      g.lineWidth = 3;
+      g.fillStyle = '#fff8e8';
+      for (const poi of POIS) {
+        const u = U(poi.x), v = V(poi.z);
+        const rx = u * cy - v * sy, ry = u * sy + v * cy;
+        const d = Math.hypot(rx, ry);
+        if (d > 64 || d < 14) continue;
+        label(poi.name, 80 + rx, 80 + ry);
+      }
+      // the little landmarks in between: smaller, softer, only nearby
+      g.font = 'italic 600 8px Fredoka, sans-serif';
+      g.fillStyle = '#ffe9a8';
+      g.lineWidth = 2.5;
+      for (const lm of this.landmarks) {
+        const u = U(lm.x), v = V(lm.z);
+        const rx = u * cy - v * sy, ry = u * sy + v * cy;
+        const d = Math.hypot(rx, ry);
+        if (d < 12 || d > 58) continue;
+        label(lm.name, 80 + rx, 80 + ry);
+      }
     }
     // you
     g.fillStyle = '#fff8e8';

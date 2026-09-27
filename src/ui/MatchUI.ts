@@ -67,7 +67,7 @@ export class MatchUI {
   root = h('div', 'matchui');
   private banner = h('div', 'mbanner big');
   private sub = h('div', 'msub');
-  private gloomEl = h('div', 'gloompill panel big');
+  gloomEl = h('div', 'gloompill panel big');
   private jumpEl = h('div', 'jumpprompt big');
   private routeEl = h('div', 'route', '<i></i><b></b>');
   private bugEl = h('div', 'bugout panel');
@@ -144,6 +144,7 @@ export class MatchUI {
 
   setVisible(v: boolean) {
     this.root.style.display = v ? '' : 'none';
+    this.gloomEl.style.display = v ? '' : 'none';
   }
 
   lobby(t: number, joined: number, of: number) {
@@ -256,31 +257,34 @@ export class MatchUI {
   showSummary(s: MatchSummary) {
     this.hideAllBits();
     document.exitPointerLock?.();
-    const rows: [string, string, string?][] = [
+    const rows: [string, string][] = [
       ['Eliminations', String(s.kills)],
-      ['Damage dealt', String(s.damage)],
-      ['Best weapon', s.bestWeapon],
-      ['Best rarity found', s.bestRarity, s.bestRarityColor],
-      ['Blinks', String(s.blinks)],
-      ['Fusions', String(s.fusions)],
-      ['Distance', `${s.distance}m`],
+      ['Damage', s.damage.toLocaleString()],
       ['Survived', fmt(s.time)],
+      ['Best weapon', s.bestWeapon],
     ];
-    const lines = s.xpParts.filter(([, v]) => v > 0).map(([k, v], i) => `<div class="xpl" style="animation-delay:${0.5 + i * 0.12}s"><span>${k}</span><b>+${v}</b></div>`).join('');
+    const more = `Blinks ${s.blinks} · Fusions ${s.fusions} · Distance ${s.distance}m · Best find ${s.bestRarity}`;
+    const breakdown = (parts: [string, number][]) => parts.filter(([, v]) => v > 0).map(([k, v]) => `${k} +${v}`).join(' · ');
+    const arenaPct = Math.max(0, Math.min(100, ((s.trophiesBefore - s.arenaAt) / Math.max(1, s.nextArenaAt - s.arenaAt)) * 100));
+    const notes = [
+      s.newArena ? `<span class="note arena big">NEW ARENA: ${s.newArena.toUpperCase()}!</span>` : '',
+      s.rewardsWaiting ? `<span class="note">${ICONS.trophy}${s.rewardsWaiting} Trophy Road reward${s.rewardsWaiting > 1 ? 's' : ''} to claim</span>` : '',
+      s.lostRelics ? `<span class="note bad">Dropped ${s.lostRelics} relic${s.lostRelics > 1 ? 's' : ''} — bank them at a Rift Nest next time</span>` : '',
+    ].join('');
     this.summaryEl.innerHTML = `<div class="sumcard panel">
-      <div class="place big ${s.won ? 'win' : ''}">${s.won ? 'VICTORY ROYALE-ISH!' : `#${s.placement}`}<small> of ${s.of}${s.teams ? ' teams' : ''}</small></div>
-      <div class="stats">${rows.map(([k, v, c]) => `<div class="st"><span>${k}</span><b class="big" ${c ? `style="color:${c}"` : ''}>${v}</b></div>`).join('')}</div>
-      <div class="trophyrow" style="--ac:${s.arenaColor}"><span class="tr big">${ICONS.trophy}<b class="n">${s.trophiesBefore}</b></span><span class="gain big ${s.trophyGain < 0 ? 'neg' : ''}">${s.trophyGain >= 0 ? '+' : ''}${s.trophyGain}</span><div class="abar"><div class="fill" style="width:${Math.max(0, Math.min(100, ((s.trophiesBefore - s.arenaAt) / Math.max(1, s.nextArenaAt - s.arenaAt)) * 100))}%"></div><span>${s.arenaName}</span></div></div>
-      ${s.newArena ? `<div class="newarena big">NEW ARENA: ${s.newArena.toUpperCase()}!</div>` : ''}
-      ${s.rewardsWaiting ? `<div class="rewardswait">${s.rewardsWaiting} Trophy Road reward${s.rewardsWaiting > 1 ? 's' : ''} to claim!</div>` : ''}
-      <div class="glimrow"><span class="gl big">${ICONS.glimmer}<b class="n">${s.glimmerBefore}</b></span><span class="gain big">+${s.glimmer}</span><small>${s.glimmerParts.map(([k, v]) => `${k} +${v}`).join(' · ')}</small></div>
-      ${s.relics.length ? `<div class="relicwin">${s.relics.map((r, i) => `<div class="rw" style="--rc:${RARITY[r.rarity as RarityIndex].css};animation-delay:${0.8 + i * 0.25}s">${relicSvg(r.id, 30)}<span><b class="big">${r.name}</b><small>${r.fresh ? 'NEW! On display in your Burrow museum' : `Already had one · +${r.glimmer} glimmer`}</small>${r.set ? `<em class="big">${r.set}</em>` : ''}</span></div>`).join('')}</div>` : ''}
-      ${s.lostRelics ? `<div class="relicloss">You dropped ${s.lostRelics} relic${s.lostRelics > 1 ? 's' : ''} — send them home at a Rift Nest next time!</div>` : ''}
-      <div class="xp"><div class="lv big">LV <span class="n">${s.startLevel}</span></div><div class="xpbar"><div class="fill"></div></div><div class="gain big">+${s.xp} XP</div></div>
-      <div class="xplines">${lines}</div>
-      <div class="diff">Bots: <b>${s.difficulty}</b> · change in Settings</div>
-      <div class="cocoonwin" style="--rc:${s.cocoonColor}"><span class="coc"></span><span><b class="big">+1 ${s.cocoon.toUpperCase()} COCOON</b><br><small>${s.bugName} can't wait to meet a new friend · pop it in an incubator in your BURROW</small></span></div>
+      <div class="sumhead"><div class="place big ${s.won ? 'win' : ''}">${s.won ? 'VICTORY!' : `#${s.placement}`}</div>
+        <div class="sub">${s.won ? `Last ${s.teams ? 'squad' : 'rascal'} standing` : `of ${s.of}${s.teams ? ' teams' : ' rascals'}`}</div></div>
+      <div class="stats" title="${more}">${rows.map(([k, v]) => `<div class="st"><span>${k}</span><b class="big">${v}</b></div>`).join('')}</div>
+      <div class="rewards">
+        <div class="rw trophyrow" style="--ac:${s.arenaColor}"><span class="lbl">TROPHIES</span><div class="val"><span class="tr big">${ICONS.trophy}<b class="n">${s.trophiesBefore}</b></span><span class="gain big ${s.trophyGain < 0 ? 'neg' : ''}">${s.trophyGain >= 0 ? '+' : ''}${s.trophyGain}</span></div><div class="abar"><div class="fill" style="width:${arenaPct}%"></div><span>${s.arenaName}</span></div></div>
+        <div class="rw glimrow" title="${breakdown(s.glimmerParts)}"><span class="lbl">GLIMMER</span><div class="val"><span class="gl big">${ICONS.glimmer}<b class="n">${s.glimmerBefore}</b></span><span class="gain big">+${s.glimmer}</span></div><small>${breakdown(s.glimmerParts)}</small></div>
+        <div class="rw xp" title="${breakdown(s.xpParts)}"><span class="lbl">LEVEL</span><div class="val"><span class="lv big">LV <span class="n">${s.startLevel}</span></span><span class="gain big">+${s.xp.toLocaleString()} XP</span></div><div class="xpbar"><div class="fill"></div></div></div>
+        <div class="rw cocoonwin" style="--rc:${s.cocoonColor}"><span class="lbl">NEW COCOON</span><div class="val"><span class="coc"></span><b class="big">${s.cocoon}</b></div><small>Hatch it in your Burrow</small></div>
+      </div>
+      ${s.relics.length ? `<div class="relicwin">${s.relics.map((r, i) => `<div class="rw" style="--rc:${RARITY[r.rarity as RarityIndex].css};animation-delay:${0.8 + i * 0.25}s">${relicSvg(r.id, 26)}<span><b class="big">${r.name}</b><small>${r.fresh ? 'NEW — on display in your museum' : `Duplicate · +${r.glimmer} glimmer`}</small>${r.set ? `<em class="big">${r.set}</em>` : ''}</span></div>`).join('')}</div>` : ''}
+      ${notes ? `<div class="notes">${notes}</div>` : ''}
       <div class="btns">${this.netClient ? '<div class="wait">The host can start the next match</div>' : '<button class="btn again">PLAY AGAIN</button>'}<button class="btn secondary home">${this.netClient || this.netRoom ? 'LEAVE ROOM' : 'HOME'}</button></div>
+      <div class="diff">Bots: ${s.difficulty}</div>
     </div>`;
     this.summaryEl.classList.remove('hidden');
     const fill = this.summaryEl.querySelector('.xpbar .fill') as HTMLElement;

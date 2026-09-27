@@ -4455,3 +4455,444 @@ body.tut-nobug .tbtn[data-id='blink'] {
     box-shadow: 0 4px 0 var(--ink);
   }
 }
+
+/* ======================================================================= UI PASS: match summary */
+.overlay.summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.summary .sumcard {
+  margin: auto 0;
+  width: min(600px, 96vw);
+  padding: 14px 18px 12px;
+}
+.sumcard .sumhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+}
+.sumcard .place,
+.sumcard .place.win {
+  font-size: clamp(40px, 6vw, 56px);
+}
+.sumcard .sumhead .sub {
+  font-weight: 800;
+  font-size: 15px;
+  opacity: 0.7;
+}
+.sumcard .stats {
+  margin: 10px 0 8px;
+}
+.sumcard .st {
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.sumcard .st b {
+  font-size: 18px;
+}
+.sumcard .rewards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.sumcard .rewards .rw {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  min-width: 0;
+  border-radius: 14px;
+  border: 3px solid var(--ink);
+  background: #fff;
+  animation: fadeUp 0.35s both;
+}
+.sumcard .rewards .rw:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.sumcard .rewards .rw:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.sumcard .rewards .rw:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.sumcard .rw .lbl {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  opacity: 0.55;
+}
+.sumcard .rw .val {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.sumcard .rw small {
+  font-size: 10px;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sumcard .rw .gain {
+  font-size: 20px;
+}
+.sumcard .trophyrow .tr,
+.sumcard .glimrow .gl,
+.sumcard .rw .lv {
+  font-size: 22px;
+}
+.sumcard .trophyrow .abar {
+  flex: none;
+  height: 16px;
+  border-width: 2px;
+}
+.sumcard .trophyrow .abar span {
+  font-size: 10px;
+}
+.sumcard .glimrow {
+  background: linear-gradient(180deg, #e3fbff, #fff) !important;
+}
+.sumcard .rw.xp .xpbar {
+  flex: none;
+  height: 14px;
+  border-width: 2px;
+}
+.sumcard .rw.xp .gain {
+  font-size: 17px;
+}
+.sumcard .cocoonwin {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rc) 28%, #fff), #fff) !important;
+}
+.sumcard .cocoonwin .coc {
+  width: 24px;
+  height: 31px;
+}
+.sumcard .cocoonwin b {
+  font-size: 18px;
+}
+.sumcard .relicwin {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.sumcard .relicwin .rw {
+  flex: 1 1 180px;
+  padding: 4px 8px;
+}
+.sumcard .relicwin .rw b {
+  font-size: 14px;
+}
+.sumcard .notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sumcard .note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--terra);
+  background: rgba(217, 119, 79, 0.12);
+}
+.sumcard .note svg {
+  width: 14px;
+  height: 14px;
+}
+.sumcard .note.arena {
+  font-size: 15px;
+  color: #fff;
+  background: #ff6bb5;
+  border: 2px solid var(--ink);
+  animation: arenapop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) 0.8s both;
+}
+.sumcard .note.bad {
+  color: #a33;
+  background: rgba(200, 50, 50, 0.1);
+}
+.sumcard .btns {
+  margin-top: 12px;
+}
+.sumcard .btn.again {
+  font-size: 30px;
+  padding: 10px 36px;
+}
+.sumcard .btns .btn.home {
+  font-size: 22px;
+  padding: 10px 22px;
+}
+.sumcard .diff {
+  margin-top: 8px;
+  font-size: 11px;
+}
+@media (max-width: 520px) {
+  .sumcard .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-height: 500px) {
+  .summary .sumcard {
+    width: min(760px, 96vw);
+    padding: 8px 14px 8px;
+  }
+  .sumcard .place,
+  .sumcard .place.win {
+    font-size: 34px;
+  }
+  .sumcard .stats {
+    margin: 6px 0;
+  }
+  .sumcard .st b {
+    font-size: 15px;
+  }
+  .sumcard .rewards {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .sumcard .rewards .rw {
+    padding: 5px 8px;
+  }
+  .sumcard .rw small {
+    display: none;
+  }
+  .sumcard .trophyrow .tr,
+  .sumcard .glimrow .gl,
+  .sumcard .rw .lv {
+    font-size: 18px;
+  }
+  .sumcard .rw .gain,
+  .sumcard .rw.xp .gain {
+    font-size: 15px;
+  }
+  .sumcard .trophyrow .tr svg,
+  .sumcard .glimrow svg {
+    width: 18px;
+    height: 18px;
+  }
+  .sumcard .btns {
+    margin-top: 8px;
+  }
+  .sumcard .btn.again {
+    font-size: 22px;
+    padding: 6px 26px;
+  }
+  .sumcard .btns .btn.home {
+    font-size: 17px;
+    padding: 6px 16px;
+  }
+  .sumcard .diff {
+    display: none;
+  }
+}
+
+/* ======================================================================= UI PASS: pause */
+.menu .hidden {
+  display: none !important;
+}
+.pausefoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.pausefoot .btn {
+  font-size: 17px;
+  padding: 7px 16px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 var(--ink);
+}
+.pausefoot .leave.sure {
+  background: #ff8a7a;
+}
+.menuhead .resume {
+  white-space: nowrap;
+}
+@media (max-height: 500px) {
+  .menuhead .btn {
+    font-size: 18px;
+    padding: 5px 18px;
+  }
+  .menu h2 {
+    font-size: 26px;
+  }
+  .seg button {
+    padding: 4px 7px;
+    font-size: 13px;
+  }
+  .row span {
+    font-size: 14px;
+  }
+  .pausefoot {
+    margin-top: 6px;
+  }
+  .pausefoot .btn {
+    font-size: 14px;
+    padding: 4px 12px;
+  }
+}
+
+/* ======================================================================= UI PASS: MY BUGS training */
+.trainrow .btn.train {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+}
+.trainrow .btn.train small {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.trainrow .btn svg,
+.gymrow .btn svg,
+.bpanel .btn small svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ======================================================================= UI PASS: in-match HUD */
+/* one tidy top row: alive · Gloom timer · eliminations */
+.topbar {
+  align-items: center;
+}
+.topbar .gloompill {
+  position: static;
+  transform: none;
+  opacity: 1;
+  font-size: 17px;
+  padding: 3px 12px 3px 6px;
+  transition: background 0.3s;
+}
+.topbar .gloompill:not(.show) {
+  display: none;
+}
+.touch-on .topbar .gloompill {
+  font-size: 13px;
+  padding: 2px 8px 2px 4px;
+  border-width: 2px;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.touch-on .topbar .gloompill .ic {
+  width: 18px;
+  height: 18px;
+}
+.touch-on .topbar .gloompill .ic svg {
+  width: 15px;
+  height: 15px;
+}
+.relicpill {
+  top: calc(60px + var(--safe-t));
+}
+.touch-on .relicpill {
+  top: calc(54px + var(--safe-t));
+  font-size: 12px;
+  padding: 2px 10px 2px 6px;
+}
+.touch-on .relicpill .gems svg {
+  width: 17px;
+  height: 17px;
+}
+/* emote: a keyboard key (B) on desktop, a small button in the corner on touch */
+body:not(.touch-on) .emotebtn,
+body:not(.touch-on) .emotepick {
+  display: none;
+}
+.touch-on .emotebtn {
+  top: calc(8px + var(--safe-t));
+  right: calc(10px + var(--safe-r));
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+.touch-on .emotepick {
+  top: calc(50px + var(--safe-t));
+  right: calc(10px + var(--safe-r));
+  flex-direction: column;
+}
+/* perk badges sit on the left, above the heart */
+.healthbox .perks {
+  left: 6px;
+  right: auto;
+}
+.touch-on .healthbox .perk {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+}
+.touch-on .healthbox .perk svg {
+  width: 14px;
+  height: 14px;
+}
+/* teammates only (your own health is the big bar) */
+.teampanel .mate {
+  width: 140px;
+}
+/* key hints on the bug widget are for new players */
+.hud.veteran .bugwidget .keys {
+  display: none;
+}
+/* portrait phones in a match: ask to rotate */
+.rotatehint {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  place-items: center;
+  background: rgba(43, 34, 56, 0.72);
+  pointer-events: auto;
+}
+.rotatehint .panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 24px;
+  text-align: center;
+}
+.rotatehint b {
+  font-size: 22px;
+}
+.rotatehint small {
+  font-size: 13px;
+  opacity: 0.75;
+}
+.rotatehint .btn {
+  margin-top: 8px;
+  font-size: 16px;
+  padding: 6px 16px;
+  border-width: 3px;
+  box-shadow: 0 4px 0 var(--ink);
+}
+.rotatehint .phone {
+  width: 44px;
+  height: 72px;
+  border: 4px solid var(--ink);
+  border-radius: 10px;
+  background: #dff9ff;
+  animation: rotPhone 2s ease-in-out infinite;
+}
+@keyframes rotPhone {
+  0%, 30% { transform: rotate(0); }
+  60%, 100% { transform: rotate(-90deg); }
+}
+@media (orientation: portrait) {
+  .touch-on .rotatehint:not(.dismissed) {
+    display: grid;
+  }
+}
+.touch.off { display: none !important; }
+/* MY BUGS: the turntable never collapses in the scrolling detail column */
+.bdetail .stage {
+  flex-shrink: 0;
+  min-height: 96px;
+}

@@ -150,6 +150,8 @@ export class Game implements GameCtx {
     for (const c of this.world.crateSpots) this.loot.placeCrate(c.pos, c.yaw);
     this.matchCtl = new Match(this);
     this.matchCtl.ui.setVisible(false);
+    // the Gloom timer lives in the HUD's top row, between alive and eliminations
+    this.hud.mountTopCenter(this.matchCtl.ui.gloomEl);
 
     this.hud.onPlayerEliminated = (by) => {
       this.respawnT = 3.5;
@@ -510,6 +512,8 @@ export class Game implements GameCtx {
     this.respawnT = -1;
     this.botRespawn.clear();
     this.matchCtl.startLobby();
+    // after a few matches the HUD drops its how-to hints
+    this.hud.root.classList.toggle('veteran', (this.matchCtl.profile.matches ?? 0) >= 3);
     this.play();
   }
 
@@ -758,6 +762,9 @@ export class Game implements GameCtx {
       return;
     }
 
+    // touch controls only while you're actually playing (not behind menus)
+    const touchOff = this.paused || (this.matchCtl.summaryShown && (this.mode === 'match' || this.mode === 'net'));
+    if (this.touch.root.classList.contains('off') !== touchOff) this.touch.root.classList.toggle('off', touchOff);
     if (this.paused && this.menus.burrow?.isOpen) {
       // your Burrow has its own little world
       this.menus.burrow.tick(dt);
